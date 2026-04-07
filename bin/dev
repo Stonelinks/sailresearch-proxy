@@ -1,0 +1,8 @@
+#!/bin/bash
+set -e
+
+cd $PROJECT_ROOT
+
+source env.sh
+
+bun --watch run src/index.ts

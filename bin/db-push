@@ -1,0 +1,8 @@
+#!/bin/bash
+set -e
+
+cd $PROJECT_ROOT
+
+source env.sh
+
+bunx prisma db push

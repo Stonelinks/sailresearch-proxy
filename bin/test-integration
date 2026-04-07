@@ -1,0 +1,280 @@
+#!/bin/bash
+set -e
+
+cd $PROJECT_ROOT
+
+source env.sh
+
+if [ -z "$SAIL_API_KEY" ] || [ "$SAIL_API_KEY" = "test" ]; then
+	echo "SAIL_API_KEY must be set to a real key for integration tests"
+	exit 1
+fi
+
+PORT="${INTEGRATION_TEST_PORT:-4111}"
+export PORT
+
+# Kill any leftover proxy on this port
+lsof -ti:$PORT | xargs kill -9 2>/dev/null || true
+sleep 1
+
+# Start proxy in background
+bun run src/index.ts &
+PROXY_PID=$!
+
+cleanup() {
+	kill $PROXY_PID 2>/dev/null || true
+	wait $PROXY_PID 2>/dev/null || true
+}
+trap cleanup EXIT
+
+sleep 3
+
+BASE="http://localhost:$PORT"
+PASS=0
+FAIL=0
+
+run_test() {
+	local name="$1"
+	shift
+	echo -n "  $name ... "
+	if output=$("$@" 2>&1); then
+		echo "PASS"
+		PASS=$((PASS + 1))
+	else
+		echo "FAIL"
+		echo "$output" | head -20
+		FAIL=$((FAIL + 1))
+	fi
+}
+
+assert_json_field() {
+	local json="$1"
+	local field="$2"
+	local expected="$3"
+	local actual
+	actual=$(echo "$json" | python3 -c "import sys,json; print(json.load(sys.stdin)${field})" 2>&1)
+	if [ "$actual" != "$expected" ]; then
+		echo "Expected ${field}=${expected}, got ${actual}" >&2
+		return 1
+	fi
+}
+
+assert_contains() {
+	if echo "$1" | grep -q "$2"; then
+		return 0
+	else
+		echo "Expected output to contain '$2'" >&2
+		echo "Got: $(echo "$1" | head -5)" >&2
+		return 1
+	fi
+}
+
+# ── Health ──────────────────────────────────────────────
+
+echo "=== Health ==="
+run_test "GET /health" bash -c '
+	resp=$(curl -sf '"$BASE"'/health)
+	[ "$resp" = "ok" ]
+'
+
+# ── Models ──────────────────────────────────────────────
+
+echo "=== Models ==="
+run_test "GET /v1/models" bash -c '
+	resp=$(curl -sf '"$BASE"'/v1/models)
+	echo "$resp" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+assert data[\"object\"] == \"list\"
+assert len(data[\"data\"]) > 0
+assert all(m[\"object\"] == \"model\" for m in data[\"data\"])
+"'
+
+# ── Passthrough (asap) ─────────────────────────────────
+
+echo "=== Passthrough (asap) ==="
+
+run_test "sync response" bash -c '
+	resp=$(curl -sf -X POST '"$BASE"'/v1/chat/completions \
+		-H "Content-Type: application/json" \
+		-d "{
+			\"model\": \"deepseek-ai/DeepSeek-V3.2\",
+			\"messages\": [{\"role\": \"user\", \"content\": \"What is 2+2? Just the number.\"}],
+			\"metadata\": {\"completion_window\": \"asap\"},
+			\"max_completion_tokens\": 10
+		}")
+	echo "$resp" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+assert data[\"object\"] == \"chat.completion\", \"bad object: \" + str(data.get(\"object\"))
+assert len(data[\"choices\"]) == 1
+assert data[\"choices\"][0][\"message\"][\"role\"] == \"assistant\"
+assert data[\"choices\"][0][\"message\"][\"content\"] is not None
+assert data[\"choices\"][0][\"finish_reason\"] == \"stop\"
+assert data[\"usage\"][\"total_tokens\"] > 0
+"'
+
+run_test "max_tokens compat" bash -c '
+	resp=$(curl -sf -X POST '"$BASE"'/v1/chat/completions \
+		-H "Content-Type: application/json" \
+		-d "{
+			\"model\": \"deepseek-ai/DeepSeek-V3.2\",
+			\"messages\": [{\"role\": \"user\", \"content\": \"Say hi.\"}],
+			\"metadata\": {\"completion_window\": \"asap\"},
+			\"max_tokens\": 10
+		}")
+	echo "$resp" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+assert \"error\" not in data, f\"got error: {data}\"
+assert data[\"choices\"][0][\"message\"][\"content\"] is not None
+"'
+
+run_test "X-Completion-Window header" bash -c '
+	resp=$(curl -sf -X POST '"$BASE"'/v1/chat/completions \
+		-H "Content-Type: application/json" \
+		-H "X-Completion-Window: asap" \
+		-d "{
+			\"model\": \"deepseek-ai/DeepSeek-V3.2\",
+			\"messages\": [{\"role\": \"user\", \"content\": \"Say yes.\"}],
+			\"max_completion_tokens\": 5
+		}")
+	echo "$resp" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+assert \"error\" not in data, f\"got error: {data}\"
+assert data[\"choices\"][0][\"message\"][\"content\"] is not None
+"'
+
+run_test "streaming" bash -c '
+	resp=$(curl -sf -N -X POST '"$BASE"'/v1/chat/completions \
+		-H "Content-Type: application/json" \
+		-d "{
+			\"model\": \"deepseek-ai/DeepSeek-V3.2\",
+			\"messages\": [{\"role\": \"user\", \"content\": \"Count 1 to 3.\"}],
+			\"metadata\": {\"completion_window\": \"asap\"},
+			\"stream\": true,
+			\"max_completion_tokens\": 20
+		}")
+	# Check SSE structure
+	echo "$resp" | grep -q "chat.completion.chunk" || { echo "missing chunk object"; exit 1; }
+	echo "$resp" | grep -q "\"role\":\"assistant\"" || { echo "missing role delta"; exit 1; }
+	echo "$resp" | grep -q "\"finish_reason\":\"stop\"" || { echo "missing finish_reason"; exit 1; }
+	echo "$resp" | grep -q "\[DONE\]" || { echo "missing DONE"; exit 1; }
+'
+
+# ── Batching (15m) ─────────────────────────────────────
+
+echo "=== Batching (15m) ==="
+
+run_test "sync response (polls until complete)" bash -c '
+	resp=$(curl -sf --max-time 300 -X POST '"$BASE"'/v1/chat/completions \
+		-H "Content-Type: application/json" \
+		-d "{
+			\"model\": \"deepseek-ai/DeepSeek-V3.2\",
+			\"messages\": [{\"role\": \"user\", \"content\": \"What is 3*3? Just the number.\"}],
+			\"metadata\": {\"completion_window\": \"15m\"},
+			\"max_tokens\": 10
+		}")
+	echo "$resp" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+assert data[\"object\"] == \"chat.completion\", f\"bad object: {data}\"
+assert data[\"choices\"][0][\"message\"][\"content\"] is not None
+assert data[\"choices\"][0][\"finish_reason\"] == \"stop\"
+assert data[\"usage\"][\"total_tokens\"] > 0
+"'
+
+run_test "streaming (polls then streams)" bash -c '
+	resp=$(curl -sf -N --max-time 300 -X POST '"$BASE"'/v1/chat/completions \
+		-H "Content-Type: application/json" \
+		-d "{
+			\"model\": \"deepseek-ai/DeepSeek-V3.2\",
+			\"messages\": [{\"role\": \"user\", \"content\": \"Capital of France? One word.\"}],
+			\"metadata\": {\"completion_window\": \"15m\"},
+			\"stream\": true,
+			\"max_tokens\": 10
+		}")
+	echo "$resp" | grep -q "chat.completion.chunk" || { echo "missing chunk object"; exit 1; }
+	echo "$resp" | grep -q "\[DONE\]" || { echo "missing DONE"; exit 1; }
+'
+
+# ── Python openai client ──────────────────────────────
+
+echo "=== Python openai client ==="
+
+run_test "sync (asap)" python3 -c "
+from openai import OpenAI
+client = OpenAI(base_url='$BASE/v1', api_key='x')
+r = client.chat.completions.create(
+    model='deepseek-ai/DeepSeek-V3.2',
+    messages=[{'role': 'user', 'content': 'What is 7*8? Just the number.'}],
+    max_completion_tokens=10,
+    extra_body={'metadata': {'completion_window': 'asap'}},
+)
+assert r.choices[0].message.content is not None
+assert r.choices[0].finish_reason == 'stop'
+assert r.usage.total_tokens > 0
+"
+
+run_test "streaming (asap)" python3 -c "
+from openai import OpenAI
+client = OpenAI(base_url='$BASE/v1', api_key='x')
+stream = client.chat.completions.create(
+    model='deepseek-ai/DeepSeek-V3.2',
+    messages=[{'role': 'user', 'content': 'Say hello.'}],
+    max_completion_tokens=10,
+    stream=True,
+    extra_body={'metadata': {'completion_window': 'asap'}},
+)
+chunks = []
+for chunk in stream:
+    if chunk.choices[0].delta.content:
+        chunks.append(chunk.choices[0].delta.content)
+assert len(chunks) > 0, 'no content chunks received'
+"
+
+run_test "sync (15m batching)" python3 -c "
+from openai import OpenAI
+client = OpenAI(base_url='$BASE/v1', api_key='x', timeout=300)
+r = client.chat.completions.create(
+    model='deepseek-ai/DeepSeek-V3.2',
+    messages=[{'role': 'user', 'content': 'What is 10/2? Just the number.'}],
+    max_completion_tokens=10,
+    extra_body={'metadata': {'completion_window': '15m'}},
+)
+assert r.choices[0].message.content is not None
+assert r.choices[0].finish_reason == 'stop'
+"
+
+# ── Error handling ─────────────────────────────────────
+
+echo "=== Error handling ==="
+
+run_test "missing model returns 400" bash -c '
+	status=$(curl -s -o /dev/null -w "%{http_code}" -X POST '"$BASE"'/v1/chat/completions \
+		-H "Content-Type: application/json" \
+		-d "{\"messages\": []}")
+	[ "$status" = "400" ]
+'
+
+run_test "invalid JSON returns 400" bash -c '
+	status=$(curl -s -o /dev/null -w "%{http_code}" -X POST '"$BASE"'/v1/chat/completions \
+		-H "Content-Type: application/json" \
+		-d "not json")
+	[ "$status" = "400" ]
+'
+
+run_test "unknown route returns 404" bash -c '
+	status=$(curl -s -o /dev/null -w "%{http_code}" '"$BASE"'/v1/nonexistent)
+	[ "$status" = "404" ]
+'
+
+# ── Summary ────────────────────────────────────────────
+
+echo ""
+echo "================================"
+echo "  PASS: $PASS  FAIL: $FAIL"
+echo "================================"
+
+[ "$FAIL" -eq 0 ]

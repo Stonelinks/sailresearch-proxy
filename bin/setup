@@ -1,0 +1,10 @@
+#!/bin/bash
+set -e
+
+cd $PROJECT_ROOT
+
+source env.sh
+
+bun install
+bunx prisma generate
+bunx prisma db push --skip-generate

@@ -1,0 +1,12 @@
+#!/bin/bash
+set -e
+
+cd $PROJECT_ROOT
+
+source env.sh
+
+if [ $# -gt 0 ]; then
+	prettier --write "$@"
+else
+	prettier --write 'src/**/*.ts'
+fi

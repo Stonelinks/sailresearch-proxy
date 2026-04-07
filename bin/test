@@ -1,0 +1,8 @@
+#!/bin/bash
+set -e
+
+cd $PROJECT_ROOT
+
+source env.sh
+
+SAIL_API_KEY="${SAIL_API_KEY:-test}" bun test "$@"
