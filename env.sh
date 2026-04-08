@@ -1,22 +1,20 @@
 #!/bin/bash
 
-# Source this file, don't execute it
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-	echo "This script should be sourced, not executed."
-	echo "Usage: source env.sh"
+if [ "$0" = "$BASH_SOURCE" ]; then
+	echo "This script must be sourced, not executed."
 	exit 1
 fi
 
-export PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT=$(pwd)
+export PROJECT_ROOT
 
-# Database
-export DATABASE_URL="${DATABASE_URL:-file:$PROJECT_ROOT/data/proxy.db}"
+export DATABASE_URL="file:$PROJECT_ROOT/data/proxy.db"
 
-# Make all bin scripts executable and add to PATH
-chmod +x "$PROJECT_ROOT/bin/"* 2>/dev/null || true
-export PATH="$PROJECT_ROOT/bin:$PROJECT_ROOT/node_modules/.bin:$PATH"
+chmod +x $PROJECT_ROOT/bin/* 2>/dev/null
+PATH=$PROJECT_ROOT/bin:$PATH
+PATH=$PROJECT_ROOT/node_modules/.bin:$PATH
+export PATH
 
-# Source secrets if present
-if [ -f "$PROJECT_ROOT/secrets.sh" ]; then
-	source "$PROJECT_ROOT/secrets.sh"
+if [ -f secrets.sh ]; then
+	source secrets.sh
 fi
