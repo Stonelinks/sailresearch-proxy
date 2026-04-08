@@ -3,7 +3,9 @@ import { config } from "./config.ts";
 import { Poller } from "./services/poller.ts";
 import { handleChatCompletions } from "./routes/chat-completions.ts";
 import { handleModels } from "./routes/models.ts";
+import { handleDashboardJobs } from "./routes/dashboard-api.ts";
 import { openAIError } from "./errors.ts";
+import dashboard from "./dashboard/dashboard.html";
 
 // Run migrations / ensure DB schema
 const migrateResult = Bun.spawnSync(
@@ -52,6 +54,10 @@ const server = Bun.serve({
       GET: () => handleModels(),
     },
     "/health": new Response("ok"),
+    "/dashboard": dashboard,
+    "/api/dashboard/jobs": {
+      GET: (req) => handleDashboardJobs(req),
+    },
   },
 
   fetch(req) {
