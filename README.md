@@ -15,7 +15,7 @@ setup
 ```bash
 source env.sh
 dev       # watch mode
-start     # production
+run       # production
 ```
 
 The proxy listens on `http://0.0.0.0:4000` by default.
@@ -97,7 +97,7 @@ All scripts are in `bin/` and available on `PATH` after `source env.sh`.
 |--------|-------------|
 | `setup` | Install dependencies, generate Prisma client, push DB schema |
 | `dev` | Start proxy in watch mode |
-| `start` | Start proxy |
+| `run` | Start proxy |
 | `check` | Run format + typecheck + test |
 | `format` | Run all formatters (format-ts + format-shell) |
 | `format-ts` | Prettier on TypeScript files |

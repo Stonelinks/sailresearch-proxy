@@ -4,7 +4,7 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "start": "bun run src/index.ts",
+    "run": "bun run src/index.ts",
     "dev": "bun --watch run src/index.ts",
     "db:push": "bunx prisma db push",
     "db:studio": "bunx prisma studio"
