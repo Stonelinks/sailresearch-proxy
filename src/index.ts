@@ -1,5 +1,6 @@
 import { prisma } from "./db.ts";
 import { config } from "./config.ts";
+import { log } from "./logger.ts";
 import { Poller } from "./services/poller.ts";
 import { handleChatCompletions } from "./routes/chat-completions.ts";
 import { handleModels } from "./routes/models.ts";
@@ -13,7 +14,7 @@ const migrateResult = Bun.spawnSync(
   { env: process.env, cwd: import.meta.dir + "/.." },
 );
 if (migrateResult.exitCode !== 0) {
-  console.error(
+  log.error(
     "[startup] prisma db push failed:",
     migrateResult.stderr.toString(),
   );
@@ -25,7 +26,7 @@ const resumed = await prisma.pendingJob.count({
   where: { status: { notIn: ["completed", "failed", "cancelled"] } },
 });
 if (resumed > 0) {
-  console.log(`[startup] resuming ${resumed} in-flight job(s)`);
+  log.info(`[startup] resuming ${resumed} in-flight job(s)`);
 }
 
 // Start poller
@@ -41,9 +42,9 @@ const server = Bun.serve({
     "/v1/chat/completions": {
       POST: (req) => {
         const start = Date.now();
-        console.log(`[req] POST /v1/chat/completions`);
+        log.info(`[req] POST /v1/chat/completions`);
         return handleChatCompletions(req, poller).then((res) => {
-          console.log(
+          log.info(
             `[res] POST /v1/chat/completions ${res.status} ${Date.now() - start}ms`,
           );
           return res;
@@ -61,23 +62,23 @@ const server = Bun.serve({
   },
 
   fetch(req) {
-    console.log(`[req] ${req.method} ${new URL(req.url).pathname} -> 404`);
+    log.info(`[req] ${req.method} ${new URL(req.url).pathname} -> 404`);
     return openAIError(404, "Not found", "invalid_request_error");
   },
 
   error(error) {
-    console.error("[server] unhandled error:", error);
+    log.error("[server] unhandled error:", error);
     return openAIError(500, "Internal server error");
   },
 });
 
-console.log(
-  `[startup] sail proxy listening on http://${config.server.host}:${config.server.port}`,
+log.info(
+  `[startup] sail proxy listening on http://${config.server.host}:${config.server.port} logLevel=${config.logging.level}`,
 );
 
 // Graceful shutdown
 async function shutdown() {
-  console.log("\n[shutdown] stopping...");
+  log.info("\n[shutdown] stopping...");
   poller.stop();
   await prisma.$disconnect();
   server.stop();

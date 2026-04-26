@@ -1,6 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
 import { sail } from "../sail-client.ts";
 import { config } from "../config.ts";
+import { log } from "../logger.ts";
 import type { JobWaiter } from "../types.ts";
 
 export function getBackoffMs(pollCount: number): number {
@@ -20,7 +21,7 @@ export class Poller {
   start() {
     if (this.timer) return;
     this.timer = setInterval(() => this.tick(), config.polling.intervalMs);
-    console.log("[poller] started");
+    log.info("[poller] started");
   }
 
   stop() {
@@ -33,7 +34,7 @@ export class Poller {
       waiter.reject(new Error("Poller stopped"));
     }
     this.waiters.clear();
-    console.log("[poller] stopped");
+    log.info("[poller] stopped");
   }
 
   registerWaiter(sailResponseId: string): Promise<any> {
@@ -61,6 +62,12 @@ export class Poller {
       take: config.polling.maxConcurrent - this.activePollCount,
     });
 
+    if (jobs.length > 0) {
+      log.debug(
+        `[poller] tick activePolls=${this.activePollCount} jobsFound=${jobs.length}`,
+      );
+    }
+
     for (const job of jobs) {
       this.pollJob(job);
     }
@@ -69,10 +76,17 @@ export class Poller {
   private async pollJob(job: any) {
     this.activePollCount++;
     try {
+      log.debug(
+        `[poller] polling id=${job.sailResponseId} pollCount=${job.pollCount}`,
+      );
       const { status, data } = await sail.getResponse(job.sailResponseId);
 
+      log.debug(
+        `[poller] sail status=${status} sailStatus=${data?.status} id=${job.sailResponseId}`,
+      );
+
       if (status !== 200) {
-        console.error(
+        log.error(
           `[poller] error polling ${job.sailResponseId}: HTTP ${status}`,
         );
         await this.scheduleRetry(job);
@@ -97,7 +111,7 @@ export class Poller {
           waiter.resolve(data);
           this.waiters.delete(job.sailResponseId);
         }
-        console.log(`[poller] completed ${job.sailResponseId}`);
+        log.info(`[poller] completed ${job.sailResponseId}`);
       } else if (sailStatus === "failed" || sailStatus === "cancelled") {
         const errorBody = JSON.stringify(data);
         await this.prisma.pendingJob.update({
@@ -110,13 +124,13 @@ export class Poller {
           waiter.reject(data);
           this.waiters.delete(job.sailResponseId);
         }
-        console.log(`[poller] ${sailStatus} ${job.sailResponseId}`);
+        log.info(`[poller] ${sailStatus} ${job.sailResponseId}`);
       } else {
         // Still pending or running
         await this.scheduleRetry(job, sailStatus);
       }
     } catch (err) {
-      console.error(`[poller] fetch error for ${job.sailResponseId}:`, err);
+      log.error(`[poller] fetch error for ${job.sailResponseId}:`, err);
       await this.scheduleRetry(job);
     } finally {
       this.activePollCount--;
@@ -126,6 +140,9 @@ export class Poller {
   private async scheduleRetry(job: any, newStatus?: string) {
     const newPollCount = job.pollCount + 1;
     const backoff = getBackoffMs(newPollCount);
+    log.debug(
+      `[poller] retry id=${job.sailResponseId} newPollCount=${newPollCount} backoffMs=${backoff} newStatus=${newStatus ?? job.status}`,
+    );
     await this.prisma.pendingJob.update({
       where: { id: job.id },
       data: {

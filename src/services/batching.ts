@@ -1,6 +1,7 @@
 import { prisma } from "../db.ts";
 import { sail } from "../sail-client.ts";
 import { config } from "../config.ts";
+import { log } from "../logger.ts";
 import { mapSailError, openAIError } from "../errors.ts";
 import { chatToResponsesAPI } from "../transforms/request.ts";
 import { responsesToChatCompletion } from "../transforms/response.ts";
@@ -16,9 +17,15 @@ export async function handleBatching(
 ): Promise<Response> {
   // Transform OpenAI chat completion request → Sail Responses API
   const sailBody = chatToResponsesAPI(body, completionWindow);
+  log.debug(
+    `[batch] transformed request keys=${Object.keys(sailBody).join(",")}`,
+  );
 
   // Submit to Sail
   const { status, data } = await sail.createResponse(sailBody);
+  log.debug(
+    `[batch] sail submit status=${status} id=${data?.id} sailStatus=${data?.status}`,
+  );
 
   if (status !== 200 && status !== 202) {
     return mapSailError(status, data);
@@ -26,6 +33,7 @@ export async function handleBatching(
 
   // If Sail returned a completed response synchronously (unlikely but possible)
   if (data.status === "completed") {
+    log.info(`[batch] sail returned completed synchronously id=${data.id}`);
     const completion = responsesToChatCompletion(data);
     if (wantsStream) {
       return new Response(streamResponse(completion), {
@@ -42,6 +50,9 @@ export async function handleBatching(
   const sailResponseId = data.id;
 
   // Persist to DB
+  log.debug(
+    `[batch] persisting job id=${sailResponseId} model=${body.model} window=${completionWindow}`,
+  );
   await prisma.pendingJob.create({
     data: {
       sailResponseId,
@@ -53,6 +64,9 @@ export async function handleBatching(
   });
 
   // Register in-memory waiter and await result with timeout
+  log.debug(
+    `[batch] waiter registered id=${sailResponseId} timeoutMs=${config.polling.maxDurationMs}`,
+  );
   const resultPromise = poller
     .registerWaiter(sailResponseId)
     .then((result) => ({ ok: true as const, result }))
@@ -67,10 +81,14 @@ export async function handleBatching(
   );
 
   const outcome = await Promise.race([resultPromise, timeoutPromise]);
+  log.debug(`[batch] outcome id=${sailResponseId} ok=${outcome.ok}`);
 
   if (!outcome.ok) {
     poller.unregisterWaiter(sailResponseId);
     if (outcome.error === "timeout") {
+      log.warn(
+        `[batch] timeout id=${sailResponseId} ms=${config.polling.maxDurationMs}`,
+      );
       return openAIError(
         504,
         `Request timed out after ${config.polling.maxDurationMs}ms. Job ${sailResponseId} is still processing on Sail.`,
@@ -86,6 +104,7 @@ export async function handleBatching(
     );
   }
 
+  log.debug(`[batch] mapping responses → chat completion id=${sailResponseId}`);
   const completion = responsesToChatCompletion(outcome.result);
 
   if (wantsStream) {

@@ -1,4 +1,5 @@
 import { sail } from "../sail-client.ts";
+import { log } from "../logger.ts";
 import { mapSailError } from "../errors.ts";
 import { streamResponse } from "./stream.ts";
 import type { CompletionWindow } from "../types.ts";
@@ -25,6 +26,7 @@ export async function handlePassthrough(
   delete sailBody.max_tokens;
 
   const { status, data } = await sail.chatCompletions(sailBody);
+  log.debug(`[passthrough] sail status=${status}`);
 
   if (status !== 200) return mapSailError(status, data);
 

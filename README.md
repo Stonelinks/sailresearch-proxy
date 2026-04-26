@@ -128,6 +128,7 @@ All scripts are in `bin/` and available on `PATH` after `source env.sh`.
 | `POLL_INTERVAL_MS` | `1000` | Poller tick interval |
 | `MAX_CONCURRENT_POLLS` | `10` | Max concurrent poll requests to Sail |
 | `STREAM_CHUNK_SIZE` | `20` | Approximate characters per simulated SSE chunk |
+| `LOG_LEVEL` | `info` | Verbosity: `debug` / `info` / `warn` / `error` |
 | `DATABASE_URL` | `file:$PROJECT_ROOT/data/proxy.db` | SQLite database path |
 
 ## Testing

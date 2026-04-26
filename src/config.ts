@@ -38,5 +38,8 @@ export const config = {
   streaming: {
     chunkSize: intEnv("STREAM_CHUNK_SIZE", 20),
   },
+  logging: {
+    level: env("LOG_LEVEL", "info"),
+  },
   proxyApiKey: env("PROXY_API_KEY", ""),
 };
