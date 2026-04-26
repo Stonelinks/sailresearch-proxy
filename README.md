@@ -49,12 +49,12 @@ for chunk in stream:
 
 Control the latency/cost tradeoff via `metadata.completion_window` in the request body, or the `X-Completion-Window` header. See https://docs.sailresearch.com/completion-windows for tier details.
 
-| Window | Mode | Behavior |
-|--------|------|----------|
-| `asap` | Passthrough | Forwards to Sail synchronously on latency-optimized hardware. Premium pricing. |
-| `priority` | Batching | Scheduled, ~1–2 min target. For agent loops where latency compounds. |
-| `standard` | Batching | Scheduled, ~5 min target. **Default.** |
-| `flex` | Batching | Best-effort, off-peak. Cheapest, no SLO. |
+| Window | Mode | Behavior | Default timeout |
+|--------|------|----------|----------------|
+| `asap` | Passthrough | Forwards to Sail synchronously on latency-optimized hardware. Premium pricing. | N/A (sync) |
+| `priority` | Batching | Scheduled, ~1–2 min target. For agent loops where latency compounds. | 5 min |
+| `standard` | Batching | Scheduled, ~5 min target. **Default.** | 15 min |
+| `flex` | Batching | Best-effort, off-peak. Cheapest, no SLO. | 60 min |
 
 ```python
 # Fast (passthrough)
@@ -124,7 +124,9 @@ All scripts are in `bin/` and available on `PATH` after `source env.sh`.
 | `PORT` | `4000` | Proxy listen port |
 | `HOST` | `0.0.0.0` | Proxy listen host |
 | `DEFAULT_COMPLETION_WINDOW` | `standard` | Default window when not specified by client |
-| `MAX_POLL_DURATION_MS` | `900000` | Max time to hold connection open for batching (15 min) |
+| `TIMEOUT_PRIORITY_MS` | `300000` | Max wait for `priority` jobs (5 min) |
+| `TIMEOUT_STANDARD_MS` | `900000` | Max wait for `standard` jobs (15 min) |
+| `TIMEOUT_FLEX_MS` | `3600000` | Max wait for `flex` jobs (60 min) |
 | `POLL_INTERVAL_MS` | `1000` | Poller tick interval |
 | `MAX_CONCURRENT_POLLS` | `10` | Max concurrent poll requests to Sail |
 | `STREAM_CHUNK_SIZE` | `20` | Approximate characters per simulated SSE chunk |
@@ -146,8 +148,8 @@ The integration test suite starts an isolated proxy on port 4111, runs 16 tests 
 The proxy has two modes based on completion window:
 
 - **Passthrough** (`asap`): Forwards directly to Sail's `/v1/chat/completions` endpoint. Synchronous round-trip.
-- **Batching** (`priority` / `standard` / `flex`): Submits to Sail's `/v1/responses` API with `background: true`, persists the job handle to SQLite via Prisma, and polls with exponential backoff until the result is ready. The HTTP connection is held open until completion or timeout.
+- **Batching** (`priority` / `standard` / `flex`): Submits to Sail's `/v1/responses` API with `background: true`, persists the job handle to SQLite via Prisma, and polls with exponential backoff until the result is ready. The HTTP connection is held open until completion or timeout. Each window has its own timeout (5 min / 15 min / 60 min by default), so the proxy returns a 504 quickly for latency-sensitive windows while giving flex jobs ample time.
 
-SQLite persistence means in-flight jobs survive proxy restarts. On startup, the poller resumes polling any incomplete jobs from the previous run.
+SQLite persistence means in-flight jobs survive proxy restarts. On startup, the poller resumes polling any incomplete jobs from the previous run. Jobs that exceed their window-specific timeout are automatically expired by the poller, even if they were orphaned by a restart.
 
 Built with Bun, TypeScript, and Prisma. No frameworks.

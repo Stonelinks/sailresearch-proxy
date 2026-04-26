@@ -1,6 +1,6 @@
 import { prisma } from "../db.ts";
 import { sail } from "../sail-client.ts";
-import { config } from "../config.ts";
+import { config, getTimeoutMs } from "../config.ts";
 import { log } from "../logger.ts";
 import { mapSailError, openAIError } from "../errors.ts";
 import { chatToResponsesAPI } from "../transforms/request.ts";
@@ -63,9 +63,10 @@ export async function handleBatching(
     },
   });
 
-  // Register in-memory waiter and await result with timeout
+  // Register in-memory waiter and await result with window-specific timeout
+  const timeoutMs = getTimeoutMs(completionWindow);
   log.debug(
-    `[batch] waiter registered id=${sailResponseId} timeoutMs=${config.polling.maxDurationMs}`,
+    `[batch] waiter registered id=${sailResponseId} window=${completionWindow} timeoutMs=${timeoutMs}`,
   );
   const resultPromise = poller
     .registerWaiter(sailResponseId)
@@ -76,7 +77,7 @@ export async function handleBatching(
     (resolve) =>
       setTimeout(
         () => resolve({ ok: false, error: "timeout" }),
-        config.polling.maxDurationMs,
+        timeoutMs,
       ),
   );
 
@@ -87,11 +88,11 @@ export async function handleBatching(
     poller.unregisterWaiter(sailResponseId);
     if (outcome.error === "timeout") {
       log.warn(
-        `[batch] timeout id=${sailResponseId} ms=${config.polling.maxDurationMs}`,
+        `[batch] timeout id=${sailResponseId} window=${completionWindow} ms=${timeoutMs}`,
       );
       return openAIError(
         504,
-        `Request timed out after ${config.polling.maxDurationMs}ms. Job ${sailResponseId} is still processing on Sail.`,
+        `Request timed out after ${timeoutMs}ms (window: ${completionWindow}). Job ${sailResponseId} is still processing on Sail.`,
         "timeout_error",
       );
     }

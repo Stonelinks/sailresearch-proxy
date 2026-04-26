@@ -1,8 +1,8 @@
 import type { PrismaClient } from "@prisma/client";
 import { sail } from "../sail-client.ts";
-import { config } from "../config.ts";
+import { config, getTimeoutMs } from "../config.ts";
 import { log } from "../logger.ts";
-import type { JobWaiter } from "../types.ts";
+import type { JobWaiter, CompletionWindow } from "../types.ts";
 
 export function getBackoffMs(pollCount: number): number {
   if (pollCount < 3) return 2000;
@@ -54,10 +54,40 @@ export class Poller {
   private async tick() {
     if (this.activePollCount >= config.polling.maxConcurrent) return;
 
+    const now = new Date();
+
+    // Expire jobs that have exceeded their window-specific timeout
+    const activeJobs = await this.prisma.pendingJob.findMany({
+      where: {
+        status: { notIn: ["completed", "failed", "cancelled"] },
+      },
+      select: { id: true, sailResponseId: true, completionWindow: true, createdAt: true },
+    });
+
+    for (const job of activeJobs) {
+      const timeoutMs = getTimeoutMs(job.completionWindow as CompletionWindow);
+      const deadline = new Date(job.createdAt.getTime() + timeoutMs);
+      if (now >= deadline) {
+        log.warn(
+          `[poller] expiring timed-out job id=${job.sailResponseId} window=${job.completionWindow} timeoutMs=${timeoutMs}`,
+        );
+        await this.prisma.pendingJob.update({
+          where: { id: job.id },
+          data: { status: "failed", errorBody: JSON.stringify({ error: { message: `Job timed out after ${timeoutMs}ms (window: ${job.completionWindow})` } }) },
+        });
+        const waiter = this.waiters.get(job.sailResponseId);
+        if (waiter) {
+          waiter.reject({ error: { message: `Job timed out after ${timeoutMs}ms (window: ${job.completionWindow})` } });
+          this.waiters.delete(job.sailResponseId);
+        }
+      }
+    }
+
+    // Poll jobs that are due
     const jobs = await this.prisma.pendingJob.findMany({
       where: {
         status: { notIn: ["completed", "failed", "cancelled"] },
-        nextPollAt: { lte: new Date() },
+        nextPollAt: { lte: now },
       },
       take: config.polling.maxConcurrent - this.activePollCount,
     });
