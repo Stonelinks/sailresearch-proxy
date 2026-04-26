@@ -47,13 +47,14 @@ for chunk in stream:
 
 ## Completion Windows
 
-Control the latency/cost tradeoff via `metadata.completion_window` in the request body, or the `X-Completion-Window` header:
+Control the latency/cost tradeoff via `metadata.completion_window` in the request body, or the `X-Completion-Window` header. See https://docs.sailresearch.com/completion-windows for tier details.
 
 | Window | Mode | Behavior |
 |--------|------|----------|
-| `asap` | Passthrough | Forwards to Sail synchronously. Fastest, premium pricing. |
-| `15m` | Batching | Submits async, polls until complete. Typical response under 5 min. **Default.** |
-| `24h` | Batching | Same as 15m but 50% cheaper. For non-time-sensitive workloads. |
+| `asap` | Passthrough | Forwards to Sail synchronously on latency-optimized hardware. Premium pricing. |
+| `priority` | Batching | Scheduled, ~1–2 min target. For agent loops where latency compounds. |
+| `standard` | Batching | Scheduled, ~5 min target. **Default.** |
+| `flex` | Batching | Best-effort, off-peak. Cheapest, no SLO. |
 
 ```python
 # Fast (passthrough)
@@ -67,7 +68,7 @@ client.chat.completions.create(
 client.chat.completions.create(
     model="deepseek-ai/DeepSeek-V3.2",
     messages=[...],
-    extra_body={"metadata": {"completion_window": "24h"}},
+    extra_body={"metadata": {"completion_window": "flex"}},
 )
 ```
 
@@ -122,7 +123,7 @@ All scripts are in `bin/` and available on `PATH` after `source env.sh`.
 | `SAIL_BASE_URL` | `https://api.sailresearch.com/v1` | Sail API base URL |
 | `PORT` | `4000` | Proxy listen port |
 | `HOST` | `0.0.0.0` | Proxy listen host |
-| `DEFAULT_COMPLETION_WINDOW` | `15m` | Default window when not specified by client |
+| `DEFAULT_COMPLETION_WINDOW` | `standard` | Default window when not specified by client |
 | `MAX_POLL_DURATION_MS` | `900000` | Max time to hold connection open for batching (15 min) |
 | `POLL_INTERVAL_MS` | `1000` | Poller tick interval |
 | `MAX_CONCURRENT_POLLS` | `10` | Max concurrent poll requests to Sail |
@@ -137,14 +138,14 @@ check               # format + typecheck + unit tests
 test-integration     # live tests against Sail API
 ```
 
-The integration test suite starts an isolated proxy on port 4111, runs 14 tests covering passthrough, batching, streaming, the Python `openai` client, and error handling, then tears down.
+The integration test suite starts an isolated proxy on port 4111, runs 16 tests covering passthrough, batching, streaming, the Python `openai` client, and error handling, then tears down.
 
 ## Architecture
 
 The proxy has two modes based on completion window:
 
 - **Passthrough** (`asap`): Forwards directly to Sail's `/v1/chat/completions` endpoint. Synchronous round-trip.
-- **Batching** (`15m`/`24h`): Submits to Sail's `/v1/responses` API with `background: true`, persists the job handle to SQLite via Prisma, and polls with exponential backoff until the result is ready. The HTTP connection is held open until completion or timeout.
+- **Batching** (`priority` / `standard` / `flex`): Submits to Sail's `/v1/responses` API with `background: true`, persists the job handle to SQLite via Prisma, and polls with exponential backoff until the result is ready. The HTTP connection is held open until completion or timeout.
 
 SQLite persistence means in-flight jobs survive proxy restarts. On startup, the poller resumes polling any incomplete jobs from the previous run.
 

@@ -1,4 +1,4 @@
-export type CompletionWindow = "asap" | "15m" | "24h";
+export type CompletionWindow = "asap" | "priority" | "standard" | "flex";
 
 export type JobStatus =
   | "pending"

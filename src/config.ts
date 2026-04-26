@@ -23,10 +23,11 @@ export const config = {
     host: env("HOST", "0.0.0.0"),
   },
   defaults: {
-    completionWindow: env("DEFAULT_COMPLETION_WINDOW", "15m") as
+    completionWindow: env("DEFAULT_COMPLETION_WINDOW", "standard") as
       | "asap"
-      | "15m"
-      | "24h",
+      | "priority"
+      | "standard"
+      | "flex",
     model: env("DEFAULT_MODEL", "deepseek-ai/DeepSeek-V3.2"),
   },
   polling: {

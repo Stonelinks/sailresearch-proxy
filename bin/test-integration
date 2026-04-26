@@ -163,9 +163,9 @@ run_test "streaming" bash -c '
 	echo "$resp" | grep -q "\[DONE\]" || { echo "missing DONE"; exit 1; }
 '
 
-# ── Batching (15m) ─────────────────────────────────────
+# ── Batching (standard / priority / flex) ─────────────
 
-echo "=== Batching (15m) ==="
+echo "=== Batching (standard) ==="
 
 run_test "sync response (polls until complete)" bash -c '
 	resp=$(curl -sf --max-time 300 -X POST '"$BASE"'/v1/chat/completions \
@@ -173,7 +173,7 @@ run_test "sync response (polls until complete)" bash -c '
 		-d "{
 			\"model\": \"deepseek-ai/DeepSeek-V3.2\",
 			\"messages\": [{\"role\": \"user\", \"content\": \"What is 3*3? Just the number.\"}],
-			\"metadata\": {\"completion_window\": \"15m\"},
+			\"metadata\": {\"completion_window\": \"standard\"},
 			\"max_tokens\": 10
 		}")
 	echo "$resp" | python3 -c "
@@ -191,13 +191,43 @@ run_test "streaming (polls then streams)" bash -c '
 		-d "{
 			\"model\": \"deepseek-ai/DeepSeek-V3.2\",
 			\"messages\": [{\"role\": \"user\", \"content\": \"Capital of France? One word.\"}],
-			\"metadata\": {\"completion_window\": \"15m\"},
+			\"metadata\": {\"completion_window\": \"standard\"},
 			\"stream\": true,
 			\"max_tokens\": 10
 		}")
 	echo "$resp" | grep -q "chat.completion.chunk" || { echo "missing chunk object"; exit 1; }
 	echo "$resp" | grep -q "\[DONE\]" || { echo "missing DONE"; exit 1; }
 '
+
+run_test "priority window" bash -c '
+	resp=$(curl -sf --max-time 300 -X POST '"$BASE"'/v1/chat/completions \
+		-H "Content-Type: application/json" \
+		-d "{
+			\"model\": \"deepseek-ai/DeepSeek-V3.2\",
+			\"messages\": [{\"role\": \"user\", \"content\": \"What is 5+5? Just the number.\"}],
+			\"metadata\": {\"completion_window\": \"priority\"},
+			\"max_tokens\": 10
+		}")
+	echo "$resp" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+assert data[\"choices\"][0][\"message\"][\"content\"] is not None
+"'
+
+run_test "flex window" bash -c '
+	resp=$(curl -sf --max-time 600 -X POST '"$BASE"'/v1/chat/completions \
+		-H "Content-Type: application/json" \
+		-d "{
+			\"model\": \"deepseek-ai/DeepSeek-V3.2\",
+			\"messages\": [{\"role\": \"user\", \"content\": \"Capital of Japan? One word.\"}],
+			\"metadata\": {\"completion_window\": \"flex\"},
+			\"max_tokens\": 10
+		}")
+	echo "$resp" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+assert data[\"choices\"][0][\"message\"][\"content\"] is not None
+"'
 
 # ── Python openai client ──────────────────────────────
 
@@ -234,14 +264,14 @@ for chunk in stream:
 assert len(chunks) > 0, 'no content chunks received'
 "
 
-run_test "sync (15m batching)" python3 -c "
+run_test "sync (standard batching)" python3 -c "
 from openai import OpenAI
 client = OpenAI(base_url='$BASE/v1', api_key='x', timeout=300)
 r = client.chat.completions.create(
     model='deepseek-ai/DeepSeek-V3.2',
     messages=[{'role': 'user', 'content': 'What is 10/2? Just the number.'}],
     max_completion_tokens=10,
-    extra_body={'metadata': {'completion_window': '15m'}},
+    extra_body={'metadata': {'completion_window': 'standard'}},
 )
 assert r.choices[0].message.content is not None
 assert r.choices[0].finish_reason == 'stop'

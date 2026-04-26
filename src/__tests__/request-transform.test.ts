@@ -8,19 +8,19 @@ describe("chatToResponsesAPI", () => {
       messages: [{ role: "user", content: "Hello" }],
     };
 
-    const result = chatToResponsesAPI(body, "15m");
+    const result = chatToResponsesAPI(body, "standard");
 
     expect(result.model).toBe("deepseek-ai/DeepSeek-V3.2");
     expect(result.input).toEqual([{ role: "user", content: "Hello" }]);
     expect(result.background).toBe(true);
     expect(result.store).toBe(true);
-    expect(result.metadata.completion_window).toBe("15m");
+    expect(result.metadata.completion_window).toBe("standard");
   });
 
   test("maps max_completion_tokens to max_output_tokens", () => {
     const result = chatToResponsesAPI(
       { model: "m", messages: [], max_completion_tokens: 500 },
-      "15m",
+      "standard",
     );
     expect(result.max_output_tokens).toBe(500);
   });
@@ -28,7 +28,7 @@ describe("chatToResponsesAPI", () => {
   test("maps max_tokens to max_output_tokens as fallback", () => {
     const result = chatToResponsesAPI(
       { model: "m", messages: [], max_tokens: 300 },
-      "15m",
+      "standard",
     );
     expect(result.max_output_tokens).toBe(300);
   });
@@ -36,27 +36,27 @@ describe("chatToResponsesAPI", () => {
   test("prefers max_completion_tokens over max_tokens", () => {
     const result = chatToResponsesAPI(
       { model: "m", messages: [], max_completion_tokens: 500, max_tokens: 300 },
-      "15m",
+      "standard",
     );
     expect(result.max_output_tokens).toBe(500);
   });
 
   test("does not set max_output_tokens when neither is provided", () => {
-    const result = chatToResponsesAPI({ model: "m", messages: [] }, "15m");
+    const result = chatToResponsesAPI({ model: "m", messages: [] }, "standard");
     expect(result.max_output_tokens).toBeUndefined();
   });
 
   test("passes through temperature and top_p", () => {
     const result = chatToResponsesAPI(
       { model: "m", messages: [], temperature: 0.7, top_p: 0.9 },
-      "15m",
+      "standard",
     );
     expect(result.temperature).toBe(0.7);
     expect(result.top_p).toBe(0.9);
   });
 
   test("omits temperature and top_p when not set", () => {
-    const result = chatToResponsesAPI({ model: "m", messages: [] }, "15m");
+    const result = chatToResponsesAPI({ model: "m", messages: [] }, "standard");
     expect(result.temperature).toBeUndefined();
     expect(result.top_p).toBeUndefined();
   });
@@ -74,7 +74,7 @@ describe("chatToResponsesAPI", () => {
           },
         },
       },
-      "15m",
+      "standard",
     );
     expect(result.text).toEqual({
       type: "json_schema",
@@ -88,7 +88,7 @@ describe("chatToResponsesAPI", () => {
   test("maps json_object response_format", () => {
     const result = chatToResponsesAPI(
       { model: "m", messages: [], response_format: { type: "json_object" } },
-      "15m",
+      "standard",
     );
     expect(result.text).toEqual({ type: "json_schema" });
   });
@@ -96,7 +96,7 @@ describe("chatToResponsesAPI", () => {
   test("maps reasoning_effort", () => {
     const result = chatToResponsesAPI(
       { model: "m", messages: [], reasoning_effort: "high" },
-      "15m",
+      "standard",
     );
     expect(result.reasoning).toEqual({ effort: "high" });
   });
@@ -113,7 +113,7 @@ describe("chatToResponsesAPI", () => {
     ];
     const result = chatToResponsesAPI(
       { model: "m", messages: [], tools, tool_choice: "auto" },
-      "15m",
+      "standard",
     );
     expect(result.tools).toEqual(tools);
     expect(result.tool_choice).toBe("auto");
@@ -122,7 +122,7 @@ describe("chatToResponsesAPI", () => {
   test("passes through user", () => {
     const result = chatToResponsesAPI(
       { model: "m", messages: [], user: "user-123" },
-      "15m",
+      "standard",
     );
     expect(result.user).toBe("user-123");
   });
@@ -134,10 +134,15 @@ describe("chatToResponsesAPI", () => {
         messages: [],
         metadata: { custom_field: "value" },
       },
-      "24h",
+      "flex",
     );
     expect(result.metadata.custom_field).toBe("value");
-    expect(result.metadata.completion_window).toBe("24h");
+    expect(result.metadata.completion_window).toBe("flex");
+  });
+
+  test("priority window is passed through", () => {
+    const result = chatToResponsesAPI({ model: "m", messages: [] }, "priority");
+    expect(result.metadata.completion_window).toBe("priority");
   });
 
   test("completion_window param overrides metadata", () => {
@@ -147,15 +152,15 @@ describe("chatToResponsesAPI", () => {
         messages: [],
         metadata: { completion_window: "asap" },
       },
-      "15m",
+      "standard",
     );
-    expect(result.metadata.completion_window).toBe("15m");
+    expect(result.metadata.completion_window).toBe("standard");
   });
 
   test("does not include stream or n from original body", () => {
     const result = chatToResponsesAPI(
       { model: "m", messages: [], stream: true, n: 2 },
-      "15m",
+      "standard",
     );
     // These should not be present in the Sail Responses API request
     expect(result.stream).toBeUndefined();
