@@ -101,13 +101,15 @@ describe("chatToResponsesAPI", () => {
     expect(result.reasoning).toEqual({ effort: "high" });
   });
 
-  test("passes through tools and tool_choice", () => {
+  test("flattens chat-completions tools to Responses API shape", () => {
     const tools = [
       {
         type: "function",
         function: {
           name: "get_weather",
+          description: "Get current weather",
           parameters: { type: "object", properties: {} },
+          strict: true,
         },
       },
     ];
@@ -115,8 +117,39 @@ describe("chatToResponsesAPI", () => {
       { model: "m", messages: [], tools, tool_choice: "auto" },
       "standard",
     );
-    expect(result.tools).toEqual(tools);
+    expect(result.tools).toEqual([
+      {
+        type: "function",
+        name: "get_weather",
+        description: "Get current weather",
+        parameters: { type: "object", properties: {} },
+        strict: true,
+      },
+    ]);
     expect(result.tool_choice).toBe("auto");
+  });
+
+  test("omits optional tool fields when not provided", () => {
+    const tools = [
+      {
+        type: "function",
+        function: {
+          name: "ping",
+          parameters: { type: "object", properties: {} },
+        },
+      },
+    ];
+    const result = chatToResponsesAPI(
+      { model: "m", messages: [], tools },
+      "standard",
+    );
+    expect(result.tools).toEqual([
+      {
+        type: "function",
+        name: "ping",
+        parameters: { type: "object", properties: {} },
+      },
+    ]);
   });
 
   test("passes through user", () => {
@@ -155,6 +188,104 @@ describe("chatToResponsesAPI", () => {
       "standard",
     );
     expect(result.metadata.completion_window).toBe("standard");
+  });
+
+  test("translates assistant tool_calls into function_call input items", () => {
+    const result = chatToResponsesAPI(
+      {
+        model: "m",
+        messages: [
+          { role: "user", content: "what's the weather in SF?" },
+          {
+            role: "assistant",
+            content: null,
+            tool_calls: [
+              {
+                id: "call_abc",
+                type: "function",
+                function: {
+                  name: "get_weather",
+                  arguments: '{"location":"SF"}',
+                },
+              },
+            ],
+          },
+          { role: "tool", tool_call_id: "call_abc", content: "sunny, 72F" },
+          { role: "user", content: "thanks" },
+        ],
+      },
+      "standard",
+    );
+
+    expect(result.input).toEqual([
+      { role: "user", content: "what's the weather in SF?" },
+      {
+        type: "function_call",
+        call_id: "call_abc",
+        name: "get_weather",
+        arguments: '{"location":"SF"}',
+      },
+      {
+        type: "function_call_output",
+        call_id: "call_abc",
+        output: "sunny, 72F",
+      },
+      { role: "user", content: "thanks" },
+    ]);
+  });
+
+  test("emits an assistant message before function_calls when content is present", () => {
+    const result = chatToResponsesAPI(
+      {
+        model: "m",
+        messages: [
+          {
+            role: "assistant",
+            content: "I'll check that.",
+            tool_calls: [
+              {
+                id: "call_1",
+                type: "function",
+                function: { name: "lookup", arguments: '{"q":"x"}' },
+              },
+            ],
+          },
+        ],
+      },
+      "standard",
+    );
+    expect(result.input).toEqual([
+      { role: "assistant", content: "I'll check that." },
+      {
+        type: "function_call",
+        call_id: "call_1",
+        name: "lookup",
+        arguments: '{"q":"x"}',
+      },
+    ]);
+  });
+
+  test("stringifies non-string tool message content", () => {
+    const result = chatToResponsesAPI(
+      {
+        model: "m",
+        messages: [
+          {
+            role: "tool",
+            tool_call_id: "call_x",
+            content: { result: "ok", count: 3 },
+          },
+        ],
+      },
+      "standard",
+    );
+    expect(result.input).toEqual([
+      {
+        type: "function_call_output",
+        call_id: "call_x",
+        output: '{"result":"ok","count":3}',
+      },
+    ]);
   });
 
   test("does not include stream or n from original body", () => {

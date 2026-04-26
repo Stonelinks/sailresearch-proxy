@@ -82,7 +82,10 @@ describe("responsesToChatCompletion", () => {
     expect(result.choices[0].message.content).toBe("Part 1 Part 2");
   });
 
-  test("extracts tool calls from function_call output", () => {
+  test("extracts tool calls from function_call output (Responses API shape)", () => {
+    // Real Sail responses use top-level name/arguments and a separate call_id.
+    // The chat-completions tool_calls[].id must be the call_id (used to round-trip
+    // tool_call_id), not the internal item id.
     const result = responsesToChatCompletion({
       id: "resp_1",
       status: "completed",
@@ -90,11 +93,10 @@ describe("responsesToChatCompletion", () => {
       output: [
         {
           type: "function_call",
-          id: "call_abc",
-          function: {
-            name: "get_weather",
-            arguments: '{"location":"SF"}',
-          },
+          id: "msg_internal_xyz",
+          call_id: "call_abc",
+          name: "get_weather",
+          arguments: '{"location":"SF"}',
         },
       ],
     });
@@ -111,6 +113,22 @@ describe("responsesToChatCompletion", () => {
     expect(result.choices[0].finish_reason).toBe("tool_calls");
   });
 
+  test("falls back to id when call_id is missing", () => {
+    const result = responsesToChatCompletion({
+      id: "resp_1",
+      status: "completed",
+      model: "m",
+      output: [
+        {
+          type: "function_call",
+          id: "call_legacy",
+          function: { name: "fn", arguments: '{}' },
+        },
+      ],
+    });
+    expect(result.choices[0].message.tool_calls[0].id).toBe("call_legacy");
+  });
+
   test("handles function_call with object arguments", () => {
     const result = responsesToChatCompletion({
       id: "resp_1",
@@ -119,11 +137,9 @@ describe("responsesToChatCompletion", () => {
       output: [
         {
           type: "function_call",
-          id: "call_1",
-          function: {
-            name: "search",
-            arguments: { query: "test" },
-          },
+          call_id: "call_1",
+          name: "search",
+          arguments: { query: "test" },
         },
       ],
     });
@@ -141,18 +157,22 @@ describe("responsesToChatCompletion", () => {
       output: [
         {
           type: "function_call",
-          id: "call_1",
-          function: { name: "fn1", arguments: "{}" },
+          call_id: "call_1",
+          name: "fn1",
+          arguments: "{}",
         },
         {
           type: "function_call",
-          id: "call_2",
-          function: { name: "fn2", arguments: "{}" },
+          call_id: "call_2",
+          name: "fn2",
+          arguments: "{}",
         },
       ],
     });
 
     expect(result.choices[0].message.tool_calls).toHaveLength(2);
+    expect(result.choices[0].message.tool_calls[0].id).toBe("call_1");
+    expect(result.choices[0].message.tool_calls[1].id).toBe("call_2");
     expect(result.choices[0].finish_reason).toBe("tool_calls");
   });
 

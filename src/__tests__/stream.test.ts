@@ -155,6 +155,58 @@ describe("streamResponse", () => {
     expect(events.length).toBe(3);
   });
 
+  test("emits delta.tool_calls chunks before the final chunk", async () => {
+    const completion = {
+      id: "chatcmpl-tc",
+      model: "m",
+      created: 0,
+      choices: [
+        {
+          message: {
+            role: "assistant",
+            content: null,
+            tool_calls: [
+              {
+                id: "call_abc",
+                type: "function",
+                function: { name: "get_weather", arguments: '{"loc":"SF"}' },
+              },
+              {
+                id: "call_def",
+                type: "function",
+                function: { name: "get_time", arguments: "{}" },
+              },
+            ],
+          },
+          finish_reason: "tool_calls",
+        },
+      ],
+    };
+
+    const events = await collectStream(streamResponse(completion));
+    const parsed = events.slice(0, -1).map(parseSSE);
+
+    const tcEvents = parsed.filter((e) => e.choices?.[0]?.delta?.tool_calls);
+    expect(tcEvents).toHaveLength(2);
+
+    expect(tcEvents[0].choices[0].delta.tool_calls[0]).toEqual({
+      index: 0,
+      id: "call_abc",
+      type: "function",
+      function: { name: "get_weather", arguments: '{"loc":"SF"}' },
+    });
+    expect(tcEvents[1].choices[0].delta.tool_calls[0]).toEqual({
+      index: 1,
+      id: "call_def",
+      type: "function",
+      function: { name: "get_time", arguments: "{}" },
+    });
+
+    // Final non-DONE event carries finish_reason
+    const finalEvent = parsed[parsed.length - 1];
+    expect(finalEvent.choices[0].finish_reason).toBe("tool_calls");
+  });
+
   test("preserves id and model across all chunks", async () => {
     const completion = {
       id: "chatcmpl-xyz",

@@ -68,6 +68,44 @@ export function streamResponse(completion: any): ReadableStream<Uint8Array> {
         }
       }
 
+      // Tool-call chunks: clients expect each call as a delta with index, id,
+      // type, and function.{name,arguments}. We emit one chunk per call rather
+      // than splitting arguments across deltas — Sail returns the full arg
+      // string at once so there's nothing to stream incrementally.
+      const toolCalls = choice?.message?.tool_calls ?? [];
+      for (let i = 0; i < toolCalls.length; i++) {
+        const tc = toolCalls[i];
+        controller.enqueue(
+          encoder.encode(
+            formatSSE({
+              id,
+              object: "chat.completion.chunk",
+              created,
+              model,
+              choices: [
+                {
+                  index: 0,
+                  delta: {
+                    tool_calls: [
+                      {
+                        index: i,
+                        id: tc.id,
+                        type: "function",
+                        function: {
+                          name: tc.function?.name,
+                          arguments: tc.function?.arguments ?? "",
+                        },
+                      },
+                    ],
+                  },
+                  finish_reason: null,
+                },
+              ],
+            }),
+          ),
+        );
+      }
+
       // Final chunk with finish_reason + usage
       controller.enqueue(
         encoder.encode(

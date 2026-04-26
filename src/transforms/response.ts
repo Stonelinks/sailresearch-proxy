@@ -61,18 +61,17 @@ function extractToolCalls(output: any): any[] {
   let idx = 0;
   for (const item of output) {
     if (item.type === "function_call") {
+      // Prefer call_id (Responses API correlation id) over id (internal msg_id)
+      // so the client's tool_call_id round-trips back to a call_id Sail recognizes.
+      const id = item.call_id || item.id || `call_${idx}`;
+      const name = item.name ?? item.function?.name;
+      const rawArgs = item.arguments ?? item.function?.arguments;
+      const args =
+        typeof rawArgs === "string" ? rawArgs : JSON.stringify(rawArgs ?? {});
       calls.push({
-        id: item.id || `call_${idx}`,
+        id,
         type: "function",
-        function: {
-          name: item.function?.name ?? item.name,
-          arguments:
-            typeof item.function?.arguments === "string"
-              ? item.function.arguments
-              : JSON.stringify(
-                  item.function?.arguments ?? item.arguments ?? {},
-                ),
-        },
+        function: { name, arguments: args },
       });
       idx++;
     }
