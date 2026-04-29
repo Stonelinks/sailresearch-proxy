@@ -5,14 +5,16 @@ import { handlePassthrough } from "../services/passthrough.ts";
 import { handleBatching } from "../services/batching.ts";
 import type { Poller } from "../services/poller.ts";
 import type { CompletionWindow } from "../types.ts";
+import { resolveCompletionWindow } from "../completion-window.ts";
 
 export async function handleChatCompletions(
   req: Request,
   poller: Poller,
+  urlPrefix: CompletionWindow | null = null,
 ): Promise<Response> {
   const headerWindow = req.headers.get("x-completion-window");
   log.debug(
-    `[req] hasAuth=${req.headers.get("authorization") != null} headerWindow=${headerWindow ?? "<none>"}`,
+    `[req] hasAuth=${req.headers.get("authorization") != null} headerWindow=${headerWindow ?? "<none>"} urlPrefix=${urlPrefix ?? "<none>"}`,
   );
 
   // Auth check
@@ -48,15 +50,14 @@ export async function handleChatCompletions(
     `[req] parsed body model=${body.model} stream=${wantsStream} msgs=${body.messages?.length ?? 0}`,
   );
 
-  // Determine completion window (header > body metadata > default)
-  const windowSource = headerWindow
-    ? "header"
-    : body.metadata?.completion_window
-      ? "metadata"
-      : "default";
-  const completionWindow = (headerWindow ??
-    body.metadata?.completion_window ??
-    config.defaults.completionWindow) as CompletionWindow;
+  // Determine completion window (prefix > header > body metadata > default)
+  const { window: completionWindow, source: windowSource } =
+    resolveCompletionWindow(
+      urlPrefix,
+      headerWindow,
+      body.metadata,
+      config.defaults.completionWindow,
+    );
   log.debug(
     `[req] window=${completionWindow} source=${windowSource}`,
   );

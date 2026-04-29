@@ -74,12 +74,51 @@ client.chat.completions.create(
 
 Streaming is supported in all modes. Since Sail does not support server-sent events natively, the proxy receives the complete response and emits simulated SSE chunks.
 
+You can also use [window-prefixed routes](#window-prefixed-routes) to pin a client to a specific window via the base URL.
+
+## Window-Prefixed Routes
+
+Every `/v1/*` endpoint is also available under a window prefix, so you can pin a client to a specific completion window without modifying request bodies or headers:
+
+```
+/asap/v1/chat/completions
+/priority/v1/chat/completions
+/standard/v1/chat/completions
+/flex/v1/chat/completions
+/asap/v1/models
+/flex/v1/models
+...etc
+```
+
+The easiest way to use this is to point your OpenAI client at the prefixed base URL:
+
+```python
+from openai import OpenAI
+
+# All requests use the flex window automatically — no extra config needed
+client = OpenAI(base_url="http://localhost:4000/flex/v1", api_key="anything")
+
+response = client.chat.completions.create(
+    model="deepseek-ai/DeepSeek-V3.2",
+    messages=[{"role": "user", "content": "Hello!"}],
+)
+```
+
+**Resolution order** (highest priority first):
+
+1. URL prefix (e.g. `/flex/v1/...`)
+2. `X-Completion-Window` header
+3. `metadata.completion_window` in the request body
+4. `DEFAULT_COMPLETION_WINDOW` config (defaults to `standard`)
+
 ## API Compatibility
 
 **Endpoints:**
 
 - `POST /v1/chat/completions` — chat completions (sync and streaming)
+- `POST /<window>/v1/chat/completions` — same, with window prefilled (e.g. `/flex/v1/chat/completions`)
 - `GET /v1/models` — list available models
+- `GET /<window>/v1/models` — same, with window prefilled
 - `GET /health` — health check
 
 **Field remapping:**

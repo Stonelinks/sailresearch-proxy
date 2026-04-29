@@ -7,6 +7,7 @@ import { handleModels } from "./routes/models.ts";
 import { handleDashboardJobs } from "./routes/dashboard-api.ts";
 import { openAIError } from "./errors.ts";
 import dashboard from "./dashboard/dashboard.html";
+import { handleWindowPrefixedRoute } from "./router.ts";
 
 // Run migrations / ensure DB schema
 const migrateResult = Bun.spawnSync(
@@ -62,6 +63,10 @@ const server = Bun.serve({
   },
 
   fetch(req) {
+    // Try window-prefixed routes first
+    const windowResult = handleWindowPrefixedRoute(req, poller);
+    if (windowResult) return windowResult;
+
     log.info(`[req] ${req.method} ${new URL(req.url).pathname} -> 404`);
     return openAIError(404, "Not found", "invalid_request_error");
   },
