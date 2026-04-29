@@ -6,6 +6,9 @@
   "scripts": {
     "run": "bun run src/index.ts",
     "dev": "bun --watch run src/index.ts",
+    "test": "bun test",
+    "test:slow": "SAIL_SLOW_INTEGRATION=1 bun test",
+    "test:unit": "bun test src/completion-window.test.ts src/errors.test.ts src/logger.test.ts src/router.test.ts src/transforms/request.test.ts src/transforms/response.test.ts src/services/poller.test.ts src/services/stream.test.ts",
     "db:push": "bunx prisma db push",
     "db:studio": "bunx prisma studio"
   },
