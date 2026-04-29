@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { getBackoffMs } from "../services/poller.ts";
+import { getBackoffMs } from "./poller.ts";
 
 describe("getBackoffMs", () => {
   test("returns 2s for polls 0-2", () => {

@@ -3,7 +3,7 @@ import {
   splitIntoChunks,
   formatSSE,
   streamResponse,
-} from "../services/stream.ts";
+} from "./stream.ts";
 
 describe("splitIntoChunks", () => {
   test("returns single chunk for short text", () => {

@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { responsesToChatCompletion } from "../transforms/response.ts";
+import { responsesToChatCompletion } from "./response.ts";
 
 describe("responsesToChatCompletion", () => {
   test("converts structured output array", () => {
@@ -83,9 +83,6 @@ describe("responsesToChatCompletion", () => {
   });
 
   test("extracts tool calls from function_call output (Responses API shape)", () => {
-    // Real Sail responses use top-level name/arguments and a separate call_id.
-    // The chat-completions tool_calls[].id must be the call_id (used to round-trip
-    // tool_call_id), not the internal item id.
     const result = responsesToChatCompletion({
       id: "resp_1",
       status: "completed",

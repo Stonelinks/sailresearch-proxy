@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { chatToResponsesAPI } from "../transforms/request.ts";
+import { chatToResponsesAPI } from "./request.ts";
 
 describe("chatToResponsesAPI", () => {
   test("basic message transform", () => {

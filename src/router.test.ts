@@ -1,6 +1,6 @@
 import { describe, test, expect, mock, beforeEach, afterEach } from "bun:test";
-import { handleWindowPrefixedRoute, dispatchRoute } from "../router.ts";
-import type { CompletionWindow } from "../types.ts";
+import { handleWindowPrefixedRoute, dispatchRoute } from "./router.ts";
+import type { CompletionWindow } from "./types.ts";
 
 // Create a minimal mock poller with the shape dispatchRoute expects
 // (it only passes it to handleChatCompletions)

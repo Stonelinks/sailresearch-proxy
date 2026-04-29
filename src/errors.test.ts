@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { openAIError, mapSailError } from "../errors.ts";
+import { openAIError, mapSailError } from "./errors.ts";
 
 describe("openAIError", () => {
   test("creates error response with correct status", async () => {

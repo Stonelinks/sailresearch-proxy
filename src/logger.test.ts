@@ -1,5 +1,5 @@
 import { describe, test, expect, spyOn, afterEach } from "bun:test";
-import { log, setLogLevel, getLogLevel } from "../logger.ts";
+import { log, setLogLevel, getLogLevel } from "./logger.ts";
 
 describe("logger", () => {
   const original = getLogLevel();
@@ -81,7 +81,7 @@ describe("logger", () => {
       cmd: [
         "bun",
         "-e",
-        `import('${import.meta.dir}/../logger.ts').then(m => { console.log(m.getLogLevel()); });`,
+        `import('${import.meta.dir}/logger.ts').then(m => { console.log(m.getLogLevel()); });`,
       ],
       env: { ...process.env, LOG_LEVEL: "garbage" },
     });
