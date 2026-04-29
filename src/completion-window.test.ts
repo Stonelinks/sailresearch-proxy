@@ -8,9 +8,12 @@ import {
 import type { CompletionWindow } from "./types.ts";
 
 describe("isValidCompletionWindow", () => {
-  test.each([...COMPLETION_WINDOWS] as CompletionWindow[])("returns true for '%s'", (window) => {
-    expect(isValidCompletionWindow(window)).toBe(true);
-  });
+  test.each([...COMPLETION_WINDOWS] as CompletionWindow[])(
+    "returns true for '%s'",
+    (window) => {
+      expect(isValidCompletionWindow(window)).toBe(true);
+    },
+  );
 
   test("returns false for invalid values", () => {
     expect(isValidCompletionWindow("urgent")).toBe(false);
@@ -20,9 +23,14 @@ describe("isValidCompletionWindow", () => {
 });
 
 describe("extractWindowPrefix", () => {
-  test.each([...COMPLETION_WINDOWS] as CompletionWindow[])("extracts '%s' from /%s/v1/chat/completions", (window) => {
-    expect(extractWindowPrefix(`/${window}/v1/chat/completions`)).toBe(window);
-  });
+  test.each([...COMPLETION_WINDOWS] as CompletionWindow[])(
+    "extracts '%s' from /%s/v1/chat/completions",
+    (window) => {
+      expect(extractWindowPrefix(`/${window}/v1/chat/completions`)).toBe(
+        window,
+      );
+    },
+  );
 
   test("returns null for unprefixed /v1/ paths", () => {
     expect(extractWindowPrefix("/v1/chat/completions")).toBeNull();
@@ -88,7 +96,12 @@ describe("resolveCompletionWindow", () => {
   });
 
   test("header with empty string falls through to metadata", () => {
-    const result = resolveCompletionWindow(null, "", { completion_window: "flex" }, "standard");
+    const result = resolveCompletionWindow(
+      null,
+      "",
+      { completion_window: "flex" },
+      "standard",
+    );
     expect(result).toEqual({ window: "flex", source: "metadata" });
   });
 });

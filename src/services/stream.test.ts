@@ -1,9 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import {
-  splitIntoChunks,
-  formatSSE,
-  streamResponse,
-} from "./stream.ts";
+import { splitIntoChunks, formatSSE, streamResponse } from "./stream.ts";
 
 describe("splitIntoChunks", () => {
   test("returns single chunk for short text", () => {

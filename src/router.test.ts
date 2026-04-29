@@ -90,14 +90,20 @@ describe("handleWindowPrefixedRoute", () => {
     expect(handleWindowPrefixedRoute(req, mockPoller)).not.toBeNull();
   });
 
-  test.each(windows)("detects /%s/v1/chat/completions as window-prefixed", (window) => {
-    const req = new Request(`http://localhost/${window}/v1/chat/completions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: "test", messages: [] }),
-    });
-    expect(handleWindowPrefixedRoute(req, mockPoller)).not.toBeNull();
-  });
+  test.each(windows)(
+    "detects /%s/v1/chat/completions as window-prefixed",
+    (window) => {
+      const req = new Request(
+        `http://localhost/${window}/v1/chat/completions`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ model: "test", messages: [] }),
+        },
+      );
+      expect(handleWindowPrefixedRoute(req, mockPoller)).not.toBeNull();
+    },
+  );
 
   test("returns 404 for window-prefixed unknown /v1/ path", async () => {
     const req = new Request("http://localhost/flex/v1/nonexistent", {

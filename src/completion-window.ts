@@ -9,7 +9,9 @@ export const COMPLETION_WINDOWS: readonly CompletionWindow[] = [
 ];
 
 /** Check if a string is a valid CompletionWindow value. */
-export function isValidCompletionWindow(value: string): value is CompletionWindow {
+export function isValidCompletionWindow(
+  value: string,
+): value is CompletionWindow {
   return (COMPLETION_WINDOWS as readonly string[]).includes(value);
 }
 
@@ -41,10 +43,16 @@ export function resolveCompletionWindow(
   header: string | null,
   bodyMetadata: { completion_window?: string } | undefined,
   defaultWindow: CompletionWindow,
-): { window: CompletionWindow; source: "prefix" | "header" | "metadata" | "default" } {
+): {
+  window: CompletionWindow;
+  source: "prefix" | "header" | "metadata" | "default";
+} {
   if (urlPrefix) return { window: urlPrefix, source: "prefix" };
   if (header) return { window: header as CompletionWindow, source: "header" };
   if (bodyMetadata?.completion_window)
-    return { window: bodyMetadata.completion_window as CompletionWindow, source: "metadata" };
+    return {
+      window: bodyMetadata.completion_window as CompletionWindow,
+      source: "metadata",
+    };
   return { window: defaultWindow, source: "default" };
 }

@@ -72,9 +72,10 @@ function messagesToResponsesInput(messages: any[]): any[] {
       items.push({
         type: "function_call_output",
         call_id: msg.tool_call_id,
-        output: typeof msg.content === "string"
-          ? msg.content
-          : JSON.stringify(msg.content ?? ""),
+        output:
+          typeof msg.content === "string"
+            ? msg.content
+            : JSON.stringify(msg.content ?? ""),
       });
       continue;
     }
@@ -92,7 +93,8 @@ function messagesToResponsesInput(messages: any[]): any[] {
           type: "function_call",
           call_id: call?.id,
           name: call?.function?.name,
-          arguments: typeof args === "string" ? args : JSON.stringify(args ?? {}),
+          arguments:
+            typeof args === "string" ? args : JSON.stringify(args ?? {}),
         });
       }
       continue;

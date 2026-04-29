@@ -75,10 +75,7 @@ export async function handleBatching(
 
   const timeoutPromise = new Promise<{ ok: false; error: "timeout" }>(
     (resolve) =>
-      setTimeout(
-        () => resolve({ ok: false, error: "timeout" }),
-        timeoutMs,
-      ),
+      setTimeout(() => resolve({ ok: false, error: "timeout" }), timeoutMs),
   );
 
   const outcome = await Promise.race([resultPromise, timeoutPromise]);

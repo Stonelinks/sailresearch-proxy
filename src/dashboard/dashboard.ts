@@ -8,11 +8,15 @@ let paused = false;
 
 const tbody = document.getElementById("jobs-body") as HTMLTableSectionElement;
 const lastUpdatedEl = document.getElementById("last-updated")!;
-const toggleBtn = document.getElementById("toggle-refresh") as HTMLButtonElement;
+const toggleBtn = document.getElementById(
+  "toggle-refresh",
+) as HTMLButtonElement;
 const prevBtn = document.getElementById("prev-page") as HTMLButtonElement;
 const nextBtn = document.getElementById("next-page") as HTMLButtonElement;
 const pageInfo = document.getElementById("page-info")!;
-const statusFilter = document.getElementById("status-filter") as HTMLSelectElement;
+const statusFilter = document.getElementById(
+  "status-filter",
+) as HTMLSelectElement;
 
 interface Job {
   id: string;
@@ -110,7 +114,11 @@ function shortModel(model: string): string {
 }
 
 function esc(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 function startRefresh() {

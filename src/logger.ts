@@ -19,7 +19,8 @@ export function getLogLevel(): Level {
 
 function emit(level: Level, args: unknown[]) {
   if (ORDER[level] < ORDER[currentLevel]) return;
-  const sink = level === "error" || level === "warn" ? console.error : console.log;
+  const sink =
+    level === "error" || level === "warn" ? console.error : console.log;
   sink(...args);
 }
 

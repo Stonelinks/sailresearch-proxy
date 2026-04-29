@@ -119,7 +119,7 @@ describe("responsesToChatCompletion", () => {
         {
           type: "function_call",
           id: "call_legacy",
-          function: { name: "fn", arguments: '{}' },
+          function: { name: "fn", arguments: "{}" },
         },
       ],
     });

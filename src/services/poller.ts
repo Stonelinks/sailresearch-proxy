@@ -61,7 +61,12 @@ export class Poller {
       where: {
         status: { notIn: ["completed", "failed", "cancelled"] },
       },
-      select: { id: true, sailResponseId: true, completionWindow: true, createdAt: true },
+      select: {
+        id: true,
+        sailResponseId: true,
+        completionWindow: true,
+        createdAt: true,
+      },
     });
 
     for (const job of activeJobs) {
@@ -73,11 +78,22 @@ export class Poller {
         );
         await this.prisma.pendingJob.update({
           where: { id: job.id },
-          data: { status: "failed", errorBody: JSON.stringify({ error: { message: `Job timed out after ${timeoutMs}ms (window: ${job.completionWindow})` } }) },
+          data: {
+            status: "failed",
+            errorBody: JSON.stringify({
+              error: {
+                message: `Job timed out after ${timeoutMs}ms (window: ${job.completionWindow})`,
+              },
+            }),
+          },
         });
         const waiter = this.waiters.get(job.sailResponseId);
         if (waiter) {
-          waiter.reject({ error: { message: `Job timed out after ${timeoutMs}ms (window: ${job.completionWindow})` } });
+          waiter.reject({
+            error: {
+              message: `Job timed out after ${timeoutMs}ms (window: ${job.completionWindow})`,
+            },
+          });
           this.waiters.delete(job.sailResponseId);
         }
       }

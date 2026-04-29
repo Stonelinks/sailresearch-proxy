@@ -58,9 +58,7 @@ export async function handleChatCompletions(
       body.metadata,
       config.defaults.completionWindow,
     );
-  log.debug(
-    `[req] window=${completionWindow} source=${windowSource}`,
-  );
+  log.debug(`[req] window=${completionWindow} source=${windowSource}`);
 
   if (completionWindow === "asap") {
     log.debug("[req] dispatching to passthrough");
