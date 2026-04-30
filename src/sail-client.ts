@@ -54,4 +54,11 @@ export const sail = {
   listModels() {
     return request("/models");
   },
+
+  createMessage(body: any) {
+    return request("/messages", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
 };

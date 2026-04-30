@@ -5,6 +5,7 @@ import type { Poller } from "./services/poller.ts";
 import type { CompletionWindow } from "./types.ts";
 import { handleChatCompletions } from "./routes/chat-completions.ts";
 import { handleModels } from "./routes/models.ts";
+import { handleMessages } from "./routes/messages.ts";
 
 /**
  * Dispatch a request to the appropriate route handler based on pathname.
@@ -20,6 +21,9 @@ export function dispatchRoute(
   }
   if (pathname === "/v1/models" && req.method === "GET") {
     return handleModels();
+  }
+  if (pathname === "/v1/messages" && req.method === "POST") {
+    return handleMessages(req);
   }
   return openAIError(404, "Not found", "invalid_request_error");
 }

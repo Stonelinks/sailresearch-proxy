@@ -3,6 +3,7 @@ import { log } from "./logger.ts";
 import { Poller } from "./services/poller.ts";
 import { handleChatCompletions } from "./routes/chat-completions.ts";
 import { handleModels } from "./routes/models.ts";
+import { handleMessages } from "./routes/messages.ts";
 import { handleDashboardJobs } from "./routes/dashboard-api.ts";
 import { openAIError } from "./errors.ts";
 import dashboard from "./dashboard/dashboard.html";
@@ -40,6 +41,18 @@ export function createApp(prisma: PrismaClient, port?: number): AppServer {
       },
       "/v1/models": {
         GET: () => handleModels(),
+      },
+      "/v1/messages": {
+        POST: (req) => {
+          const start = Date.now();
+          log.info(`[req] POST /v1/messages`);
+          return handleMessages(req).then((res) => {
+            log.info(
+              `[res] POST /v1/messages ${res.status} ${Date.now() - start}ms`,
+            );
+            return res;
+          });
+        },
       },
       "/health": new Response("ok"),
       "/dashboard": dashboard,
