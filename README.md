@@ -117,6 +117,8 @@ response = client.chat.completions.create(
 
 - `POST /v1/chat/completions` — chat completions (sync and streaming)
 - `POST /<window>/v1/chat/completions` — same, with window prefilled (e.g. `/flex/v1/chat/completions`)
+- `POST /v1/messages` — Anthropic Messages API (Alpha)
+- `POST /<window>/v1/messages` — same, with window prefilled
 - `GET /v1/models` — list available models
 - `GET /<window>/v1/models` — same, with window prefilled
 - `GET /health` — health check
@@ -127,7 +129,108 @@ response = client.chat.completions.create(
 - `stream` is handled by the proxy — Sail receives a non-streaming request regardless
 - In batching mode, the OpenAI chat format is transformed to Sail's Responses API format and the result is transformed back
 
-**Supported features:** temperature, top_p, tools/tool_choice, response_format (json_schema, json_object), reasoning_effort, user.
+**Supported features:** temperature, top_p, tools/tool_choice, response_format (json_schema, json_object), reasoning_effort, user, **image input**.
+
+## Image Input
+
+Send images to multimodal models via the OpenAI `image_url` content part or the Anthropic `image` content block. Images are accepted as HTTP(S) URLs or base64 data URIs.
+
+**Supported models:** See [Sail's supported models](https://docs.sailresearch.com/supported-models) for multimodal capability flags. Currently `moonshotai/Kimi-K2.5`.
+
+**Limits:** Max 20 images per request, max 20 MB per image. Formats: JPEG, PNG, WebP, GIF.
+
+### OpenAI format (chat completions)
+
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:4000/v1", api_key="anything")
+
+response = client.chat.completions.create(
+    model="moonshotai/Kimi-K2.5",
+    messages=[
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "What's in this image?"},
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": "https://example.com/cat.jpg",
+                        "detail": "auto",  # optional: "auto" | "low" | "high"
+                    },
+                },
+            ],
+        }
+    ],
+)
+```
+
+Data URIs are also accepted:
+
+```python
+import base64
+
+b64 = base64.b64encode(open("cat.jpg", "rb").read()).decode()
+response = client.chat.completions.create(
+    model="moonshotai/Kimi-K2.5",
+    messages=[
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "Describe this image"},
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
+            ],
+        }
+    ],
+)
+```
+
+### Anthropic format (messages)
+
+```python
+import anthropic
+
+client = anthropic.Anthropic(
+    auth_token="your-sail-api-key",  # Use auth_token, not api_key
+    base_url="http://localhost:4000",
+)
+
+# URL source
+response = client.messages.create(
+    model="moonshotai/Kimi-K2.5",
+    max_tokens=1024,
+    messages=[
+        {
+            "role": "user",
+            "content": [
+                {"type": "image", "source": {"type": "url", "url": "https://example.com/cat.jpg"}},
+                {"type": "text", "text": "What's in this image?"},
+            ],
+        }
+    ],
+)
+
+# Base64 source
+response = client.messages.create(
+    model="moonshotai/Kimi-K2.5",
+    max_tokens=1024,
+    messages=[
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "image",
+                    "source": {"type": "base64", "media_type": "image/jpeg", "data": b64},
+                },
+                {"type": "text", "text": "What's in this image?"},
+            ],
+        }
+    ],
+)
+```
+
+**How it works:** In passthrough mode (`asap`), image content parts are forwarded to Sail's native API as-is. In batching mode (`priority`/`standard`/`flex`), the proxy transforms OpenAI `image_url` and Anthropic `image` blocks into Sail's `input_image` format for the Responses API.
 
 ## Scripts
 
@@ -180,14 +283,14 @@ check               # format + typecheck + unit tests
 test-integration     # live tests against Sail API
 ```
 
-The integration test suite starts an isolated proxy on port 4111, runs 16 tests covering passthrough, batching, streaming, the Python `openai` client, and error handling, then tears down.
+The integration test suite starts an isolated proxy on a random port, runs tests covering passthrough, batching, streaming, the Python `openai` client, image input, and error handling, then tears down.
 
 ## Architecture
 
 The proxy has two modes based on completion window:
 
-- **Passthrough** (`asap`): Forwards directly to Sail's `/v1/chat/completions` endpoint. Synchronous round-trip.
-- **Batching** (`priority` / `standard` / `flex`): Submits to Sail's `/v1/responses` API with `background: true`, persists the job handle to SQLite via Prisma, and polls with exponential backoff until the result is ready. The HTTP connection is held open until completion or timeout. Each window has its own timeout (5 min / 15 min / 60 min by default), so the proxy returns a 504 quickly for latency-sensitive windows while giving flex jobs ample time.
+- **Passthrough** (`asap`): Forwards directly to Sail's `/v1/chat/completions` or `/v1/messages` endpoint. Synchronous round-trip. Image content parts are forwarded as-is.
+- **Batching** (`priority` / `standard` / `flex`): Submits to Sail's `/v1/responses` API with `background: true`, persists the job handle to SQLite via Prisma, and polls with exponential backoff until the result is ready. The HTTP connection is held open until completion or timeout. Each window has its own timeout (5 min / 15 min / 60 min by default), so the proxy returns a 504 quickly for latency-sensitive windows while giving flex jobs ample time. OpenAI `image_url` and Anthropic `image` content blocks are transformed to Sail's `input_image` format.
 
 SQLite persistence means in-flight jobs survive proxy restarts. On startup, the poller resumes polling any incomplete jobs from the previous run. Jobs that exceed their window-specific timeout are automatically expired by the poller, even if they were orphaned by a restart.
 
