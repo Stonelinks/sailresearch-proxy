@@ -1,63 +1,70 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Sail Proxy Dashboard</title>
-  <link rel="stylesheet" href="./dashboard.css" />
-</head>
-<body>
-  <div class="container">
-    <header>
-      <h1>Sail Proxy Dashboard</h1>
-      <p class="subtitle">Batched requests only &mdash; passthrough (asap) requests are not tracked.</p>
-    </header>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sail Proxy Dashboard</title>
+    <link rel="stylesheet" href="./dashboard.css" />
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <h1>Sail Proxy Dashboard</h1>
+        <p class="subtitle">
+          Batched requests only &mdash; passthrough (asap) requests are not
+          tracked.
+        </p>
+      </header>
 
-    <div class="controls">
-      <div class="controls-left">
-        <label for="status-filter">Status:</label>
-        <select id="status-filter">
-          <option value="">All</option>
-          <option value="pending">Pending</option>
-          <option value="queued">Queued</option>
-          <option value="running">Running</option>
-          <option value="completed">Completed</option>
-          <option value="failed">Failed</option>
-          <option value="cancelled">Cancelled</option>
-        </select>
+      <div class="controls">
+        <div class="controls-left">
+          <label for="status-filter">Status:</label>
+          <select id="status-filter">
+            <option value="">All</option>
+            <option value="pending">Pending</option>
+            <option value="queued">Queued</option>
+            <option value="running">Running</option>
+            <option value="completed">Completed</option>
+            <option value="failed">Failed</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+        </div>
+        <div class="controls-right">
+          <span id="last-updated"></span>
+          <button id="toggle-refresh" title="Pause/resume auto-refresh">
+            Pause
+          </button>
+        </div>
       </div>
-      <div class="controls-right">
-        <span id="last-updated"></span>
-        <button id="toggle-refresh" title="Pause/resume auto-refresh">Pause</button>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Status</th>
+              <th>Model</th>
+              <th>Window</th>
+              <th>Created</th>
+              <th>Duration</th>
+              <th>Polls</th>
+              <th>ID</th>
+            </tr>
+          </thead>
+          <tbody id="jobs-body">
+            <tr>
+              <td colspan="7" class="empty">Loading&hellip;</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="pagination">
+        <button id="prev-page" disabled>Prev</button>
+        <span id="page-info"></span>
+        <button id="next-page" disabled>Next</button>
       </div>
     </div>
 
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Status</th>
-            <th>Model</th>
-            <th>Window</th>
-            <th>Created</th>
-            <th>Duration</th>
-            <th>Polls</th>
-            <th>ID</th>
-          </tr>
-        </thead>
-        <tbody id="jobs-body">
-          <tr><td colspan="7" class="empty">Loading&hellip;</td></tr>
-        </tbody>
-      </table>
-    </div>
-
-    <div class="pagination">
-      <button id="prev-page" disabled>Prev</button>
-      <span id="page-info"></span>
-      <button id="next-page" disabled>Next</button>
-    </div>
-  </div>
-
-  <script type="module" src="./dashboard.ts"></script>
-</body>
+    <script type="module" src="./dashboard.ts"></script>
+  </body>
 </html>

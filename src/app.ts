@@ -4,6 +4,7 @@ import { Poller } from "./services/poller.ts";
 import { handleChatCompletions } from "./routes/chat-completions.ts";
 import { handleModels } from "./routes/models.ts";
 import { handleMessages } from "./routes/messages.ts";
+import { handleResponses } from "./routes/responses.ts";
 import { handleDashboardJobs } from "./routes/dashboard-api.ts";
 import { openAIError } from "./errors.ts";
 import dashboard from "./dashboard/dashboard.html";
@@ -46,9 +47,21 @@ export function createApp(prisma: PrismaClient, port?: number): AppServer {
         POST: (req) => {
           const start = Date.now();
           log.info(`[req] POST /v1/messages`);
-          return handleMessages(req).then((res) => {
+          return handleMessages(req, poller).then((res) => {
             log.info(
               `[res] POST /v1/messages ${res.status} ${Date.now() - start}ms`,
+            );
+            return res;
+          });
+        },
+      },
+      "/v1/responses": {
+        POST: (req) => {
+          const start = Date.now();
+          log.info(`[req] POST /v1/responses`);
+          return handleResponses(req, poller).then((res) => {
+            log.info(
+              `[res] POST /v1/responses ${res.status} ${Date.now() - start}ms`,
             );
             return res;
           });

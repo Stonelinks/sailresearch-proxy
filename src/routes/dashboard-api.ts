@@ -23,6 +23,7 @@ export async function handleDashboardJobs(req: Request): Promise<Response> {
         status: true,
         model: true,
         completionWindow: true,
+        apiType: true,
         createdAt: true,
         completedAt: true,
         pollCount: true,
@@ -38,6 +39,7 @@ export async function handleDashboardJobs(req: Request): Promise<Response> {
     status: job.status,
     model: job.model,
     completionWindow: job.completionWindow,
+    apiType: job.apiType,
     createdAt: job.createdAt.toISOString(),
     completedAt: job.completedAt?.toISOString() ?? null,
     durationMs: job.completedAt

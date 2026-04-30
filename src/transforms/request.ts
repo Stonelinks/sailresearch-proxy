@@ -70,7 +70,7 @@ function toResponsesTool(tool: any): any {
 //   - Anthropic image      → {type: "input_image", image_url} (base64 → data URI)
 //   - Sail input_image     → pass through unchanged
 //   - OpenAI text          → {type: "input_text", text}
-function messagesToResponsesInput(messages: any[]): any[] {
+export function messagesToResponsesInput(messages: any[]): any[] {
   const items: any[] = [];
   for (const msg of messages) {
     if (msg?.role === "tool") {

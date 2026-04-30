@@ -8,12 +8,15 @@ import { responsesToChatCompletion } from "../transforms/response.ts";
 import { streamResponse } from "./stream.ts";
 import type { Poller } from "./poller.ts";
 import type { CompletionWindow } from "../types.ts";
+import type { PrismaClient } from "@prisma/client";
 
 export async function handleBatching(
   body: any,
   completionWindow: CompletionWindow,
   wantsStream: boolean,
   poller: Poller,
+  apiType: "chat-completions" | "messages" | "responses" = "chat-completions",
+  db: PrismaClient = prisma,
 ): Promise<Response> {
   // Transform OpenAI chat completion request → Sail Responses API
   const sailBody = chatToResponsesAPI(body, completionWindow);
@@ -53,13 +56,14 @@ export async function handleBatching(
   log.debug(
     `[batch] persisting job id=${sailResponseId} model=${body.model} window=${completionWindow}`,
   );
-  await prisma.pendingJob.create({
+  await db.pendingJob.create({
     data: {
       sailResponseId,
       status: data.status ?? "pending",
       requestBody: JSON.stringify(body),
       model: body.model ?? config.defaults.model,
       completionWindow,
+      apiType,
     },
   });
 

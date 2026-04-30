@@ -54,6 +54,13 @@ describe("dispatchRoute", () => {
     const res = result instanceof Promise ? await result : result;
     expect(res.status).toBe(404);
   });
+
+  test("returns 404 for GET /v1/responses (wrong method)", async () => {
+    const req = new Request("http://localhost/v1/responses", { method: "GET" });
+    const result = dispatchRoute(req, "/v1/responses", mockPoller);
+    const res = result instanceof Promise ? await result : result;
+    expect(res.status).toBe(404);
+  });
 });
 
 // --- Tests for handleWindowPrefixedRoute ---
@@ -124,6 +131,21 @@ describe("handleWindowPrefixedRoute", () => {
     });
     expect(handleWindowPrefixedRoute(req, mockPoller)).not.toBeNull();
   });
+
+  test.each(windows)(
+    "detects /%s/v1/responses as window-prefixed",
+    (window) => {
+      const req = new Request(`http://localhost/${window}/v1/responses`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "test",
+          input: "hello",
+        }),
+      });
+      expect(handleWindowPrefixedRoute(req, mockPoller)).not.toBeNull();
+    },
+  );
 
   test("returns 404 for window-prefixed unknown /v1/ path", async () => {
     const req = new Request("http://localhost/flex/v1/nonexistent", {

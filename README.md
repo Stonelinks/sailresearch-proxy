@@ -1,6 +1,6 @@
 # sailresearch-proxy
 
-OpenAI-compatible proxy for [Sail Research](https://docs.sailresearch.com/). Translates standard `/v1/chat/completions` requests into Sail's async completion window API, letting any OpenAI client use Sail without modification.
+OpenAI-compatible proxy for [Sail Research](https://docs.sailresearch.com/). Translates standard `/v1/chat/completions`, `/v1/messages`, and `/v1/responses` requests into Sail's async completion window API, letting any OpenAI, Anthropic, or Sail-native client use Sail without modification.
 
 ## Setup
 
@@ -45,6 +45,41 @@ for chunk in stream:
     print(chunk.choices[0].delta.content or "", end="")
 ```
 
+Or use the Anthropic SDK:
+
+```python
+from anthropic import Anthropic
+
+client = Anthropic(
+    auth_token="your-sail-api-key",  # Use auth_token, not api_key
+    base_url="http://localhost:4000",
+)
+
+response = client.messages.create(
+    model="deepseek-ai/DeepSeek-V3.2",
+    max_tokens=1024,
+    messages=[{"role": "user", "content": "Hello!"}],
+)
+```
+
+Or call the Sail Responses API directly:
+
+```python
+import requests
+
+response = requests.post(
+    "http://localhost:4000/v1/responses",
+    headers={
+        "Authorization": "Bearer your-sail-api-key",
+        "Content-Type": "application/json",
+    },
+    json={
+        "model": "deepseek-ai/DeepSeek-V3.2",
+        "input": "Hello!",
+    },
+)
+```
+
 ## Completion Windows
 
 Control the latency/cost tradeoff via `metadata.completion_window` in the request body, or the `X-Completion-Window` header. See https://docs.sailresearch.com/completion-windows for tier details.
@@ -72,7 +107,7 @@ client.chat.completions.create(
 )
 ```
 
-Streaming is supported in all modes. Since Sail does not support server-sent events natively, the proxy receives the complete response and emits simulated SSE chunks.
+Streaming is supported for chat completions in all modes. Since Sail does not support server-sent events natively, the proxy receives the complete response and emits simulated SSE chunks.
 
 You can also use [window-prefixed routes](#window-prefixed-routes) to pin a client to a specific window via the base URL.
 
@@ -85,12 +120,16 @@ Every `/v1/*` endpoint is also available under a window prefix, so you can pin a
 /priority/v1/chat/completions
 /standard/v1/chat/completions
 /flex/v1/chat/completions
+/asap/v1/messages
+/flex/v1/messages
+/asap/v1/responses
+/flex/v1/responses
 /asap/v1/models
 /flex/v1/models
 ...etc
 ```
 
-The easiest way to use this is to point your OpenAI client at the prefixed base URL:
+The easiest way to use this is to point your client at the prefixed base URL:
 
 ```python
 from openai import OpenAI
@@ -100,6 +139,22 @@ client = OpenAI(base_url="http://localhost:4000/flex/v1", api_key="anything")
 
 response = client.chat.completions.create(
     model="deepseek-ai/DeepSeek-V3.2",
+    messages=[{"role": "user", "content": "Hello!"}],
+)
+```
+
+```python
+from anthropic import Anthropic
+
+# All Anthropic requests use the flex window
+client = Anthropic(
+    auth_token="your-sail-api-key",
+    base_url="http://localhost:4000/flex",
+)
+
+response = client.messages.create(
+    model="deepseek-ai/DeepSeek-V3.2",
+    max_tokens=1024,
     messages=[{"role": "user", "content": "Hello!"}],
 )
 ```
@@ -115,21 +170,52 @@ response = client.chat.completions.create(
 
 **Endpoints:**
 
-- `POST /v1/chat/completions` — chat completions (sync and streaming)
-- `POST /<window>/v1/chat/completions` — same, with window prefilled (e.g. `/flex/v1/chat/completions`)
-- `POST /v1/messages` — Anthropic Messages API (Alpha)
-- `POST /<window>/v1/messages` — same, with window prefilled
-- `GET /v1/models` — list available models
-- `GET /<window>/v1/models` — same, with window prefilled
-- `GET /health` — health check
+| Endpoint | Description | Maturity |
+|----------|-------------|----------|
+| `POST /v1/chat/completions` | OpenAI Chat Completions (sync and streaming) | Full support |
+| `POST /v1/messages` | Anthropic Messages API | Full support (passthrough + batching) |
+| `POST /v1/responses` | Sail Responses API (native) | Full support (passthrough + batching) |
+| `GET /v1/models` | List available models | Full support |
+| `GET /health` | Health check | — |
+
+All endpoints also support window-prefixed variants (e.g. `/flex/v1/chat/completions`).
 
 **Field remapping:**
 
-- `max_tokens` is automatically remapped to `max_completion_tokens` (Sail does not accept the deprecated field)
+- `max_tokens` is automatically remapped to `max_completion_tokens` for chat completions (Sail does not accept the deprecated field)
 - `stream` is handled by the proxy — Sail receives a non-streaming request regardless
-- In batching mode, the OpenAI chat format is transformed to Sail's Responses API format and the result is transformed back
+- In batching mode, chat completions and messages are transformed to Sail's Responses API format and the result is transformed back
 
 **Supported features:** temperature, top_p, tools/tool_choice, response_format (json_schema, json_object), reasoning_effort, user, **image input**.
+
+### Chat Completions
+
+Full OpenAI Chat Completions compatibility. Supports all completion windows, streaming, tools, structured outputs, and image input.
+
+### Anthropic Messages
+
+The proxy accepts Anthropic Messages API requests at `POST /v1/messages`. This works with the official Anthropic SDK:
+
+- **`asap` window:** Forwards directly to Sail's native `/v1/messages` endpoint. No format transformation needed.
+- **Batched windows** (`priority`/`standard`/`flex`): Transforms the request to Sail's Responses API format, submits with `background: true`, polls until complete, then transforms the result back to Anthropic Messages format. Jobs appear on the dashboard with `apiType: "messages"`.
+
+**Auth:** The proxy accepts both `Authorization: Bearer <key>` and `x-api-key: <key>` headers. Use `auth_token` (not `api_key`) when initializing the Anthropic SDK:
+
+```python
+client = Anthropic(
+    auth_token="your-sail-api-key",  # sends Authorization: Bearer
+    base_url="http://localhost:4000",
+)
+```
+
+**Unsupported fields stripped automatically:** `system`, `thinking`, `tools`, `tool_choice`, `stop_sequences`, `top_k`, `stream`, `service_tier`, `inference_geo`. These are not supported by Sail's Messages API (Alpha) and will be removed from the request before forwarding.
+
+### Responses API
+
+The proxy supports Sail's native Responses API at `POST /v1/responses`. This is Sail's primary/stable API surface.
+
+- **`asap` window:** Forwards directly to Sail's `/v1/responses`.
+- **Batched windows:** Submits with `background: true`, creates a `pendingJob` with `apiType: "responses"`, polls until complete, returns the Responses API result as-is. No format transformation needed.
 
 ## Image Input
 
@@ -232,6 +318,18 @@ response = client.messages.create(
 
 **How it works:** In passthrough mode (`asap`), image content parts are forwarded to Sail's native API as-is. In batching mode (`priority`/`standard`/`flex`), the proxy transforms OpenAI `image_url` and Anthropic `image` blocks into Sail's `input_image` format for the Responses API.
 
+## Dashboard
+
+The built-in dashboard at `http://localhost:4000/dashboard` shows all batched jobs with their status, model, completion window, and timing. Each job's `apiType` field indicates which API surface was used:
+
+| `apiType` | API Surface |
+|-----------|-------------|
+| `chat-completions` | OpenAI Chat Completions (`/v1/chat/completions`) |
+| `messages` | Anthropic Messages (`/v1/messages`) |
+| `responses` | Sail Responses API (`/v1/responses`) |
+
+The dashboard API is available at `GET /api/dashboard/jobs`.
+
 ## Scripts
 
 All scripts are in `bin/` and available on `PATH` after `source env.sh`.
@@ -283,14 +381,20 @@ check               # format + typecheck + unit tests
 test-integration     # live tests against Sail API
 ```
 
-The integration test suite starts an isolated proxy on a random port, runs tests covering passthrough, batching, streaming, the Python `openai` client, image input, and error handling, then tears down.
+The integration test suite starts an isolated proxy on a random port, runs tests covering passthrough, batching, streaming, the Python `openai` and `anthropic` clients (via `uvx`), the Responses API, image input, and error handling, then tears down.
+
+Set `SAIL_SLOW_INTEGRATION=1` to also test batched windows (priority/standard/flex), which wait for Sail to process and can take several minutes each.
 
 ## Architecture
 
-The proxy has two modes based on completion window:
+The proxy supports three API surfaces, all with both passthrough and batching modes:
 
-- **Passthrough** (`asap`): Forwards directly to Sail's `/v1/chat/completions` or `/v1/messages` endpoint. Synchronous round-trip. Image content parts are forwarded as-is.
-- **Batching** (`priority` / `standard` / `flex`): Submits to Sail's `/v1/responses` API with `background: true`, persists the job handle to SQLite via Prisma, and polls with exponential backoff until the result is ready. The HTTP connection is held open until completion or timeout. Each window has its own timeout (5 min / 15 min / 60 min by default), so the proxy returns a 504 quickly for latency-sensitive windows while giving flex jobs ample time. OpenAI `image_url` and Anthropic `image` content blocks are transformed to Sail's `input_image` format.
+- **Passthrough** (`asap`): Forwards directly to the corresponding Sail endpoint (`/v1/chat/completions`, `/v1/messages`, or `/v1/responses`). Synchronous round-trip. Image content parts are forwarded as-is.
+- **Batching** (`priority` / `standard` / `flex`): Submits to Sail's `/v1/responses` API with `background: true`, persists the job handle to SQLite via Prisma, and polls with exponential backoff until the result is ready. The HTTP connection is held open until completion or timeout. Each window has its own timeout (5 min / 15 min / 60 min by default), so the proxy returns a 504 quickly for latency-sensitive windows while giving flex jobs ample time.
+
+For chat completions and messages, the proxy transforms the request to Sail's Responses API format and transforms the result back. For the Responses API, no transformation is needed — the body is submitted as-is.
+
+OpenAI `image_url` and Anthropic `image` content blocks are transformed to Sail's `input_image` format when going through the batching path.
 
 SQLite persistence means in-flight jobs survive proxy restarts. On startup, the poller resumes polling any incomplete jobs from the previous run. Jobs that exceed their window-specific timeout are automatically expired by the poller, even if they were orphaned by a restart.
 

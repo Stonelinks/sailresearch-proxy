@@ -13,6 +13,7 @@ model PendingJob {
   status           String    @default("pending")
   requestBody      String
   model            String
+  apiType          String    @default("chat-completions")
   completionWindow String
   responseBody     String?
   errorBody        String?

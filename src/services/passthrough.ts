@@ -51,3 +51,35 @@ export async function handlePassthrough(
 
   return Response.json(data);
 }
+
+/**
+ * Passthrough for the Responses API — forward directly to Sail's
+ * /v1/responses endpoint as-is. No format transformation needed.
+ */
+export async function handlePassthroughResponses(
+  body: any,
+  completionWindow: CompletionWindow,
+): Promise<Response> {
+  const sailBody: any = {
+    ...body,
+    metadata: {
+      ...body.metadata,
+      completion_window: completionWindow,
+    },
+  };
+  // Strip streaming — Sail doesn't support it on Responses API
+  delete sailBody.stream;
+
+  const { status, data } = await sail.createResponse(sailBody);
+  log.debug(`[passthrough-responses] sail status=${status}`);
+
+  if (status !== 200 && status !== 202) {
+    if (data?.error?.message) {
+      const outStatus = status >= 500 ? 502 : status;
+      return Response.json(data, { status: outStatus });
+    }
+    return mapSailError(status, data);
+  }
+
+  return Response.json(data);
+}
