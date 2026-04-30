@@ -65,6 +65,11 @@ function toResponsesTool(tool: any): any {
 // chat-style {role, content} shape). Tool-related messages are rewritten:
 //   - assistant.tool_calls[] → one {type: "function_call", call_id, name, arguments} per call
 //   - role: "tool"           → {type: "function_call_output", call_id, output}
+// Image content parts are transformed:
+//   - OpenAI image_url     → {type: "input_image", image_url, detail?}
+//   - Anthropic image      → {type: "input_image", image_url} (base64 → data URI)
+//   - Sail input_image     → pass through unchanged
+//   - OpenAI text          → {type: "input_text", text}
 function messagesToResponsesInput(messages: any[]): any[] {
   const items: any[] = [];
   for (const msg of messages) {
@@ -100,7 +105,109 @@ function messagesToResponsesInput(messages: any[]): any[] {
       continue;
     }
 
+    // If message content is an array, check for image parts that need transforming
+    if (Array.isArray(msg?.content)) {
+      const transformed = transformContentParts(msg.content);
+      const hasImageParts = transformed.some(
+        (p: any) =>
+          p.type === "input_image" ||
+          p.type === "image_url" ||
+          p.type === "image",
+      );
+      if (hasImageParts) {
+        // When images are present, emit a message with content array using
+        // Responses API types (input_text + input_image)
+        items.push({ role: msg.role, content: transformed });
+        continue;
+      }
+      // No images — pass through the original message as-is
+    }
+
     items.push(msg);
   }
   return items;
+}
+
+/**
+ * Transform content parts within a message's content array.
+ * - OpenAI `image_url` parts → Sail `input_image` parts
+ * - Anthropic `image` parts  → Sail `input_image` parts
+ * - OpenAI `text` parts      → Sail `input_text` parts
+ * - Sail `input_image`        → pass through
+ * - Sail `input_text`         → pass through
+ */
+function transformContentParts(parts: any[]): any[] {
+  return parts.map((part: any) => {
+    // Already in Sail Responses API format
+    if (part?.type === "input_image" || part?.type === "input_text") {
+      return part;
+    }
+
+    // OpenAI image_url format
+    if (part?.type === "image_url" && part.image_url) {
+      return imageUrlToInputImage(part);
+    }
+
+    // Anthropic image format
+    if (part?.type === "image" && part.source) {
+      return anthropicImageToInputImage(part);
+    }
+
+    // OpenAI text format → Sail input_text
+    if (part?.type === "text" && part.text !== undefined) {
+      return { type: "input_text", text: part.text };
+    }
+
+    // Unknown part — pass through
+    return part;
+  });
+}
+
+/**
+ * Convert OpenAI `image_url` content part to Sail `input_image`.
+ *
+ * OpenAI: { type: "image_url", image_url: { url: "...", detail?: "auto"|"low"|"high" } }
+ * Sail:   { type: "input_image", image_url: "...", detail?: "auto"|"low"|"high" }
+ */
+function imageUrlToInputImage(part: any): any {
+  const out: any = {
+    type: "input_image",
+    image_url: part.image_url.url,
+  };
+  if (part.image_url.detail) {
+    out.detail = part.image_url.detail;
+  }
+  return out;
+}
+
+/**
+ * Convert Anthropic `image` content block to Sail `input_image`.
+ *
+ * Anthropic URL source:
+ *   { type: "image", source: { type: "url", url: "https://..." } }
+ *   → { type: "input_image", image_url: "https://..." }
+ *
+ * Anthropic base64 source:
+ *   { type: "image", source: { type: "base64", media_type: "image/jpeg", data: "..." } }
+ *   → { type: "input_image", image_url: "data:image/jpeg;base64,..." }
+ */
+function anthropicImageToInputImage(part: any): any {
+  const source = part.source;
+  if (source?.type === "url") {
+    return {
+      type: "input_image",
+      image_url: source.url,
+    };
+  }
+
+  if (source?.type === "base64") {
+    const dataUri = `data:${source.media_type};base64,${source.data}`;
+    return {
+      type: "input_image",
+      image_url: dataUri,
+    };
+  }
+
+  // Fallback: pass through as-is
+  return part;
 }

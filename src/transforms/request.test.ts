@@ -298,3 +298,285 @@ describe("chatToResponsesAPI", () => {
     expect(result.n).toBeUndefined();
   });
 });
+
+describe("image content transforms", () => {
+  test("OpenAI image_url with URL → input_image with image_url", () => {
+    const result = chatToResponsesAPI(
+      {
+        model: "m",
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "What's in this image?" },
+              {
+                type: "image_url",
+                image_url: { url: "https://example.com/cat.jpg" },
+              },
+            ],
+          },
+        ],
+      },
+      "standard",
+    );
+
+    expect(result.input).toEqual([
+      {
+        role: "user",
+        content: [
+          { type: "input_text", text: "What's in this image?" },
+          {
+            type: "input_image",
+            image_url: "https://example.com/cat.jpg",
+          },
+        ],
+      },
+    ]);
+  });
+
+  test("OpenAI image_url with data URI → input_image with image_url (data URI)", () => {
+    const dataUri = "data:image/jpeg;base64,/9j/4AAQ";
+    const result = chatToResponsesAPI(
+      {
+        model: "m",
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "image_url",
+                image_url: { url: dataUri },
+              },
+            ],
+          },
+        ],
+      },
+      "standard",
+    );
+
+    expect(result.input).toEqual([
+      {
+        role: "user",
+        content: [{ type: "input_image", image_url: dataUri }],
+      },
+    ]);
+  });
+
+  test("OpenAI image_url with detail → input_image with detail", () => {
+    const result = chatToResponsesAPI(
+      {
+        model: "m",
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "image_url",
+                image_url: {
+                  url: "https://example.com/cat.jpg",
+                  detail: "high",
+                },
+              },
+            ],
+          },
+        ],
+      },
+      "standard",
+    );
+
+    expect(result.input).toEqual([
+      {
+        role: "user",
+        content: [
+          {
+            type: "input_image",
+            image_url: "https://example.com/cat.jpg",
+            detail: "high",
+          },
+        ],
+      },
+    ]);
+  });
+
+  test("Anthropic image with base64 source → input_image with data URI", () => {
+    const result = chatToResponsesAPI(
+      {
+        model: "m",
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "image",
+                source: {
+                  type: "base64",
+                  media_type: "image/jpeg",
+                  data: "b64data",
+                },
+              },
+              { type: "text", text: "Describe this" },
+            ],
+          },
+        ],
+      },
+      "standard",
+    );
+
+    expect(result.input).toEqual([
+      {
+        role: "user",
+        content: [
+          {
+            type: "input_image",
+            image_url: "data:image/jpeg;base64,b64data",
+          },
+          { type: "input_text", text: "Describe this" },
+        ],
+      },
+    ]);
+  });
+
+  test("Anthropic image with url source → input_image with image_url", () => {
+    const result = chatToResponsesAPI(
+      {
+        model: "m",
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "image",
+                source: {
+                  type: "url",
+                  url: "https://example.com/cat.jpg",
+                },
+              },
+            ],
+          },
+        ],
+      },
+      "standard",
+    );
+
+    expect(result.input).toEqual([
+      {
+        role: "user",
+        content: [
+          {
+            type: "input_image",
+            image_url: "https://example.com/cat.jpg",
+          },
+        ],
+      },
+    ]);
+  });
+
+  test("input_image blocks pass through unchanged", () => {
+    const result = chatToResponsesAPI(
+      {
+        model: "m",
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "input_text", text: "What is this?" },
+              {
+                type: "input_image",
+                image_url: "https://example.com/cat.jpg",
+                detail: "auto",
+              },
+            ],
+          },
+        ],
+      },
+      "standard",
+    );
+
+    expect(result.input).toEqual([
+      {
+        role: "user",
+        content: [
+          { type: "input_text", text: "What is this?" },
+          {
+            type: "input_image",
+            image_url: "https://example.com/cat.jpg",
+            detail: "auto",
+          },
+        ],
+      },
+    ]);
+  });
+
+  test("mixed content: text + image in same message", () => {
+    const result = chatToResponsesAPI(
+      {
+        model: "m",
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "Describe these:" },
+              {
+                type: "image_url",
+                image_url: { url: "https://example.com/a.jpg" },
+              },
+              {
+                type: "image",
+                source: {
+                  type: "base64",
+                  media_type: "image/png",
+                  data: "pngdata",
+                },
+              },
+            ],
+          },
+        ],
+      },
+      "standard",
+    );
+
+    expect(result.input).toEqual([
+      {
+        role: "user",
+        content: [
+          { type: "input_text", text: "Describe these:" },
+          { type: "input_image", image_url: "https://example.com/a.jpg" },
+          {
+            type: "input_image",
+            image_url: "data:image/png;base64,pngdata",
+          },
+        ],
+      },
+    ]);
+  });
+
+  test("string content with no images passes through unchanged", () => {
+    const result = chatToResponsesAPI(
+      {
+        model: "m",
+        messages: [{ role: "user", content: "Just text" }],
+      },
+      "standard",
+    );
+    expect(result.input).toEqual([{ role: "user", content: "Just text" }]);
+  });
+
+  test("array content with text-only parts passes through unchanged", () => {
+    const result = chatToResponsesAPI(
+      {
+        model: "m",
+        messages: [
+          {
+            role: "user",
+            content: [{ type: "text", text: "Hello" }],
+          },
+        ],
+      },
+      "standard",
+    );
+    // No image parts, so the original message passes through as-is
+    expect(result.input).toEqual([
+      { role: "user", content: [{ type: "text", text: "Hello" }] },
+    ]);
+  });
+});

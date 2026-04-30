@@ -43,6 +43,7 @@ function extractOutputText(output: any): string | null {
       if (item.type === "message" && Array.isArray(item.content)) {
         for (const part of item.content) {
           if (part.type === "output_text" && part.text) texts.push(part.text);
+          // input_image in output is echoed input, not new content — skip it
         }
       }
     }
