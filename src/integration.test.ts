@@ -44,6 +44,7 @@ const hasApiKey = !!process.env.SAIL_API_KEY;
 const runSlow = process.env.SAIL_SLOW_INTEGRATION === "1";
 
 const TEST_MODEL = "MiniMaxAI/MiniMax-M2.7";
+const IMAGE_MODEL = "moonshotai/Kimi-K2.5";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -229,6 +230,86 @@ describe.skipIf(!hasApiKey)("integration: proxy + Sail API", () => {
       const { exitCode, output } = await runPiSmoke("asap");
       expect(output).not.toContain("store=false");
       expect(exitCode).toBe(0);
+    }, 60_000);
+  });
+
+  // ── Image input tests (always run, uses asap/passthrough) ────────────────
+
+  describe("image input (asap passthrough)", () => {
+    test("chat completions with image_url returns 200", async () => {
+      const url = `${baseUrl}/asap/v1/chat/completions`;
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${process.env.SAIL_API_KEY || ""}`,
+        },
+        body: JSON.stringify({
+          model: IMAGE_MODEL,
+          messages: [
+            {
+              role: "user",
+              content: [
+                {
+                  type: "text",
+                  text: "What is in this image? Describe briefly.",
+                },
+                {
+                  type: "image_url",
+                  image_url: {
+                    url: "https://www.google.com/images/branding/googlelogo/2x/googlelogo_color_272x92dp.png",
+                  },
+                },
+              ],
+            },
+          ],
+          max_tokens: 64,
+          stream: false,
+        }),
+      });
+
+      expect(res.status).toBe(200);
+      const body: any = await res.json();
+      expect(body.choices?.[0]?.message?.content).toBeDefined();
+      expect(body.choices[0].message.content.length).toBeGreaterThan(0);
+    }, 60_000);
+
+    test("Anthropic messages with image returns 200", async () => {
+      const url = `${baseUrl}/asap/v1/messages`;
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${process.env.SAIL_API_KEY || ""}`,
+        },
+        body: JSON.stringify({
+          model: IMAGE_MODEL,
+          max_tokens: 64,
+          messages: [
+            {
+              role: "user",
+              content: [
+                {
+                  type: "image",
+                  source: {
+                    type: "url",
+                    url: "https://www.google.com/images/branding/googlelogo/2x/googlelogo_color_272x92dp.png",
+                  },
+                },
+                {
+                  type: "text",
+                  text: "What is in this image? Describe briefly.",
+                },
+              ],
+            },
+          ],
+        }),
+      });
+
+      expect(res.status).toBe(200);
+      const body: any = await res.json();
+      expect(body.content).toBeDefined();
+      expect(body.content.length).toBeGreaterThan(0);
     }, 60_000);
   });
 
