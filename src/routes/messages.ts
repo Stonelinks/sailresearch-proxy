@@ -5,6 +5,10 @@ import { resolveCompletionWindow } from "../completion-window.ts";
 import { config } from "../config.ts";
 import { messagesToResponsesAPI } from "../transforms/messages-request.ts";
 import { responsesToMessage } from "../transforms/messages-response.ts";
+import {
+  submitAndWait,
+  formatAnthropicError,
+} from "../services/batch-submit.ts";
 import type { Poller } from "../services/poller.ts";
 import type { CompletionWindow } from "../types.ts";
 import type { PrismaClient } from "@prisma/client";
@@ -156,8 +160,8 @@ async function handleMessagesPassthrough(
 
 /**
  * Batching: transform the Anthropic Messages request into Sail's Responses API
- * format, submit with background:true, create a pendingJob, poll until
- * complete, then transform the result back to Anthropic Messages format.
+ * format, submit with dedup-aware batch-submit, then transform the result
+ * back to Anthropic Messages format.
  */
 async function handleMessagesBatching(
   body: any,
@@ -183,113 +187,20 @@ async function handleMessagesBatching(
     `[batch-messages] transformed request keys=${Object.keys(sailBody).join(",")}`,
   );
 
-  // Submit to Sail Responses API
-  const { status, data } = await sail.createResponse(sailBody);
-  log.debug(
-    `[batch-messages] sail submit status=${status} id=${data?.id} sailStatus=${data?.status}`,
-  );
-
-  if (status !== 200 && status !== 202) {
-    // Try to return error in Anthropic-compatible format
-    if (data?.error) {
-      const outStatus = status >= 500 ? 502 : status;
-      return Response.json(
-        {
-          type: "error",
-          error: data.error,
-        },
-        { status: outStatus },
-      );
-    }
-    return openAIError(
-      status >= 500 ? 502 : status,
-      data?.message || `Sail API error: ${status}`,
-      "upstream_error",
-    );
-  }
-
-  // If Sail returned a completed response synchronously
-  if (data.status === "completed") {
-    log.info(
-      `[batch-messages] sail returned completed synchronously id=${data.id}`,
-    );
-    return Response.json(responsesToMessage(data));
-  }
-
-  const sailResponseId = data.id;
-
-  // Persist to DB
-  log.debug(
-    `[batch-messages] persisting job id=${sailResponseId} model=${body.model} window=${completionWindow}`,
-  );
-  await db.pendingJob.create({
-    data: {
-      sailResponseId,
-      status: data.status ?? "pending",
-      requestBody: JSON.stringify(body),
-      model: body.model ?? config.defaults.model,
-      completionWindow,
-      apiType: "messages",
-    },
+  const result = await submitAndWait({
+    sailBody,
+    completionWindow,
+    apiType: "messages",
+    originalRequestBody: body,
+    model: body.model ?? "unknown",
+    poller,
+    db,
+    logPrefix: "batch-messages",
   });
 
-  // Register in-memory waiter and await result with window-specific timeout
-  const timeoutMs = getTimeoutMs(completionWindow);
-  log.debug(
-    `[batch-messages] waiter registered id=${sailResponseId} window=${completionWindow} timeoutMs=${timeoutMs}`,
-  );
-  const resultPromise = poller
-    .registerWaiter(sailResponseId)
-    .then((result) => ({ ok: true as const, result }))
-    .catch((error) => ({ ok: false as const, error }));
-
-  const timeoutPromise = new Promise<{ ok: false; error: "timeout" }>(
-    (resolve) =>
-      setTimeout(() => resolve({ ok: false, error: "timeout" }), timeoutMs),
-  );
-
-  const outcome = await Promise.race([resultPromise, timeoutPromise]);
-  log.debug(`[batch-messages] outcome id=${sailResponseId} ok=${outcome.ok}`);
-
-  if (!outcome.ok) {
-    poller.unregisterWaiter(sailResponseId);
-    if (outcome.error === "timeout") {
-      log.warn(
-        `[batch-messages] timeout id=${sailResponseId} window=${completionWindow} ms=${timeoutMs}`,
-      );
-      return Response.json(
-        {
-          type: "error",
-          error: {
-            type: "timeout_error",
-            message: `Request timed out after ${timeoutMs}ms (window: ${completionWindow}). Job ${sailResponseId} is still processing on Sail.`,
-          },
-        },
-        { status: 504 },
-      );
-    }
-    // Sail returned a failed/cancelled status
-    const errData = outcome.error;
-    return Response.json(
-      {
-        type: "error",
-        error: {
-          type: "api_error",
-          message:
-            errData?.error?.message || `Sail request ${sailResponseId} failed`,
-        },
-      },
-      { status: 502 },
-    );
+  if (!result.ok) {
+    return formatAnthropicError(result.error);
   }
 
-  log.debug(
-    `[batch-messages] mapping responses → message id=${sailResponseId}`,
-  );
-  return Response.json(responsesToMessage(outcome.result));
-}
-
-function getTimeoutMs(window: CompletionWindow): number {
-  if (window === "asap") return 0;
-  return config.windowTimeouts[window];
+  return Response.json(responsesToMessage(result.data));
 }

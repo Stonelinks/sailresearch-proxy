@@ -22,10 +22,12 @@ mock.module("../sail-client.ts", () => ({
 
 // Mock prisma to avoid hitting real DB in unit tests
 const mockPrismaCreate = mock();
+const mockPrismaFindMany = mock().mockResolvedValue([]); // no existing jobs by default
 mock.module("../db.ts", () => ({
   prisma: {
     pendingJob: {
       create: mockPrismaCreate,
+      findMany: mockPrismaFindMany,
     },
   },
 }));
@@ -58,6 +60,7 @@ describe("handleMessages", () => {
     mockPoller.registerWaiter.mockReset();
     mockPoller.unregisterWaiter.mockReset();
     mockPrismaCreate.mockReset().mockResolvedValue({ id: "db_1" });
+    mockPrismaFindMany.mockReset().mockResolvedValue([]); // no dedup hits by default
   });
 
   test("returns 400 when model is missing", async () => {
@@ -547,6 +550,49 @@ describe("handleMessages", () => {
       const body: any = await res.json();
       expect(body.type).toBe("message");
       expect(body.content).toEqual([{ type: "text", text: "Instant reply" }]);
+    });
+
+    test("deduplicates: returns cached result for matching request without calling Sail", async () => {
+      const cachedResponse = {
+        id: "resp_dedup",
+        status: "completed",
+        model: "test-model",
+        output: [
+          {
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text: "Cached response" }],
+          },
+        ],
+        usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15 },
+      };
+      mockPrismaFindMany.mockResolvedValueOnce([
+        {
+          sailResponseId: "resp_dedup",
+          status: "completed",
+          responseBody: JSON.stringify(cachedResponse),
+        },
+      ]);
+
+      const req = makeMessagesRequest(
+        {
+          model: "test-model",
+          messages: [{ role: "user", content: "Hello" }],
+          max_tokens: 1024,
+        },
+        { "x-completion-window": "flex" },
+      );
+      const res = await handleMessages(req, mockPoller);
+
+      expect(res.status).toBe(200);
+      // Should NOT have called Sail
+      expect(mockCreateResponse).toHaveBeenCalledTimes(0);
+      // Should NOT have created a new DB row
+      expect(mockPrismaCreate).toHaveBeenCalledTimes(0);
+
+      const body: any = await res.json();
+      expect(body.type).toBe("message");
+      expect(body.content).toEqual([{ type: "text", text: "Cached response" }]);
     });
   });
 });

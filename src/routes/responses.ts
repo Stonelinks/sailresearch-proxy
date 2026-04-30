@@ -4,6 +4,7 @@ import { openAIError } from "../errors.ts";
 import { handlePassthroughResponses } from "../services/passthrough.ts";
 import { resolveCompletionWindow } from "../completion-window.ts";
 import { config } from "../config.ts";
+import { submitAndWait, formatOpenAIError } from "../services/batch-submit.ts";
 import type { Poller } from "../services/poller.ts";
 import type { CompletionWindow } from "../types.ts";
 import type { PrismaClient } from "@prisma/client";
@@ -108,95 +109,21 @@ async function handleBatchingResponses(
   // Strip fields that don't belong in the Responses API request
   delete sailBody.stream;
 
-  const { status, data } = await sail.createResponse(sailBody);
-  log.debug(
-    `[batch-responses] sail submit status=${status} id=${data?.id} sailStatus=${data?.status}`,
-  );
-
-  if (status !== 200 && status !== 202) {
-    return mapResponsesError(status, data);
-  }
-
-  // If Sail returned a completed response synchronously
-  if (data.status === "completed") {
-    log.info(
-      `[batch-responses] sail returned completed synchronously id=${data.id}`,
-    );
-    return Response.json(data);
-  }
-
-  const sailResponseId = data.id;
-
-  // Persist to DB
-  log.debug(
-    `[batch-responses] persisting job id=${sailResponseId} model=${body.model} window=${completionWindow}`,
-  );
-  await db.pendingJob.create({
-    data: {
-      sailResponseId,
-      status: data.status ?? "pending",
-      requestBody: JSON.stringify(body),
-      model: body.model ?? config.defaults.model,
-      completionWindow,
-      apiType: "responses",
-    },
+  const result = await submitAndWait({
+    sailBody,
+    completionWindow,
+    apiType: "responses",
+    originalRequestBody: body,
+    model: body.model ?? "unknown",
+    poller,
+    db,
+    logPrefix: "batch-responses",
   });
 
-  // Register in-memory waiter and await result with window-specific timeout
-  const timeoutMs = getTimeoutMs(completionWindow);
-  log.debug(
-    `[batch-responses] waiter registered id=${sailResponseId} window=${completionWindow} timeoutMs=${timeoutMs}`,
-  );
-  const resultPromise = poller
-    .registerWaiter(sailResponseId)
-    .then((result) => ({ ok: true as const, result }))
-    .catch((error) => ({ ok: false as const, error }));
-
-  const timeoutPromise = new Promise<{ ok: false; error: "timeout" }>(
-    (resolve) =>
-      setTimeout(() => resolve({ ok: false, error: "timeout" }), timeoutMs),
-  );
-
-  const outcome = await Promise.race([resultPromise, timeoutPromise]);
-  log.debug(`[batch-responses] outcome id=${sailResponseId} ok=${outcome.ok}`);
-
-  if (!outcome.ok) {
-    poller.unregisterWaiter(sailResponseId);
-    if (outcome.error === "timeout") {
-      log.warn(
-        `[batch-responses] timeout id=${sailResponseId} window=${completionWindow} ms=${timeoutMs}`,
-      );
-      return openAIError(
-        504,
-        `Request timed out after ${timeoutMs}ms (window: ${completionWindow}). Job ${sailResponseId} is still processing on Sail.`,
-        "timeout_error",
-      );
-    }
-    const errData = outcome.error;
-    return openAIError(
-      502,
-      errData?.error?.message || `Sail request ${sailResponseId} failed`,
-      "upstream_error",
-    );
+  if (!result.ok) {
+    return formatOpenAIError(result.error);
   }
 
   // Return the Responses API result as-is (no format transformation needed)
-  return Response.json(outcome.result);
-}
-
-function getTimeoutMs(window: CompletionWindow): number {
-  if (window === "asap") return 0;
-  return config.windowTimeouts[window];
-}
-
-function mapResponsesError(sailStatus: number, sailBody: any): Response {
-  if (sailBody?.error?.message) {
-    const status = sailStatus >= 500 ? 502 : sailStatus;
-    return Response.json(sailBody, { status });
-  }
-  return openAIError(
-    sailStatus >= 500 ? 502 : sailStatus,
-    sailBody?.message || `Sail API error: ${sailStatus}`,
-    sailBody?.type || "upstream_error",
-  );
+  return Response.json(result.data);
 }
