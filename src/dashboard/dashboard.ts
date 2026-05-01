@@ -1,5 +1,7 @@
+import { SECOND, MINUTE, HOUR, DAY } from "../time.ts";
+
 const PAGE_SIZE = 50;
-const REFRESH_INTERVAL = 5000;
+const REFRESH_INTERVAL = 5 * SECOND;
 
 let offset = 0;
 let total = 0;
@@ -87,23 +89,23 @@ function formatDuration(ms: number | null, status: string): string {
       return "--";
     return '<span style="opacity:0.5">in progress</span>';
   }
-  if (ms < 1000) return `${ms}ms`;
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  return `${m}m ${s % 60}s`;
+  if (ms < SECOND) return `${ms}ms`;
+  const s = Math.floor(ms / SECOND);
+  if (s < MINUTE / SECOND) return `${s}s`;
+  const m = Math.floor(s / (MINUTE / SECOND));
+  return `${m}m ${s % (MINUTE / SECOND)}s`;
 }
 
 function relativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
-  const s = Math.floor(diff / 1000);
+  const s = Math.floor(diff / SECOND);
   if (s < 5) return "just now";
-  if (s < 60) return `${s}s ago`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  const d = Math.floor(h / 24);
+  if (s < MINUTE / SECOND) return `${s}s ago`;
+  const m = Math.floor(s / (MINUTE / SECOND));
+  if (m < HOUR / MINUTE) return `${m}m ago`;
+  const h = Math.floor(m / (HOUR / MINUTE));
+  if (h < DAY / HOUR) return `${h}h ago`;
+  const d = Math.floor(h / (DAY / HOUR));
   return `${d}d ago`;
 }
 

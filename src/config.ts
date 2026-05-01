@@ -1,4 +1,11 @@
 import type { CompletionWindow } from "./types.ts";
+import {
+  SECOND,
+  MINUTE,
+  FIVE_MINUTES,
+  FIFTEEN_MINUTES,
+  SIXTY_MINUTES,
+} from "./time.ts";
 
 function env(key: string, fallback: string): string {
   return process.env[key] || fallback;
@@ -33,12 +40,12 @@ export const config = {
     model: env("DEFAULT_MODEL", "deepseek-ai/DeepSeek-V3.2"),
   },
   windowTimeouts: {
-    priority: intEnv("TIMEOUT_PRIORITY_MS", 300_000), // 5 min
-    standard: intEnv("TIMEOUT_STANDARD_MS", 900_000), // 15 min
-    flex: intEnv("TIMEOUT_FLEX_MS", 3_600_000), // 60 min
+    priority: intEnv("TIMEOUT_PRIORITY_MS", FIVE_MINUTES),
+    standard: intEnv("TIMEOUT_STANDARD_MS", FIFTEEN_MINUTES),
+    flex: intEnv("TIMEOUT_FLEX_MS", SIXTY_MINUTES),
   },
   polling: {
-    intervalMs: intEnv("POLL_INTERVAL_MS", 1000),
+    intervalMs: intEnv("POLL_INTERVAL_MS", SECOND),
     maxConcurrent: intEnv("MAX_CONCURRENT_POLLS", 10),
   },
   streaming: {
@@ -46,7 +53,7 @@ export const config = {
   },
   prune: {
     retentionDays: intEnv("PRUNE_RETENTION_DAYS", 180),
-    intervalMs: intEnv("PRUNE_INTERVAL_MS", 3_600_000), // 1 hour
+    intervalMs: intEnv("PRUNE_INTERVAL_MS", SIXTY_MINUTES),
   },
   logging: {
     level: env("LOG_LEVEL", "info"),

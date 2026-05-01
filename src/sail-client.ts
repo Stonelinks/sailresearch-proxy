@@ -1,5 +1,6 @@
 import { config } from "./config.ts";
 import { log } from "./logger.ts";
+import { now } from "./time.ts";
 
 async function request(
   path: string,
@@ -9,7 +10,7 @@ async function request(
   const bodyBytes =
     typeof init.body === "string" ? init.body.length : init.body ? -1 : 0;
   log.debug(`[sail] → ${method} ${path} bodyBytes=${bodyBytes}`);
-  const start = Date.now();
+  const start = now();
   const res = await fetch(`${config.sail.baseUrl}${path}`, {
     ...init,
     headers: {
@@ -19,7 +20,7 @@ async function request(
     },
   });
   const data: any = await res.json();
-  const ms = Date.now() - start;
+  const ms = now() - start;
   const respBytes = JSON.stringify(data).length;
   log.debug(
     `[sail] ← ${method} ${path} status=${res.status} ms=${ms} bodyBytes=${respBytes}`,

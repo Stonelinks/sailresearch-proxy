@@ -1,3 +1,5 @@
+import { toUnixSeconds, unixNow } from "../time.ts";
+
 export function responsesToChatCompletion(sailResp: any): any {
   const content = extractOutputText(sailResp.output);
   const toolCalls = extractToolCalls(sailResp.output);
@@ -10,8 +12,8 @@ export function responsesToChatCompletion(sailResp: any): any {
     id: sailResp.id,
     object: "chat.completion",
     created: sailResp.created_at
-      ? Math.floor(new Date(sailResp.created_at).getTime() / 1000)
-      : Math.floor(Date.now() / 1000),
+      ? toUnixSeconds(new Date(sailResp.created_at))
+      : unixNow(),
     model: sailResp.model,
     choices: [
       {

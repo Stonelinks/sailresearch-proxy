@@ -3,6 +3,7 @@ import { sail } from "../sail-client.ts";
 import { config, getTimeoutMs } from "../config.ts";
 import { log } from "../logger.ts";
 import { RecurringTask } from "./recurring-task.ts";
+import { now } from "../time.ts";
 import type { JobWaiter, CompletionWindow } from "../types.ts";
 
 export function getBackoffMs(pollCount: number): number {
@@ -43,7 +44,7 @@ export class Poller {
       this.waiters.set(sailResponseId, {
         resolve,
         reject,
-        createdAt: Date.now(),
+        createdAt: now(),
       });
     });
   }
@@ -195,7 +196,7 @@ export class Poller {
       data: {
         status: newStatus ?? job.status,
         pollCount: newPollCount,
-        nextPollAt: new Date(Date.now() + backoff),
+        nextPollAt: new Date(now() + backoff),
       },
     });
   }

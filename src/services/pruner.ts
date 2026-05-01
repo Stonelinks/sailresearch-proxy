@@ -2,6 +2,7 @@ import type { PrismaClient } from "@prisma/client";
 import { config } from "../config.ts";
 import { log } from "../logger.ts";
 import { RecurringTask } from "./recurring-task.ts";
+import { now, daysToMs } from "../time.ts";
 
 export class Pruner {
   private task: RecurringTask | null = null;
@@ -25,9 +26,7 @@ export class Pruner {
   }
 
   async prune() {
-    const cutoff = new Date(
-      Date.now() - config.prune.retentionDays * 24 * 60 * 60 * 1000,
-    );
+    const cutoff = new Date(now() - daysToMs(config.prune.retentionDays));
 
     try {
       const result = await this.prisma.pendingJob.deleteMany({

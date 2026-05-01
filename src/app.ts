@@ -1,5 +1,6 @@
 import { config } from "./config.ts";
 import { log } from "./logger.ts";
+import { now } from "./time.ts";
 import { Poller } from "./services/poller.ts";
 import { Pruner } from "./services/pruner.ts";
 import { handleChatCompletions } from "./routes/chat-completions.ts";
@@ -35,11 +36,11 @@ export function createApp(prisma: PrismaClient, port?: number): AppServer {
     routes: {
       "/v1/chat/completions": {
         POST: (req) => {
-          const start = Date.now();
+          const start = now();
           log.info(`[req] POST /v1/chat/completions`);
           return handleChatCompletions(req, poller).then((res) => {
             log.info(
-              `[res] POST /v1/chat/completions ${res.status} ${Date.now() - start}ms`,
+              `[res] POST /v1/chat/completions ${res.status} ${now() - start}ms`,
             );
             return res;
           });
@@ -50,11 +51,11 @@ export function createApp(prisma: PrismaClient, port?: number): AppServer {
       },
       "/v1/messages": {
         POST: (req) => {
-          const start = Date.now();
+          const start = now();
           log.info(`[req] POST /v1/messages`);
           return handleMessages(req, poller).then((res) => {
             log.info(
-              `[res] POST /v1/messages ${res.status} ${Date.now() - start}ms`,
+              `[res] POST /v1/messages ${res.status} ${now() - start}ms`,
             );
             return res;
           });
@@ -62,11 +63,11 @@ export function createApp(prisma: PrismaClient, port?: number): AppServer {
       },
       "/v1/responses": {
         POST: (req) => {
-          const start = Date.now();
+          const start = now();
           log.info(`[req] POST /v1/responses`);
           return handleResponses(req, poller).then((res) => {
             log.info(
-              `[res] POST /v1/responses ${res.status} ${Date.now() - start}ms`,
+              `[res] POST /v1/responses ${res.status} ${now() - start}ms`,
             );
             return res;
           });
