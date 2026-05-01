@@ -2,6 +2,7 @@ import type { PrismaClient } from "@prisma/client";
 import { sail } from "../sail-client.ts";
 import { config, getTimeoutMs } from "../config.ts";
 import { log } from "../logger.ts";
+import { RecurringTask } from "./recurring-task.ts";
 import type { JobWaiter, CompletionWindow } from "../types.ts";
 
 export function getBackoffMs(pollCount: number): number {
@@ -12,29 +13,29 @@ export function getBackoffMs(pollCount: number): number {
 }
 
 export class Poller {
-  private timer: ReturnType<typeof setInterval> | null = null;
+  private task: RecurringTask | null = null;
   private waiters = new Map<string, JobWaiter>();
   private activePollCount = 0;
 
   constructor(private prisma: PrismaClient) {}
 
   start() {
-    if (this.timer) return;
-    this.timer = setInterval(() => this.tick(), config.polling.intervalMs);
-    log.info("[poller] started");
+    if (this.task?.running) return;
+    this.task = new RecurringTask(
+      "poller",
+      () => this.tick(),
+      config.polling.intervalMs,
+    );
+    this.task.start();
   }
 
   stop() {
-    if (this.timer) {
-      clearInterval(this.timer);
-      this.timer = null;
-    }
+    this.task?.stop();
     // Reject all waiters
     for (const [id, waiter] of this.waiters) {
       waiter.reject(new Error("Poller stopped"));
     }
     this.waiters.clear();
-    log.info("[poller] stopped");
   }
 
   registerWaiter(sailResponseId: string): Promise<any> {

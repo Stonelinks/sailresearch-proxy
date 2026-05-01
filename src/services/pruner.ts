@@ -1,28 +1,27 @@
 import type { PrismaClient } from "@prisma/client";
 import { config } from "../config.ts";
 import { log } from "../logger.ts";
+import { RecurringTask } from "./recurring-task.ts";
 
 export class Pruner {
-  private timer: ReturnType<typeof setInterval> | null = null;
+  private task: RecurringTask | null = null;
 
   constructor(private prisma: PrismaClient) {}
 
   start() {
-    if (this.timer) return;
-    // Run once immediately, then on interval
-    this.prune();
-    this.timer = setInterval(() => this.prune(), config.prune.intervalMs);
-    log.info(
-      `[pruner] started (interval=${config.prune.intervalMs}ms retention=${config.prune.retentionDays}d)`,
+    if (this.task?.running) return;
+    this.task = new RecurringTask(
+      "pruner",
+      () => this.prune(),
+      config.prune.intervalMs,
+      { runImmediately: true },
     );
+    this.task.start();
+    log.info(`[pruner] retention=${config.prune.retentionDays}d`);
   }
 
   stop() {
-    if (this.timer) {
-      clearInterval(this.timer);
-      this.timer = null;
-    }
-    log.info("[pruner] stopped");
+    this.task?.stop();
   }
 
   async prune() {
