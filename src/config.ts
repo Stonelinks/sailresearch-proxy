@@ -44,6 +44,10 @@ export const config = {
   streaming: {
     chunkSize: intEnv("STREAM_CHUNK_SIZE", 20),
   },
+  prune: {
+    retentionDays: intEnv("PRUNE_RETENTION_DAYS", 180),
+    intervalMs: intEnv("PRUNE_INTERVAL_MS", 3_600_000), // 1 hour
+  },
   logging: {
     level: env("LOG_LEVEL", "info"),
   },

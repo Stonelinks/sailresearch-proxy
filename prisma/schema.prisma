@@ -26,4 +26,5 @@ model PendingJob {
 
   @@index([status, nextPollAt])
   @@index([sailBodyHash])
+  @@index([createdAt])
 }

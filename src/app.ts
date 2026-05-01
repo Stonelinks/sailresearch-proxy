@@ -1,6 +1,7 @@
 import { config } from "./config.ts";
 import { log } from "./logger.ts";
 import { Poller } from "./services/poller.ts";
+import { Pruner } from "./services/pruner.ts";
 import { handleChatCompletions } from "./routes/chat-completions.ts";
 import { handleModels } from "./routes/models.ts";
 import { handleMessages } from "./routes/messages.ts";
@@ -14,6 +15,7 @@ import type { PrismaClient } from "@prisma/client";
 export interface AppServer {
   server: ReturnType<typeof Bun.serve>;
   poller: Poller;
+  pruner: Pruner;
   prisma: PrismaClient;
   stop: () => Promise<void>;
 }
@@ -21,6 +23,9 @@ export interface AppServer {
 export function createApp(prisma: PrismaClient, port?: number): AppServer {
   const poller = new Poller(prisma);
   poller.start();
+
+  const pruner = new Pruner(prisma);
+  pruner.start();
 
   const server = Bun.serve({
     port: port ?? config.server.port,
@@ -96,10 +101,12 @@ export function createApp(prisma: PrismaClient, port?: number): AppServer {
   return {
     server,
     poller,
+    pruner,
     prisma,
     async stop() {
       log.info("[shutdown] stopping...");
       poller.stop();
+      pruner.stop();
       await prisma.$disconnect();
       server.stop();
     },
