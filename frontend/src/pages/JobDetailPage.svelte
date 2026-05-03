@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { fetchJob, type JobDetail } from "../api";
+  import { fetchJob, connectJobUpdates, type JobDetail } from "../api";
   import { log } from "$shared/logger.ts";
   import StatusBadge from "../components/StatusBadge.svelte";
   import RelativeTime from "../components/RelativeTime.svelte";
@@ -11,17 +11,54 @@
   let job: JobDetail | null = $state(null);
   let error = $state("");
   let activeTab = $state<"request" | "response" | "error">("request");
+  // Track whether the user has interacted with the tabs so a late-arriving
+  // response doesn't yank them off the tab they're reading.
+  let userPickedTab = $state(false);
 
-  onMount(async () => {
+  async function load() {
     try {
       log.debug("Loading job", params.id);
-      job = await fetchJob(params.id);
-      if (job.errorBody) activeTab = "error";
-      else if (job.responseBody) activeTab = "response";
+      const fresh = await fetchJob(params.id);
+      job = fresh;
+      if (!userPickedTab) {
+        if (fresh.errorBody) activeTab = "error";
+        else if (fresh.responseBody) activeTab = "response";
+      }
     } catch (e: any) {
       log.error("Failed to load job", params.id, ":", e);
       error = e.message ?? "Failed to load job";
     }
+  }
+
+  function pickTab(tab: "request" | "response" | "error") {
+    activeTab = tab;
+    userPickedTab = true;
+  }
+
+  onMount(() => {
+    load();
+    // Subscribe to job updates; refetch on any update for this job. The WS
+    // payload omits requestBody/responseBody/errorBody, so we need a full
+    // fetchJob to pick up bodies once the job completes. Also resync on
+    // reconnect in case we missed the terminal update while disconnected.
+    let firstConnect = true;
+    const disconnect = connectJobUpdates(
+      (updated) => {
+        if (updated.id === params.id) {
+          log.debug("Detail page got update for", params.id, "→", updated.status);
+          load();
+        }
+      },
+      () => {
+        if (!firstConnect) {
+          log.debug("WS reconnected, refetching job detail");
+          load();
+        }
+        firstConnect = false;
+      },
+    );
+
+    return () => disconnect();
   });
 
   function shortModel(model: string): string {
@@ -118,13 +155,13 @@
       <div class="flex border-b border-slate-200 bg-slate-50">
         <button
           class="px-4 py-2.5 text-sm font-medium transition-colors cursor-pointer {activeTab === 'request' ? 'text-slate-900 border-b-2 border-slate-900 bg-white' : 'text-slate-400 hover:text-slate-600'}"
-          onclick={() => (activeTab = 'request')}
+          onclick={() => pickTab('request')}
         >
           Request
         </button>
         <button
           class="px-4 py-2.5 text-sm font-medium transition-colors cursor-pointer {activeTab === 'response' ? 'text-slate-900 border-b-2 border-slate-900 bg-white' : 'text-slate-400 hover:text-slate-600'}"
-          onclick={() => (activeTab = 'response')}
+          onclick={() => pickTab('response')}
         >
           Response
           {#if job.responseBody}
@@ -133,7 +170,7 @@
         </button>
         <button
           class="px-4 py-2.5 text-sm font-medium transition-colors cursor-pointer {activeTab === 'error' ? 'text-slate-900 border-b-2 border-slate-900 bg-white' : 'text-slate-400 hover:text-slate-600'}"
-          onclick={() => (activeTab = 'error')}
+          onclick={() => pickTab('error')}
         >
           Error
           {#if job.errorBody}
