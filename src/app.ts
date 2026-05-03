@@ -1,12 +1,12 @@
 import { config } from "./config.ts";
 import { log } from "../shared/logger.ts";
-import { now } from "../shared/time.ts";
 import { Poller } from "./services/poller.ts";
 import { Pruner } from "./services/pruner.ts";
 import { handleChatCompletions } from "./routes/chat-completions.ts";
 import { handleModels } from "./routes/models.ts";
 import { handleMessages } from "./routes/messages.ts";
 import { handleResponses } from "./routes/responses.ts";
+import { wrapRouteLogging } from "./routes/parse-request.ts";
 import {
   handleDashboardJobs,
   handleDashboardJobDetail,
@@ -128,43 +128,22 @@ export function createApp(prisma: PrismaClient, port?: number): AppServer {
 
     routes: {
       "/v1/chat/completions": {
-        POST: (req) => {
-          const start = now();
-          log.info(`[req] POST /v1/chat/completions`);
-          return handleChatCompletions(req, poller).then((res) => {
-            log.info(
-              `[res] POST /v1/chat/completions ${res.status} ${now() - start}ms`,
-            );
-            return res;
-          });
-        },
+        POST: wrapRouteLogging("/v1/chat/completions", (req) =>
+          handleChatCompletions(req, poller),
+        ),
       },
       "/v1/models": {
         GET: () => handleModels(),
       },
       "/v1/messages": {
-        POST: (req) => {
-          const start = now();
-          log.info(`[req] POST /v1/messages`);
-          return handleMessages(req, poller).then((res) => {
-            log.info(
-              `[res] POST /v1/messages ${res.status} ${now() - start}ms`,
-            );
-            return res;
-          });
-        },
+        POST: wrapRouteLogging("/v1/messages", (req) =>
+          handleMessages(req, poller),
+        ),
       },
       "/v1/responses": {
-        POST: (req) => {
-          const start = now();
-          log.info(`[req] POST /v1/responses`);
-          return handleResponses(req, poller).then((res) => {
-            log.info(
-              `[res] POST /v1/responses ${res.status} ${now() - start}ms`,
-            );
-            return res;
-          });
-        },
+        POST: wrapRouteLogging("/v1/responses", (req) =>
+          handleResponses(req, poller),
+        ),
       },
       "/health": new Response("ok"),
       "/api/dashboard/jobs": {

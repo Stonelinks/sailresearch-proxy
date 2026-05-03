@@ -2,9 +2,8 @@ import { sail } from "../sail-client.ts";
 import { log } from "../../shared/logger.ts";
 import { openAIError } from "../errors.ts";
 import { handlePassthroughResponses } from "../services/passthrough.ts";
-import { resolveCompletionWindow } from "../completion-window.ts";
-import { config } from "../config.ts";
 import { submitAndWait, formatOpenAIError } from "../services/batch-submit.ts";
+import { parseRequest } from "./parse-request.ts";
 import type { Poller } from "../services/poller.ts";
 import type { CompletionWindow } from "../types.ts";
 import type { PrismaClient } from "@prisma/client";
@@ -22,33 +21,12 @@ export async function handleResponses(
   urlPrefix: CompletionWindow | null = null,
   db?: PrismaClient,
 ): Promise<Response> {
-  // Auth check — accept both Authorization: Bearer and x-api-key (Anthropic SDK)
-  if (config.proxyApiKey) {
-    const auth = req.headers.get("authorization");
-    const xApiKey = req.headers.get("x-api-key");
-    const token = auth?.replace(/^Bearer\s+/i, "") ?? xApiKey;
-    if (token !== config.proxyApiKey) {
-      log.warn("[auth] rejected request: invalid api key");
-      return openAIError(401, "Invalid API key", "authentication_error");
-    }
-  }
-
-  let body: any;
-  try {
-    body = await req.json();
-  } catch {
-    log.debug("[responses] invalid JSON body");
-    return openAIError(400, "Invalid JSON body", "invalid_request_error");
-  }
-
-  if (!body.model) {
-    return openAIError(
-      400,
-      "model is required",
-      "invalid_request_error",
-      "model",
-    );
-  }
+  const parsed = await parseRequest(req, {
+    routeName: "responses",
+    urlPrefix,
+  });
+  if ("error" in parsed) return parsed.error;
+  const { body, completionWindow } = parsed.ok;
 
   if (!body.input || (Array.isArray(body.input) && body.input.length === 0)) {
     return openAIError(
@@ -59,14 +37,6 @@ export async function handleResponses(
     );
   }
 
-  // Determine completion window
-  const headerWindow = req.headers.get("x-completion-window");
-  const { window: completionWindow } = resolveCompletionWindow(
-    urlPrefix,
-    headerWindow,
-    body.metadata,
-    config.defaults.completionWindow,
-  );
   log.debug(
     `[responses] model=${body.model} window=${completionWindow} input=${typeof body.input === "string" ? "string" : `array[${body.input.length}]`}`,
   );
@@ -76,11 +46,9 @@ export async function handleResponses(
   const dbClient = db ?? prisma;
 
   if (completionWindow === "asap") {
-    log.debug("[responses] dispatching to passthrough");
     return handlePassthroughResponses(body, completionWindow);
   }
 
-  log.debug("[responses] dispatching to batching");
   return handleBatchingResponses(body, completionWindow, poller, dbClient);
 }
 

@@ -1,11 +1,10 @@
 import { sail } from "../sail-client.ts";
 import { log } from "../../shared/logger.ts";
 import { openAIError } from "../errors.ts";
-import { resolveCompletionWindow } from "../completion-window.ts";
-import { config } from "../config.ts";
 import { messagesToResponsesAPI } from "../transforms/messages-request.ts";
 import { responsesToMessage } from "../transforms/messages-response.ts";
 import { stripForSailMessages } from "../transforms/sail-fields.ts";
+import { parseRequest } from "./parse-request.ts";
 import {
   submitAndWait,
   formatAnthropicError,
@@ -32,33 +31,12 @@ export async function handleMessages(
   urlPrefix: CompletionWindow | null = null,
   db?: PrismaClient,
 ): Promise<Response> {
-  // Auth check — accept both Authorization: Bearer and x-api-key (Anthropic SDK)
-  if (config.proxyApiKey) {
-    const auth = req.headers.get("authorization");
-    const xApiKey = req.headers.get("x-api-key");
-    const token = auth?.replace(/^Bearer\s+/i, "") ?? xApiKey;
-    if (token !== config.proxyApiKey) {
-      log.warn("[auth] rejected request: invalid api key");
-      return openAIError(401, "Invalid API key", "authentication_error");
-    }
-  }
-
-  let body: any;
-  try {
-    body = await req.json();
-  } catch {
-    log.debug("[messages] invalid JSON body");
-    return openAIError(400, "Invalid JSON body", "invalid_request_error");
-  }
-
-  if (!body.model) {
-    return openAIError(
-      400,
-      "model is required",
-      "invalid_request_error",
-      "model",
-    );
-  }
+  const parsed = await parseRequest(req, {
+    routeName: "messages",
+    urlPrefix,
+  });
+  if ("error" in parsed) return parsed.error;
+  const { body, completionWindow } = parsed.ok;
 
   if (
     !body.messages ||
@@ -73,14 +51,6 @@ export async function handleMessages(
     );
   }
 
-  // Determine completion window
-  const headerWindow = req.headers.get("x-completion-window");
-  const { window: completionWindow } = resolveCompletionWindow(
-    urlPrefix,
-    headerWindow,
-    body.metadata,
-    config.defaults.completionWindow,
-  );
   log.debug(
     `[messages] model=${body.model} window=${completionWindow} msgs=${body.messages.length}`,
   );
