@@ -7,7 +7,25 @@ function parseLevel(raw: string | undefined): Level {
   return v in ORDER ? (v as Level) : "info";
 }
 
-let currentLevel: Level = parseLevel(process.env.LOG_LEVEL);
+/**
+ * Detect the initial log level from the current environment.
+ * - Bun / Node: reads `process.env.LOG_LEVEL`
+ * - Vite browser: reads `import.meta.env.VITE_LOG_LEVEL`
+ * - Fallback: `"info"`
+ */
+function readEnvLevel(): Level {
+  // Bun / Node
+  if (typeof process !== "undefined" && process.env) {
+    return parseLevel(process.env.LOG_LEVEL);
+  }
+  // Vite browser build — import.meta.env is replaced at build time
+  if (typeof import.meta !== "undefined" && (import.meta as any).env) {
+    return parseLevel((import.meta as any).env.VITE_LOG_LEVEL);
+  }
+  return "info";
+}
+
+let currentLevel: Level = readEnvLevel();
 
 export function setLogLevel(level: Level) {
   currentLevel = level;
