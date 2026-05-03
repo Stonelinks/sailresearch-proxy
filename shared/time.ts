@@ -47,3 +47,43 @@ export function daysToMs(days: number): number {
 export function msAgo(ms: number): Date {
   return new Date(now() - ms);
 }
+
+// ── Display formatters (used by Svelte components) ──────────────────────
+
+/**
+ * Human-readable duration. `ms === null` returns a status-aware placeholder:
+ * a dash for terminal jobs, "in progress" otherwise.
+ */
+export function formatDuration(
+  ms: number | null,
+  status?: string,
+): string {
+  if (ms === null) {
+    if (
+      status === "completed" ||
+      status === "failed" ||
+      status === "cancelled"
+    )
+      return "—";
+    return "in progress";
+  }
+  if (ms < SECOND) return `${ms}ms`;
+  const s = Math.floor(ms / SECOND);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  return `${m}m ${s % 60}s`;
+}
+
+/** "just now", "5s ago", "3m ago", "2h ago", "4d ago". */
+export function formatRelative(iso: string, nowMs: number = now()): string {
+  const diff = nowMs - new Date(iso).getTime();
+  const s = Math.floor(diff / SECOND);
+  if (s < 5) return "just now";
+  if (s < 60) return `${s}s ago`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  return `${d}d ago`;
+}

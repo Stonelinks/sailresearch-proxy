@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { fetchModels, type SailModel, type SamplingPreset } from "../api";
+  import { shortOwner, formatContextSize } from "../format";
   import { log } from "$shared/logger.ts";
 
   let models: SailModel[] = $state([]);
@@ -16,18 +17,6 @@
         )
       : models,
   );
-
-  function shortOwner(owned_by: string): string {
-    const slash = owned_by.lastIndexOf("/");
-    return slash >= 0 ? owned_by.slice(slash + 1) : owned_by;
-  }
-
-  function formatContextSize(size: number | null): string {
-    if (size === null) return "—";
-    if (size >= 1_000_000) return `${(size / 1_000_000).toFixed(1)}M`;
-    if (size >= 1_000) return `${(size / 1_000).toFixed(0)}K`;
-    return String(size);
-  }
 
   function togglePresets(modelId: string) {
     const next = new Set(expandedPresets);

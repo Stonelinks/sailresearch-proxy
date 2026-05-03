@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { fetchJob, connectJobUpdates, type JobDetail } from "../api";
+  import { shortModel } from "../format";
   import { log } from "$shared/logger.ts";
   import StatusBadge from "../components/StatusBadge.svelte";
   import RelativeTime from "../components/RelativeTime.svelte";
@@ -60,11 +61,6 @@
 
     return () => disconnect();
   });
-
-  function shortModel(model: string): string {
-    const slash = model.lastIndexOf("/");
-    return slash >= 0 ? model.slice(slash + 1) : model;
-  }
 
   function formatJson(raw: string | null): string {
     if (!raw) return "";

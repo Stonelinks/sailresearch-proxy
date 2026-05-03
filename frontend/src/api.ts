@@ -60,6 +60,29 @@ export interface SailModelsResponse {
   data: SailModel[];
 }
 
+/**
+ * Single fetch surface for the dashboard SPA. Throws on non-2xx instead of
+ * returning the success-shaped JSON, which previously crashed callers
+ * downstream on undefined fields. The body of the failed response is
+ * included in the error message to make 500s debuggable from the console.
+ */
+async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(path, init);
+  } catch (e) {
+    log.error(`fetch ${path} threw:`, e);
+    throw e;
+  }
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    const msg = `${path} returned ${res.status}: ${text || res.statusText}`;
+    log.error(msg);
+    throw new Error(msg);
+  }
+  return res.json() as Promise<T>;
+}
+
 export async function fetchJobs(
   params: { limit?: number; offset?: number; status?: string } = {},
 ): Promise<JobsResponse> {
@@ -67,33 +90,15 @@ export async function fetchJobs(
   if (params.limit) search.set("limit", String(params.limit));
   if (params.offset) search.set("offset", String(params.offset));
   if (params.status) search.set("status", params.status);
-  try {
-    const res = await fetch(`/api/dashboard/jobs?${search}`);
-    return res.json();
-  } catch (e) {
-    log.error("Failed to fetch jobs:", e);
-    throw e;
-  }
+  return fetchJson<JobsResponse>(`/api/dashboard/jobs?${search}`);
 }
 
 export async function fetchJob(id: string): Promise<JobDetail> {
-  try {
-    const res = await fetch(`/api/dashboard/jobs/${id}`);
-    return res.json();
-  } catch (e) {
-    log.error("Failed to fetch job:", id, e);
-    throw e;
-  }
+  return fetchJson<JobDetail>(`/api/dashboard/jobs/${id}`);
 }
 
 export async function fetchModels(): Promise<SailModelsResponse> {
-  try {
-    const res = await fetch(`/api/models`);
-    return res.json();
-  } catch (e) {
-    log.error("Failed to fetch models:", e);
-    throw e;
-  }
+  return fetchJson<SailModelsResponse>(`/api/models`);
 }
 
 export type JobUpdateCallback = (job: Job) => void;

@@ -7,6 +7,7 @@
     type JobUpdateCallback,
   } from "../api";
   import { applyJobUpdate } from "../jobs-reducer";
+  import { shortModel } from "../format";
   import { log } from "$shared/logger.ts";
   import StatusBadge from "../components/StatusBadge.svelte";
   import RelativeTime from "../components/RelativeTime.svelte";
@@ -23,11 +24,6 @@
 
   let page = $derived(Math.floor(offset / PAGE_SIZE) + 1);
   let totalPages = $derived(Math.max(Math.ceil(total / PAGE_SIZE), 1));
-
-  function shortModel(model: string): string {
-    const slash = model.lastIndexOf("/");
-    return slash >= 0 ? model.slice(slash + 1) : model;
-  }
 
   async function load() {
     try {
