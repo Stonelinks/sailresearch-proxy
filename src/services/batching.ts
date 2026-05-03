@@ -1,5 +1,5 @@
 import { prisma } from "../db.ts";
-import { log } from "../logger.ts";
+import { log } from "../../shared/logger.ts";
 import { chatToResponsesAPI } from "../transforms/request.ts";
 import { responsesToChatCompletion } from "../transforms/response.ts";
 import { streamResponse } from "./stream.ts";

@@ -1,5 +1,5 @@
 import { config } from "../config.ts";
-import { log } from "../logger.ts";
+import { log } from "../../shared/logger.ts";
 import { openAIError } from "../errors.ts";
 import { handlePassthrough } from "../services/passthrough.ts";
 import { handleBatching } from "../services/batching.ts";

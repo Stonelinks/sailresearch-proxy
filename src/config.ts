@@ -5,7 +5,7 @@ import {
   FIVE_MINUTES,
   FIFTEEN_MINUTES,
   SIXTY_MINUTES,
-} from "./time.ts";
+} from "../shared/time.ts";
 
 function env(key: string, fallback: string): string {
   return process.env[key] || fallback;

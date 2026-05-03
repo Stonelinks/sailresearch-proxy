@@ -1,5 +1,5 @@
 import { sail } from "../sail-client.ts";
-import { log } from "../logger.ts";
+import { log } from "../../shared/logger.ts";
 import { mapSailError } from "../errors.ts";
 import { streamResponse } from "./stream.ts";
 import type { CompletionWindow } from "../types.ts";

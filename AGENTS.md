@@ -30,8 +30,29 @@ This project uses Bun. Do not use Node.js, npm, pnpm, yarn, vite, or their ecosy
 
 ## Frontend
 
-Use HTML imports with `Bun.serve()`. Don't use `vite`. HTML imports fully support React, CSS, Tailwind.
+The frontend is a Svelte SPA in `frontend/` built with Vite + Tailwind. `svelte-spa-router` handles routing.
 
-HTML files can import `.tsx`, `.jsx`, or `.js` files directly and Bun's bundler will transpile and bundle. `<link>` tags can point to stylesheets and Bun's CSS bundler will bundle.
+### Development
 
-For more information, read the Bun API docs in `node_modules/bun-types/docs/**.mdx`.
+- Run `bun dev` in the `frontend/` directory to start the Vite dev server on :5173 (proxies `/api/*` and `/ws/*` to the backend on :4000)
+- Run `bin/dev` to start Vite dev server + Bun backend concurrently
+- Use both together for hot-reloading frontend + backend
+
+### Building
+
+- `cd frontend && bun run build` outputs to `frontend/dist/`
+- The Bun backend serves `frontend/dist/` as static files with SPA fallback
+- `setup`, `dev`, and `run` scripts automatically build the frontend
+
+### Real-time Updates
+
+- WebSocket endpoint at `/ws/dashboard` for live job updates
+- Poller broadcasts job status changes to all connected WS clients
+- Frontend `connectJobUpdates()` in `api.ts` handles auto-reconnection
+
+### Conventions
+
+- Svelte 5 with runes (`$state`, `$derived`, `$props`)
+- Tailwind v4 with `@theme` for font tokens
+- Components in `frontend/src/components/`, pages in `frontend/src/pages/`
+- API helpers in `frontend/src/api.ts`

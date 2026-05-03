@@ -5,4 +5,8 @@ cd $PROJECT_ROOT
 
 source env.sh
 
+# Build frontend
+echo "Building frontend..."
+cd frontend && bun install && bun run build && cd ..
+
 bun run src/index.ts

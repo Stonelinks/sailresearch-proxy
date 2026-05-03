@@ -1,6 +1,6 @@
 import { config } from "./config.ts";
-import { log } from "./logger.ts";
-import { now } from "./time.ts";
+import { log } from "../shared/logger.ts";
+import { now } from "../shared/time.ts";
 
 async function request(
   path: string,

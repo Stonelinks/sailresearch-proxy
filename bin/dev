@@ -1,8 +1,26 @@
 #!/bin/bash
-set -e
 
 cd $PROJECT_ROOT
 
 source env.sh
 
-bun --watch run src/index.ts
+# Install frontend deps
+cd frontend && bun install && cd ..
+
+# Start Vite dev server and Bun backend concurrently
+# Use bunx instead of npx (project convention)
+bunx vite --host &
+VITE_PID=$!
+
+bun --watch run src/index.ts &
+BUN_PID=$!
+
+cleanup() {
+	kill $VITE_PID $BUN_PID 2>/dev/null
+	wait $VITE_PID $BUN_PID 2>/dev/null
+	exit 0
+}
+trap cleanup EXIT INT TERM
+
+# Wait for either to exit
+wait -n $VITE_PID $BUN_PID 2>/dev/null || true

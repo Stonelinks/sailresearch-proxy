@@ -26,5 +26,6 @@
     "noUnusedParameters": false,
     "noPropertyAccessFromIndexSignature": false
   },
-  "exclude": ["src/dashboard"]
+  "include": ["src", "shared"],
+  "exclude": ["frontend"]
 }

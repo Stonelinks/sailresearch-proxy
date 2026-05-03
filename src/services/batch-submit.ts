@@ -1,6 +1,6 @@
 import { sail } from "../sail-client.ts";
 import { config, getTimeoutMs } from "../config.ts";
-import { log } from "../logger.ts";
+import { log } from "../../shared/logger.ts";
 import { openAIError, mapSailError } from "../errors.ts";
 import { computeSailBodyHash, findExistingJob } from "../dedup.ts";
 import type { Poller } from "./poller.ts";

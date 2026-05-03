@@ -10,6 +10,11 @@ RUN bunx prisma generate
 
 COPY . .
 
+# Install frontend dependencies and build
+WORKDIR /app/frontend
+RUN bun install --frozen-lockfile
+RUN bun run build
+
 # -- runtime stage --
 FROM oven/bun:latest
 WORKDIR /app
@@ -17,6 +22,7 @@ WORKDIR /app
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/prisma ./prisma
 COPY --from=build /app/src ./src
+COPY --from=build /app/frontend/dist ./frontend/dist
 COPY --from=build /app/package.json ./
 
 ENV DATABASE_URL=file:/app/data/proxy.db

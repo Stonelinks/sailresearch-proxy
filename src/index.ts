@@ -1,5 +1,5 @@
 import { PrismaClient } from "@prisma/client";
-import { log } from "./logger.ts";
+import { log } from "../shared/logger.ts";
 import { createApp } from "./app.ts";
 
 // Run migrations / ensure DB schema

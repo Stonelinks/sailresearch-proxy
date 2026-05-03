@@ -1,5 +1,5 @@
 import { sail } from "../sail-client.ts";
-import { log } from "../logger.ts";
+import { log } from "../../shared/logger.ts";
 import { openAIError } from "../errors.ts";
 import { resolveCompletionWindow } from "../completion-window.ts";
 import { config } from "../config.ts";

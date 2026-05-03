@@ -1,4 +1,4 @@
-import { toUnixSeconds, unixNow } from "../time.ts";
+import { toUnixSeconds, unixNow } from "../../shared/time.ts";
 
 export function responsesToChatCompletion(sailResp: any): any {
   const content = extractOutputText(sailResp.output);

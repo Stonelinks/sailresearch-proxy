@@ -1,8 +1,8 @@
 import type { PrismaClient } from "@prisma/client";
 import { config } from "../config.ts";
-import { log } from "../logger.ts";
+import { log } from "../../shared/logger.ts";
 import { RecurringTask } from "./recurring-task.ts";
-import { now, daysToMs } from "../time.ts";
+import { now, daysToMs } from "../../shared/time.ts";
 
 export class Pruner {
   private task: RecurringTask | null = null;

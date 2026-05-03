@@ -1,9 +1,10 @@
 import type { PrismaClient } from "@prisma/client";
 import { sail } from "../sail-client.ts";
 import { config, getTimeoutMs } from "../config.ts";
-import { log } from "../logger.ts";
+import { log } from "../../shared/logger.ts";
+import { broadcastJobUpdate } from "../routes/dashboard-api.ts";
 import { RecurringTask } from "./recurring-task.ts";
-import { now } from "../time.ts";
+import { now } from "../../shared/time.ts";
 import type { JobWaiter, CompletionWindow } from "../types.ts";
 
 export function getBackoffMs(pollCount: number): number {
@@ -89,6 +90,7 @@ export class Poller {
             }),
           },
         });
+        this.broadcastUpdate(job.id);
         const waiter = this.waiters.get(job.sailResponseId);
         if (waiter) {
           waiter.reject({
@@ -154,6 +156,8 @@ export class Poller {
           },
         });
 
+        this.broadcastUpdate(job.id);
+
         const waiter = this.waiters.get(job.sailResponseId);
         if (waiter) {
           waiter.resolve(data);
@@ -167,6 +171,8 @@ export class Poller {
           data: { status: sailStatus, errorBody },
         });
 
+        this.broadcastUpdate(job.id);
+
         const waiter = this.waiters.get(job.sailResponseId);
         if (waiter) {
           waiter.reject(data);
@@ -176,12 +182,51 @@ export class Poller {
       } else {
         // Still pending or running
         await this.scheduleRetry(job, sailStatus);
+        this.broadcastUpdate(job.id);
       }
     } catch (err) {
       log.error(`[poller] fetch error for ${job.sailResponseId}:`, err);
       await this.scheduleRetry(job);
     } finally {
       this.activePollCount--;
+    }
+  }
+
+  private async broadcastUpdate(jobId: string) {
+    try {
+      const job = await this.prisma.pendingJob.findUnique({
+        where: { id: jobId },
+        select: {
+          id: true,
+          sailResponseId: true,
+          status: true,
+          model: true,
+          completionWindow: true,
+          apiType: true,
+          createdAt: true,
+          completedAt: true,
+          pollCount: true,
+          errorBody: true,
+        },
+      });
+      if (!job) return;
+      broadcastJobUpdate({
+        id: job.id,
+        sailResponseId: job.sailResponseId,
+        status: job.status,
+        model: job.model,
+        completionWindow: job.completionWindow,
+        apiType: job.apiType,
+        createdAt: job.createdAt.toISOString(),
+        completedAt: job.completedAt?.toISOString() ?? null,
+        durationMs: job.completedAt
+          ? job.completedAt.getTime() - job.createdAt.getTime()
+          : null,
+        pollCount: job.pollCount,
+        hasError: job.errorBody !== null,
+      });
+    } catch {
+      // Non-critical: don't let broadcast failures affect polling
     }
   }
 

@@ -1,4 +1,4 @@
-import { log } from "./logger.ts";
+import { log } from "../shared/logger.ts";
 import { openAIError } from "./errors.ts";
 import { extractWindowPrefix } from "./completion-window.ts";
 import type { Poller } from "./services/poller.ts";

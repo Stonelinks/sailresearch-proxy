@@ -1,4 +1,4 @@
-import { log } from "../logger.ts";
+import { log } from "../../shared/logger.ts";
 
 export class RecurringTask {
   private timeout: ReturnType<typeof setTimeout> | null = null;
