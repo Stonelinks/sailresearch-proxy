@@ -13,3 +13,6 @@ typecheck
 
 echo "=== test ==="
 "$PROJECT_ROOT/bin/test"
+
+echo "=== test-frontend ==="
+"$PROJECT_ROOT/bin/test-frontend"

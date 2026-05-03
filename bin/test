@@ -5,4 +5,9 @@ cd $PROJECT_ROOT
 
 source env.sh
 
-SAIL_API_KEY="${SAIL_API_KEY:-test}" bun test "$@"
+# Restrict to backend tests; the frontend has its own runner (vitest, see
+# bin/test-frontend) since bun:test can't render Svelte components.
+# Pass explicit file paths so bun doesn't treat "src" as a substring filter
+# (which would also match frontend/src/...).
+BACKEND_TESTS=$(find src shared -name "*.test.ts" -type f)
+SAIL_API_KEY="${SAIL_API_KEY:-test}" bun test $BACKEND_TESTS "$@"

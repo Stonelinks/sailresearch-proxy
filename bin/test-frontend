@@ -1,0 +1,9 @@
+#!/bin/bash
+set -e
+
+cd $PROJECT_ROOT
+
+source env.sh
+
+cd frontend
+bun run test "$@"
