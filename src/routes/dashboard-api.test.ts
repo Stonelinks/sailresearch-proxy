@@ -20,6 +20,7 @@ mock.module("../sail-client.ts", () => ({
 const mockPrismaPendingJobFindMany = mock();
 const mockPrismaPendingJobCount = mock();
 const mockPrismaPendingJobFindUnique = mock();
+const mockPrismaModelMetaFindMany = mock();
 
 mock.module("../db.ts", () => ({
   prisma: {
@@ -27,6 +28,9 @@ mock.module("../db.ts", () => ({
       findMany: mockPrismaPendingJobFindMany,
       count: mockPrismaPendingJobCount,
       findUnique: mockPrismaPendingJobFindUnique,
+    },
+    modelMeta: {
+      findMany: mockPrismaModelMetaFindMany,
     },
   },
 }));
@@ -179,9 +183,10 @@ describe("handleDashboardJobDetail", () => {
 describe("handleDashboardModels", () => {
   beforeEach(() => {
     mockListModels.mockReset();
+    mockPrismaModelMetaFindMany.mockReset();
   });
 
-  test("proxies Sail models list", async () => {
+  test("proxies Sail models list with metadata enrichment", async () => {
     mockListModels.mockResolvedValueOnce({
       status: 200,
       data: {
@@ -203,12 +208,71 @@ describe("handleDashboardModels", () => {
       },
     });
 
+    mockPrismaModelMetaFindMany.mockResolvedValueOnce([
+      {
+        modelId: "model-a",
+        contextSize: 131072,
+        samplingPresets:
+          '[{"name":"default","description":"General purpose","params":{"temperature":0.7}}]',
+        description: "A large language model",
+        source: "https://huggingface.co/org-a/model-a",
+        researchedAt: new Date("2025-06-01T00:00:00Z"),
+      },
+    ]);
+
     const res = await handleDashboardModels();
 
     expect(res.status).toBe(200);
     const body: any = await res.json();
     expect(body.data).toHaveLength(2);
+
+    // model-a has metadata
     expect(body.data[0].id).toBe("model-a");
+    expect(body.data[0].contextSize).toBe(131072);
+    expect(body.data[0].samplingPresets).toEqual([
+      {
+        name: "default",
+        description: "General purpose",
+        params: { temperature: 0.7 },
+      },
+    ]);
+    expect(body.data[0].description).toBe("A large language model");
+    expect(body.data[0].source).toBe("https://huggingface.co/org-a/model-a");
+    expect(body.data[0].researchedAt).toBe("2025-06-01T00:00:00.000Z");
+
+    // model-b has no metadata
+    expect(body.data[1].id).toBe("model-b");
+    expect(body.data[1].contextSize).toBeNull();
+    expect(body.data[1].samplingPresets).toBeNull();
+    expect(body.data[1].description).toBeNull();
+    expect(body.data[1].source).toBeNull();
+    expect(body.data[1].researchedAt).toBeNull();
+  });
+
+  test("returns models with null metadata when no ModelMeta rows exist", async () => {
+    mockListModels.mockResolvedValueOnce({
+      status: 200,
+      data: {
+        object: "list",
+        data: [
+          {
+            id: "model-x",
+            object: "model",
+            created: 1700000000,
+            owned_by: "org-x",
+          },
+        ],
+      },
+    });
+
+    mockPrismaModelMetaFindMany.mockResolvedValueOnce([]);
+
+    const res = await handleDashboardModels();
+    const body: any = await res.json();
+
+    expect(body.data[0].contextSize).toBeNull();
+    expect(body.data[0].samplingPresets).toBeNull();
+    expect(body.data[0].description).toBeNull();
   });
 
   test("maps Sail errors", async () => {

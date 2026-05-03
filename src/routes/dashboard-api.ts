@@ -155,9 +155,27 @@ export async function handleDashboardJobDetail(
   });
 }
 
-/** Proxy the Sail models list for the dashboard SPA. */
+/** Proxy the Sail models list for the dashboard SPA, enriched with ModelMeta. */
 export async function handleDashboardModels(): Promise<Response> {
   const { status, data } = await sail.listModels();
   if (status !== 200) return mapSailError(status, data);
-  return Response.json(data);
+
+  // Fetch all metadata and index by modelId
+  const metaRows = await prisma.modelMeta.findMany();
+  const metaByModelId = new Map(metaRows.map((m) => [m.modelId, m]));
+
+  // Enrich each model with its metadata (nulls if not researched)
+  const enrichedData = (data.data ?? []).map((model: any) => {
+    const meta = metaByModelId.get(model.id);
+    return {
+      ...model,
+      contextSize: meta?.contextSize ?? null,
+      samplingPresets: meta ? JSON.parse(meta.samplingPresets) : null,
+      description: meta?.description ?? null,
+      source: meta?.source ?? null,
+      researchedAt: meta?.researchedAt?.toISOString() ?? null,
+    };
+  });
+
+  return Response.json({ ...data, data: enrichedData });
 }

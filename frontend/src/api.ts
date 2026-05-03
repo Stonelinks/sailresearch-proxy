@@ -27,11 +27,32 @@ export interface JobsResponse {
   offset: number;
 }
 
+export interface SamplingPresetParams {
+  temperature?: number;
+  top_p?: number;
+  top_k?: number;
+  max_tokens?: number;
+  frequency_penalty?: number;
+  presence_penalty?: number;
+  [key: string]: number | string | boolean | undefined;
+}
+
+export interface SamplingPreset {
+  name: string;
+  description: string;
+  params: SamplingPresetParams;
+}
+
 export interface SailModel {
   id: string;
   object: string;
   created: number;
   owned_by: string;
+  contextSize: number | null;
+  samplingPresets: SamplingPreset[] | null;
+  description: string | null;
+  source: string | null;
+  researchedAt: string | null;
 }
 
 export interface SailModelsResponse {
