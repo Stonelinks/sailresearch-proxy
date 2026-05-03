@@ -5,6 +5,7 @@ import { resolveCompletionWindow } from "../completion-window.ts";
 import { config } from "../config.ts";
 import { messagesToResponsesAPI } from "../transforms/messages-request.ts";
 import { responsesToMessage } from "../transforms/messages-response.ts";
+import { stripForSailMessages } from "../transforms/sail-fields.ts";
 import {
   submitAndWait,
   formatAnthropicError,
@@ -112,27 +113,15 @@ async function handleMessagesPassthrough(
   body: any,
   completionWindow: CompletionWindow,
 ): Promise<Response> {
-  // Build the request for Sail's /v1/messages endpoint
-  const sailBody: any = {
+  // Build the request for Sail's /v1/messages endpoint, stripping the
+  // Anthropic-only fields Sail doesn't accept (see sail-fields.ts).
+  const sailBody = stripForSailMessages({
     ...body,
     metadata: {
       ...body.metadata,
       completion_window: completionWindow,
     },
-  };
-
-  // Strip stream — Sail doesn't support streaming on Messages API
-  delete sailBody.stream;
-
-  // Strip fields Sail doesn't support on Messages API
-  delete sailBody.system;
-  delete sailBody.thinking;
-  delete sailBody.tools;
-  delete sailBody.tool_choice;
-  delete sailBody.stop_sequences;
-  delete sailBody.top_k;
-  delete sailBody.service_tier;
-  delete sailBody.inference_geo;
+  });
 
   const { status, data } = await sail.createMessage(sailBody);
   log.debug(`[messages] sail status=${status}`);
@@ -169,17 +158,10 @@ async function handleMessagesBatching(
   poller: Poller,
   db: PrismaClient,
 ): Promise<Response> {
-  // Strip unsupported fields before transforming
-  const cleanBody = { ...body };
-  delete cleanBody.system;
-  delete cleanBody.thinking;
-  delete cleanBody.tools;
-  delete cleanBody.tool_choice;
-  delete cleanBody.stop_sequences;
-  delete cleanBody.top_k;
-  delete cleanBody.stream;
-  delete cleanBody.service_tier;
-  delete cleanBody.inference_geo;
+  // Strip unsupported fields before the transform sees them, otherwise the
+  // resulting Responses request would carry Anthropic-only fields Sail
+  // rejects.
+  const cleanBody = stripForSailMessages(body);
 
   // Transform Anthropic Messages → Sail Responses API
   const sailBody = messagesToResponsesAPI(cleanBody, completionWindow);

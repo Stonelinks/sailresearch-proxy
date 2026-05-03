@@ -3,6 +3,7 @@ import { config } from "../config.ts";
 import { log } from "../../shared/logger.ts";
 import { mapSailError } from "../errors.ts";
 import { streamResponse } from "./stream.ts";
+import { stripForSailChatCompletions } from "../transforms/sail-fields.ts";
 import type { CompletionWindow } from "../types.ts";
 
 export async function handlePassthrough(
@@ -11,25 +12,15 @@ export async function handlePassthrough(
   wantsStream: boolean,
 ): Promise<Response> {
   // Build request for Sail's chat completions endpoint
-  const sailBody = {
+  const sailBody: any = stripForSailChatCompletions({
     ...body,
     metadata: {
       ...body.metadata,
       completion_window: completionWindow,
     },
-  };
-  delete sailBody.stream;
+  });
 
-  // Sail API does not support store=false (responses are always stored).
-  // Pi sends store=false by default — strip it to avoid a 400 error.
-  delete sailBody.store;
-
-  // Strip other OpenAI-specific fields that Sail doesn't understand
-  delete sailBody.prompt_cache_key;
-  delete sailBody.prompt_cache_retention;
-  delete sailBody.stream_options;
-
-  // Sail uses max_completion_tokens, remap max_tokens for compatibility
+  // Sail uses max_completion_tokens; remap max_tokens before stripping it.
   if (sailBody.max_tokens != null && sailBody.max_completion_tokens == null) {
     sailBody.max_completion_tokens = sailBody.max_tokens;
   }
