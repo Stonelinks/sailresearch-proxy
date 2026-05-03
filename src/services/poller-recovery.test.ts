@@ -13,17 +13,11 @@
  * polled, and `pollCount` stays at 0 — the assertion fails.
  */
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
-import { config } from "../config.ts";
 import { Poller } from "./poller.ts";
+import { swapConfig } from "../test-helpers.ts";
 
 let hangServer: ReturnType<typeof Bun.serve>;
-let saved: {
-  baseUrl: string;
-  apiKey: string;
-  pollTimeoutMs: number;
-  intervalMs: number;
-  maxConcurrent: number;
-};
+let restoreConfig: () => void;
 
 beforeAll(() => {
   hangServer = Bun.serve({
@@ -36,26 +30,18 @@ beforeAll(() => {
       return new Response("not found", { status: 404 });
     },
   });
-  saved = {
-    baseUrl: config.sail.baseUrl,
-    apiKey: config.sail.apiKey,
-    pollTimeoutMs: config.sail.pollTimeoutMs,
-    intervalMs: config.polling.intervalMs,
-    maxConcurrent: config.polling.maxConcurrent,
-  };
-  config.sail.baseUrl = `http://localhost:${hangServer.port}/v1`;
-  config.sail.apiKey = "test";
-  config.sail.pollTimeoutMs = 200;
-  config.polling.intervalMs = 50;
-  config.polling.maxConcurrent = 3;
+  restoreConfig = swapConfig({
+    sail: {
+      baseUrl: `http://localhost:${hangServer.port}/v1`,
+      apiKey: "test",
+      pollTimeoutMs: 200,
+    },
+    polling: { intervalMs: 50, maxConcurrent: 3 },
+  });
 });
 
 afterAll(() => {
-  config.sail.baseUrl = saved.baseUrl;
-  config.sail.apiKey = saved.apiKey;
-  config.sail.pollTimeoutMs = saved.pollTimeoutMs;
-  config.polling.intervalMs = saved.intervalMs;
-  config.polling.maxConcurrent = saved.maxConcurrent;
+  restoreConfig();
   hangServer.stop(true);
 });
 

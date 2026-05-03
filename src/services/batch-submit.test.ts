@@ -45,18 +45,14 @@ const { submitAndWait, waitForJob, formatOpenAIError, formatAnthropicError } =
   await import("./batch-submit.ts");
 import type { BatchError } from "./batch-submit.ts";
 
+import { waiterFor } from "../test-helpers.ts";
+
 // Minimal mock poller
 const mockPoller = {
   registerWaiter: mock(),
   start: mock(),
   stop: mock(),
 } as any;
-
-// Convenience: have registerWaiter return the new {promise, cancel} shape
-// from a plain Promise of the eventual result.
-function waiterFor(p: Promise<any>) {
-  return { promise: p, cancel: mock() };
-}
 
 const baseParams = () => ({
   sailBody: {

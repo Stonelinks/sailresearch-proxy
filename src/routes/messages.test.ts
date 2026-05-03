@@ -34,18 +34,14 @@ mock.module("../db.ts", () => ({
 
 const { handleMessages } = await import("../routes/messages.ts");
 
+import { waiterFor } from "../test-helpers.ts";
+
 // Minimal mock poller
 const mockPoller = {
   registerWaiter: mock(),
   start: mock(),
   stop: mock(),
 } as any;
-
-// Wrap a plain Promise into the {promise, cancel} shape the real
-// poller.registerWaiter returns.
-function waiterFor(p: Promise<any>) {
-  return { promise: p, cancel: mock() };
-}
 
 function makeMessagesRequest(body: any, headers: Record<string, string> = {}) {
   return new Request("http://localhost/v1/messages", {
