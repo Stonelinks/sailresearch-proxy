@@ -26,7 +26,13 @@ export const config = {
   sail: {
     apiKey: requireEnv("SAIL_API_KEY"),
     baseUrl: env("SAIL_BASE_URL", "https://api.sailresearch.com/v1"),
-    requestTimeoutMs: intEnv("SAIL_REQUEST_TIMEOUT_MS", 30 * SECOND),
+    // Tight bound for status checks and job-creation calls. These should
+    // return in milliseconds; anything past 30s is a stuck socket.
+    pollTimeoutMs: intEnv("SAIL_POLL_TIMEOUT_MS", 30 * SECOND),
+    // Generous bound for synchronous inference passthroughs. Long enough
+    // to cover most generations, short enough to bound the per-request
+    // socket leak if Sail hangs.
+    inferenceTimeoutMs: intEnv("SAIL_INFERENCE_TIMEOUT_MS", 5 * MINUTE),
   },
   server: {
     port: intEnv("PORT", 4000),

@@ -20,7 +20,7 @@ let hangServer: ReturnType<typeof Bun.serve>;
 let saved: {
   baseUrl: string;
   apiKey: string;
-  requestTimeoutMs: number;
+  pollTimeoutMs: number;
   intervalMs: number;
   maxConcurrent: number;
 };
@@ -39,13 +39,13 @@ beforeAll(() => {
   saved = {
     baseUrl: config.sail.baseUrl,
     apiKey: config.sail.apiKey,
-    requestTimeoutMs: config.sail.requestTimeoutMs,
+    pollTimeoutMs: config.sail.pollTimeoutMs,
     intervalMs: config.polling.intervalMs,
     maxConcurrent: config.polling.maxConcurrent,
   };
   config.sail.baseUrl = `http://localhost:${hangServer.port}/v1`;
   config.sail.apiKey = "test";
-  config.sail.requestTimeoutMs = 200;
+  config.sail.pollTimeoutMs = 200;
   config.polling.intervalMs = 50;
   config.polling.maxConcurrent = 3;
 });
@@ -53,7 +53,7 @@ beforeAll(() => {
 afterAll(() => {
   config.sail.baseUrl = saved.baseUrl;
   config.sail.apiKey = saved.apiKey;
-  config.sail.requestTimeoutMs = saved.requestTimeoutMs;
+  config.sail.pollTimeoutMs = saved.pollTimeoutMs;
   config.polling.intervalMs = saved.intervalMs;
   config.polling.maxConcurrent = saved.maxConcurrent;
   hangServer.stop(true);

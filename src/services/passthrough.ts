@@ -1,4 +1,5 @@
 import { sail } from "../sail-client.ts";
+import { config } from "../config.ts";
 import { log } from "../../shared/logger.ts";
 import { mapSailError } from "../errors.ts";
 import { streamResponse } from "./stream.ts";
@@ -70,7 +71,10 @@ export async function handlePassthroughResponses(
   // Strip streaming — Sail doesn't support it on Responses API
   delete sailBody.stream;
 
-  const { status, data } = await sail.createResponse(sailBody);
+  // asap passthrough: Sail runs inference inline and returns the full result.
+  const { status, data } = await sail.createResponse(sailBody, {
+    timeoutMs: config.sail.inferenceTimeoutMs,
+  });
   log.debug(`[passthrough-responses] sail status=${status}`);
 
   if (status !== 200 && status !== 202) {

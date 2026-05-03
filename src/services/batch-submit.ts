@@ -101,7 +101,31 @@ export async function submitAndWait(
   log.debug(
     `[${logPrefix}] submitting to Sail keys=${Object.keys(sailBody).join(",")}`,
   );
-  const { status, data } = await sail.createResponse(sailBody);
+  // Batch submit with `background: true` — Sail returns the job id quickly,
+  // actual generation is polled separately.
+  let status: number;
+  let data: any;
+  try {
+    ({ status, data } = await sail.createResponse(sailBody, {
+      timeoutMs: config.sail.pollTimeoutMs,
+    }));
+  } catch (err) {
+    // Network / abort / timeout — fail the request cleanly instead of
+    // letting it bubble up as an unhandled 500.
+    const isTimeout = err instanceof Error && err.name === "TimeoutError";
+    const message = err instanceof Error ? err.message : String(err);
+    log.warn(
+      `[${logPrefix}] sail submit failed: ${isTimeout ? "timeout" : "network"} ${message}`,
+    );
+    return {
+      ok: false,
+      error: {
+        type: "upstream",
+        status: 502,
+        message: `Sail submit failed: ${message}`,
+      },
+    };
+  }
   log.debug(
     `[${logPrefix}] sail submit status=${status} id=${data?.id} sailStatus=${data?.status}`,
   );
@@ -151,8 +175,11 @@ export async function submitAndWait(
 
 /**
  * Register a waiter on an in-flight job and race against the window timeout.
+ *
+ * Exported for direct testing of the timer-cleanup contract — production
+ * callers should go through `submitAndWait`.
  */
-async function waitForJob(
+export async function waitForJob(
   sailResponseId: string,
   completionWindow: CompletionWindow,
   poller: Poller,
@@ -168,16 +195,30 @@ async function waitForJob(
     .then((result) => ({ ok: true as const, result }))
     .catch((error) => ({ ok: false as const, error }));
 
+  let timer: ReturnType<typeof setTimeout> | null = null;
   const timeoutPromise = new Promise<{ ok: false; error: "timeout" }>(
-    (resolve) =>
-      setTimeout(() => resolve({ ok: false, error: "timeout" }), timeoutMs),
+    (resolve) => {
+      timer = setTimeout(
+        () => resolve({ ok: false, error: "timeout" }),
+        timeoutMs,
+      );
+    },
   );
 
-  const outcome = await Promise.race([resultPromise, timeoutPromise]);
+  let outcome: { ok: true; result: any } | { ok: false; error: any };
+  try {
+    outcome = await Promise.race([resultPromise, timeoutPromise]);
+  } finally {
+    // Always clear the timer — without this, the resolved-first path leaves a
+    // long-lived (5–60 min) timer in the event loop per successful request.
+    if (timer) clearTimeout(timer);
+    // Always unregister — safe no-op if the poller already deleted the entry.
+    poller.unregisterWaiter(sailResponseId);
+  }
+
   log.debug(`[${logPrefix}] outcome id=${sailResponseId} ok=${outcome.ok}`);
 
   if (!outcome.ok) {
-    poller.unregisterWaiter(sailResponseId);
     if (outcome.error === "timeout") {
       log.warn(
         `[${logPrefix}] timeout id=${sailResponseId} window=${completionWindow} ms=${timeoutMs}`,
