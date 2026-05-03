@@ -11,7 +11,7 @@ function makeRequest(body: any, headers: Record<string, string> = {}) {
 }
 
 describe("parseRequest", () => {
-  let originalProxyKey: string | undefined;
+  let originalProxyKey = "";
 
   beforeEach(() => {
     originalProxyKey = config.proxyApiKey;
@@ -21,7 +21,7 @@ describe("parseRequest", () => {
   });
 
   test("returns parsed body and resolved window on success", async () => {
-    config.proxyApiKey = undefined;
+    config.proxyApiKey = "";
     const req = makeRequest({ model: "m" });
     const result = await parseRequest(req, {
       routeName: "test",
@@ -66,7 +66,7 @@ describe("parseRequest", () => {
   });
 
   test("returns 400 on malformed JSON", async () => {
-    config.proxyApiKey = undefined;
+    config.proxyApiKey = "";
     const req = makeRequest("{not json", {});
     const result = await parseRequest(req, {
       routeName: "test",
@@ -78,7 +78,7 @@ describe("parseRequest", () => {
   });
 
   test("returns 400 when model is missing", async () => {
-    config.proxyApiKey = undefined;
+    config.proxyApiKey = "";
     const req = makeRequest({});
     const result = await parseRequest(req, {
       routeName: "test",

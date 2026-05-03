@@ -115,7 +115,29 @@ export class Poller {
     });
 
     for (const job of activeJobs) {
-      const timeoutMs = getTimeoutMs(job.completionWindow as CompletionWindow);
+      const window = job.completionWindow as CompletionWindow;
+      // asap jobs never go through the poller — if one is here it's a bug.
+      // Expire it on first sight so the row doesn't sit forever.
+      if (window === "asap") {
+        log.warn(
+          `[poller] unexpected asap job in poll queue id=${job.sailResponseId}; expiring`,
+        );
+        await this.prisma.pendingJob.update({
+          where: { id: job.id },
+          data: {
+            status: "failed",
+            errorBody: JSON.stringify({
+              error: { message: "asap job in poll queue" },
+            }),
+          },
+        });
+        this.broadcastUpdate(job.id);
+        this.rejectWaiters(job.sailResponseId, {
+          error: { message: "asap job in poll queue" },
+        });
+        continue;
+      }
+      const timeoutMs = getTimeoutMs(window);
       const deadline = new Date(job.createdAt.getTime() + timeoutMs);
       if (now >= deadline) {
         log.warn(

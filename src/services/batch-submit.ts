@@ -195,6 +195,12 @@ export async function waitForJob(
   poller: Poller,
   logPrefix: string,
 ): Promise<BatchResult> {
+  // submitAndWait routes asap to passthrough before this is reached, so the
+  // window here must be one of the polled windows. Type-narrow explicitly so
+  // getTimeoutMs's stricter signature is satisfied.
+  if (completionWindow === "asap") {
+    throw new Error("waitForJob called with asap window — caller bug");
+  }
   const timeoutMs = getTimeoutMs(completionWindow);
   log.debug(
     `[${logPrefix}] waiter registered id=${sailResponseId} window=${completionWindow} timeoutMs=${timeoutMs}`,

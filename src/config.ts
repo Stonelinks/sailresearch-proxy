@@ -68,7 +68,14 @@ export const config = {
   proxyApiKey: env("PROXY_API_KEY", ""),
 };
 
-export function getTimeoutMs(window: CompletionWindow): number {
-  if (window === "asap") return 0; // passthrough — no polling timeout
+/**
+ * Polling timeout for a window. asap is intentionally excluded — it goes
+ * through the passthrough path and never enters the poller, so a 0 here
+ * was a footgun (immediate expiry) for any caller that accidentally passed
+ * "asap". The type system now catches that at the call site.
+ */
+export function getTimeoutMs(
+  window: Exclude<CompletionWindow, "asap">,
+): number {
   return config.windowTimeouts[window];
 }
