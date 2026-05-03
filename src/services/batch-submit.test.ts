@@ -1,4 +1,15 @@
-import { describe, test, expect, mock, beforeEach, beforeAll } from "bun:test";
+import {
+  describe,
+  test,
+  expect,
+  mock,
+  beforeEach,
+  beforeAll,
+  afterAll,
+  spyOn,
+} from "bun:test";
+import { config } from "../config.ts";
+import { Poller } from "./poller.ts";
 
 // Set required env vars before any imports that use config
 beforeAll(() => {
@@ -30,7 +41,7 @@ mock.module("../db.ts", () => ({
   },
 }));
 
-const { submitAndWait, formatOpenAIError, formatAnthropicError } =
+const { submitAndWait, waitForJob, formatOpenAIError, formatAnthropicError } =
   await import("./batch-submit.ts");
 import type { BatchError } from "./batch-submit.ts";
 
@@ -290,4 +301,66 @@ describe("formatAnthropicError", () => {
     expect(body.type).toBe("error");
     expect(body.error.type).toBe("api_error");
   });
+});
+
+/**
+ * Verifies that `waitForJob` clears its window-timeout timer when the
+ * waiter resolves first. Without this, every successful batched request
+ * leaves a 5–60 minute pending timer in the event loop — a slow leak.
+ */
+describe("waitForJob timer cleanup", () => {
+  let savedFlex: number;
+
+  beforeAll(() => {
+    savedFlex = config.windowTimeouts.flex;
+    // Recognizable, large value so we can find the right setTimeout call and
+    // so the timeout won't fire during the test.
+    config.windowTimeouts.flex = 999_999;
+  });
+
+  afterAll(() => {
+    config.windowTimeouts.flex = savedFlex;
+  });
+
+  test("clears the window-timeout timer when the waiter resolves first", async () => {
+    const poller = new Poller({} as any);
+
+    const setTimeoutSpy = spyOn(globalThis, "setTimeout");
+    const clearTimeoutSpy = spyOn(globalThis, "clearTimeout");
+
+    const sailResponseId = "stub-id-1";
+    const waitPromise = waitForJob(sailResponseId, "flex", poller, "wait-test");
+
+    // Yield so waitForJob registers the waiter and schedules its setTimeout.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const idx = setTimeoutSpy.mock.calls.findIndex(
+      (args) => args[1] === 999_999,
+    );
+    expect(idx).toBeGreaterThanOrEqual(0);
+    const windowTimerHandle = setTimeoutSpy.mock.results[idx]?.value;
+    expect(windowTimerHandle).toBeDefined();
+
+    // Resolve the waiter — what the poller does on completion. Reach into
+    // the private `waiters` Map<string, Set<JobWaiter>> and resolve the lone
+    // waiter we know is there.
+    const waiters = (poller as unknown as { waiters: Map<string, Set<any>> })
+      .waiters;
+    const set = waiters.get(sailResponseId);
+    expect(set?.size).toBe(1);
+    const [waiter] = [...set!];
+    waiter.resolve({ id: sailResponseId, status: "completed" });
+
+    const result = await waitPromise;
+    expect(result.ok).toBe(true);
+
+    const cleared = clearTimeoutSpy.mock.calls.some(
+      (args) => args[0] === windowTimerHandle,
+    );
+    expect(cleared).toBe(true);
+
+    setTimeoutSpy.mockRestore();
+    clearTimeoutSpy.mockRestore();
+  }, 5000);
 });
