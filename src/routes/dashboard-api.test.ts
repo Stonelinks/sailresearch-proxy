@@ -275,6 +275,32 @@ describe("handleDashboardModels", () => {
     expect(body.data[0].description).toBeNull();
   });
 
+  test("falls back to [] when samplingPresets is malformed JSON", async () => {
+    mockListModels.mockResolvedValueOnce({
+      status: 200,
+      data: {
+        object: "list",
+        data: [{ id: "model-bad", object: "model", created: 1, owned_by: "x" }],
+      },
+    });
+    mockPrismaModelMetaFindMany.mockResolvedValueOnce([
+      {
+        modelId: "model-bad",
+        contextSize: 4096,
+        samplingPresets: "{not json",
+        description: null,
+        source: null,
+        researchedAt: new Date(),
+      },
+    ]);
+
+    const res = await handleDashboardModels();
+    expect(res.status).toBe(200);
+    const body: any = await res.json();
+    expect(body.data[0].samplingPresets).toEqual([]);
+    expect(body.data[0].contextSize).toBe(4096);
+  });
+
   test("maps Sail errors", async () => {
     mockListModels.mockResolvedValueOnce({
       status: 500,

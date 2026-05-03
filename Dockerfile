@@ -22,6 +22,7 @@ WORKDIR /app
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/prisma ./prisma
 COPY --from=build /app/src ./src
+COPY --from=build /app/shared ./shared
 COPY --from=build /app/frontend/dist ./frontend/dist
 COPY --from=build /app/package.json ./
 
