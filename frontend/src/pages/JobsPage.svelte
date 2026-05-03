@@ -6,6 +6,7 @@
     type Job,
     type JobUpdateCallback,
   } from "../api";
+  import { applyJobUpdate } from "../jobs-reducer";
   import { log } from "$shared/logger.ts";
   import StatusBadge from "../components/StatusBadge.svelte";
   import RelativeTime from "../components/RelativeTime.svelte";
@@ -47,25 +48,36 @@
   }
 
   const handleJobUpdate: JobUpdateCallback = (updatedJob) => {
-    const idx = jobs.findIndex((j) => j.id === updatedJob.id);
-    if (idx >= 0) {
-      log.debug("Updating job", updatedJob.id, "→", updatedJob.status);
-      jobs[idx] = updatedJob;
-    } else if (offset === 0 && (!statusFilter || updatedJob.status === statusFilter)) {
-      log.debug("New job appeared", updatedJob.id, updatedJob.status);
-      // New job appeared — prepend and bump total
-      jobs = [updatedJob, ...jobs].slice(0, PAGE_SIZE);
-      total += 1;
+    const { state, action } = applyJobUpdate({
+      state: { jobs, total },
+      updatedJob,
+      statusFilter,
+      offset,
+      pageSize: PAGE_SIZE,
+    });
+    if (action !== "ignored") {
+      log.debug("Job update", action, updatedJob.id, "→", updatedJob.status);
+      jobs = state.jobs;
+      total = state.total;
     }
   };
 
   onMount(() => {
     load();
+    let firstConnect = true;
     const disconnect = connectJobUpdates(
       (job) => {
         handleJobUpdate(job);
       },
       () => {
+        // Resync on every reconnect: any updates that fired while the WS was
+        // down were dropped, so the local state is stale. Skip the very first
+        // connect since onMount already called load().
+        if (!firstConnect) {
+          log.debug("WS reconnected, resyncing jobs");
+          load();
+        }
+        firstConnect = false;
         connected = true;
       },
       () => {
