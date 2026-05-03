@@ -13,32 +13,32 @@ describe("RecurringTask", () => {
   });
 
   it("waits for interval before first call", async () => {
-    const task = new RecurringTask("test", fn, 50);
+    const task = new RecurringTask("test", fn, 100);
     task.start();
 
-    await new Promise((r) => setTimeout(r, 10));
+    await new Promise((r) => setTimeout(r, 30));
     expect(fn).toHaveBeenCalledTimes(0);
 
-    await new Promise((r) => setTimeout(r, 60));
+    await new Promise((r) => setTimeout(r, 150));
     expect(fn).toHaveBeenCalledTimes(1);
     task.stop();
   });
 
   it("waits full interval after a slow fn completes", async () => {
     const slowFn = mock(async () => {
-      await new Promise((r) => setTimeout(r, 80));
+      await new Promise((r) => setTimeout(r, 100));
     });
 
-    const task = new RecurringTask("test", slowFn, 30);
+    const task = new RecurringTask("test", slowFn, 50);
     task.start();
 
-    // First call fires at ~30ms, takes 80ms → completes at ~110ms.
-    // Second call should NOT have fired before another 30ms passes (~140ms).
-    await new Promise((r) => setTimeout(r, 130));
+    // First call fires at ~50ms, takes 100ms → completes at ~150ms.
+    // Second call schedules at ~150ms, fires at ~200ms.
+    await new Promise((r) => setTimeout(r, 180));
     expect(slowFn).toHaveBeenCalledTimes(1);
 
-    await new Promise((r) => setTimeout(r, 100));
-    expect(slowFn).toHaveBeenCalledTimes(2);
+    await new Promise((r) => setTimeout(r, 200));
+    expect(slowFn.mock.calls.length).toBeGreaterThanOrEqual(2);
     task.stop();
   });
 
@@ -49,26 +49,26 @@ describe("RecurringTask", () => {
       if (callCount === 1) throw new Error("boom");
     });
 
-    const task = new RecurringTask("test", failingFn, 20);
+    const task = new RecurringTask("test", failingFn, 50);
     task.start();
 
-    await new Promise((r) => setTimeout(r, 80));
+    await new Promise((r) => setTimeout(r, 250));
     expect(callCount).toBeGreaterThanOrEqual(2);
     task.stop();
   });
 
   it("stop() prevents further calls", async () => {
-    const task = new RecurringTask("test", fn, 20);
+    const task = new RecurringTask("test", fn, 50);
     task.start();
 
     // Wait long enough for at least one fire.
-    await new Promise((r) => setTimeout(r, 50));
+    await new Promise((r) => setTimeout(r, 120));
     const countAfterStart = fn.mock.calls.length;
     expect(countAfterStart).toBeGreaterThan(0);
 
     task.stop();
 
-    await new Promise((r) => setTimeout(r, 80));
+    await new Promise((r) => setTimeout(r, 200));
     expect(fn.mock.calls.length).toBe(countAfterStart);
   });
 

@@ -16,7 +16,7 @@ import {
   type WSDashboardData,
 } from "./routes/dashboard-api.ts";
 import { openAIError } from "./errors.ts";
-import { handleWindowPrefixedRoute } from "./router.ts";
+import { rewriteForWindowPrefix } from "./routes/dispatch.ts";
 import path from "node:path";
 import fs from "node:fs";
 import type { PrismaClient } from "@prisma/client";
@@ -102,6 +102,33 @@ export function createApp(prisma: PrismaClient, port?: number): AppServer {
   const pruner = new Pruner(prisma);
   pruner.start();
 
+  // Pre-build per-route logging wrappers once; allocating new wrappers per
+  // request would defeat the point of the wrapper closure.
+  const chatRoute = wrapRouteLogging("/v1/chat/completions", (req) =>
+    handleChatCompletions(req, poller),
+  );
+  const messagesRoute = wrapRouteLogging("/v1/messages", (req) =>
+    handleMessages(req, poller),
+  );
+  const responsesRoute = wrapRouteLogging("/v1/responses", (req) =>
+    handleResponses(req, poller),
+  );
+
+  function dispatch(
+    req: Request,
+    pathname: string,
+  ): Response | Promise<Response> {
+    if (pathname === "/v1/chat/completions" && req.method === "POST")
+      return chatRoute(req);
+    if (pathname === "/v1/models" && req.method === "GET")
+      return handleModels();
+    if (pathname === "/v1/messages" && req.method === "POST")
+      return messagesRoute(req);
+    if (pathname === "/v1/responses" && req.method === "POST")
+      return responsesRoute(req);
+    return openAIError(404, "Not found", "invalid_request_error");
+  }
+
   const server = Bun.serve({
     port: port ?? config.server.port,
     hostname: config.server.host,
@@ -126,60 +153,40 @@ export function createApp(prisma: PrismaClient, port?: number): AppServer {
       },
     },
 
-    routes: {
-      "/v1/chat/completions": {
-        POST: wrapRouteLogging("/v1/chat/completions", (req) =>
-          handleChatCompletions(req, poller),
-        ),
-      },
-      "/v1/models": {
-        GET: () => handleModels(),
-      },
-      "/v1/messages": {
-        POST: wrapRouteLogging("/v1/messages", (req) =>
-          handleMessages(req, poller),
-        ),
-      },
-      "/v1/responses": {
-        POST: wrapRouteLogging("/v1/responses", (req) =>
-          handleResponses(req, poller),
-        ),
-      },
-      "/health": new Response("ok"),
-      "/api/dashboard/jobs": {
-        GET: (req) => handleDashboardJobs(req),
-      },
-      "/api/models": {
-        GET: () => handleDashboardModels(),
-      },
-    },
-
     fetch(req, server) {
       const url = new URL(req.url);
+      const pathname = url.pathname;
 
       // WebSocket upgrade for dashboard real-time updates
       if (
-        url.pathname === "/ws/dashboard" &&
+        pathname === "/ws/dashboard" &&
         server.upgrade(req, {
           data: { subscribedAt: Date.now() } as WSDashboardData,
         })
       ) {
-        return; // upgrade succeeded, do not return a Response
+        return; // upgrade succeeded
       }
 
-      // Try window-prefixed routes first
-      const windowResult = handleWindowPrefixedRoute(req, poller);
-      if (windowResult) return windowResult;
+      // Window-prefixed routes (e.g. /flex/v1/chat/completions): strip the
+      // prefix, inject X-Completion-Window, then dispatch as if unprefixed.
+      const rewritten = rewriteForWindowPrefix(req);
+      if (rewritten) {
+        return dispatch(rewritten.req, rewritten.pathname);
+      }
 
-      // Dashboard API: job detail
-      if (
-        url.pathname.startsWith("/api/dashboard/jobs/") &&
-        req.method === "GET"
-      ) {
+      // /v1/* and /v1/models — delegate to dispatch
+      if (pathname.startsWith("/v1/")) return dispatch(req, pathname);
+
+      // Health + dashboard API
+      if (pathname === "/health") return new Response("ok");
+      if (pathname === "/api/dashboard/jobs" && req.method === "GET")
+        return handleDashboardJobs(req);
+      if (pathname.startsWith("/api/dashboard/jobs/") && req.method === "GET")
         return handleDashboardJobDetail(req);
-      }
+      if (pathname === "/api/models" && req.method === "GET")
+        return handleDashboardModels();
 
-      // Serve SPA static files
+      // SPA static files / fallback
       return serveSPA(req);
     },
 
