@@ -6,7 +6,6 @@ import type { CompletionWindow } from "./types.ts";
 // (it only passes it to handleChatCompletions)
 const mockPoller = {
   registerWaiter: mock(),
-  unregisterWaiter: mock(),
   stop: mock(),
   start: mock(),
 } as any;

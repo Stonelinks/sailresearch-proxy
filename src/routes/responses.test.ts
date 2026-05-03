@@ -33,7 +33,6 @@ function makeResponsesRequest(body: any, headers: Record<string, string> = {}) {
 // Minimal mock poller
 const mockPoller = {
   registerWaiter: mock(),
-  unregisterWaiter: mock(),
   start: mock(),
   stop: mock(),
 } as any;

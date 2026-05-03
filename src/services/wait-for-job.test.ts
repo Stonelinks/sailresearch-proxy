@@ -3,14 +3,7 @@
  * waiter resolves first. Without this, every successful batched request
  * leaves a 5–60 minute pending timer in the event loop — a slow leak.
  */
-import {
-  describe,
-  test,
-  expect,
-  beforeAll,
-  afterAll,
-  spyOn,
-} from "bun:test";
+import { describe, test, expect, beforeAll, afterAll, spyOn } from "bun:test";
 import { config } from "../config.ts";
 import { Poller } from "./poller.ts";
 import { waitForJob } from "./batch-submit.ts";
@@ -52,11 +45,13 @@ describe("waitForJob timer cleanup", () => {
     expect(windowTimerHandle).toBeDefined();
 
     // Resolve the waiter — this is what the poller does when it sees the job
-    // complete.
-    const waiters = (poller as unknown as { waiters: Map<string, any> })
+    // complete. Reach into the private `waiters` map (Set per id) and resolve
+    // the single waiter we know is there.
+    const waiters = (poller as unknown as { waiters: Map<string, Set<any>> })
       .waiters;
-    const waiter = waiters.get(sailResponseId);
-    expect(waiter).toBeDefined();
+    const set = waiters.get(sailResponseId);
+    expect(set?.size).toBe(1);
+    const [waiter] = [...set!];
     waiter.resolve({ id: sailResponseId, status: "completed" });
 
     const result = await waitPromise;

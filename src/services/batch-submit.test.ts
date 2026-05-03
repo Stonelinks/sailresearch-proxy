@@ -37,10 +37,15 @@ import type { BatchError } from "./batch-submit.ts";
 // Minimal mock poller
 const mockPoller = {
   registerWaiter: mock(),
-  unregisterWaiter: mock(),
   start: mock(),
   stop: mock(),
 } as any;
+
+// Convenience: have registerWaiter return the new {promise, cancel} shape
+// from a plain Promise of the eventual result.
+function waiterFor(p: Promise<any>) {
+  return { promise: p, cancel: mock() };
+}
 
 const baseParams = () => ({
   sailBody: {
@@ -70,7 +75,6 @@ describe("submitAndWait", () => {
     mockPrismaCreate.mockReset().mockResolvedValue({ id: "db_1" });
     mockPrismaFindMany.mockReset().mockResolvedValue([]); // no existing jobs
     mockPoller.registerWaiter.mockReset();
-    mockPoller.unregisterWaiter.mockReset();
   });
 
   test("submits to Sail when no existing job matches", async () => {
@@ -79,11 +83,13 @@ describe("submitAndWait", () => {
       data: { id: "resp_1", status: "queued", model: "test-model" },
     });
     mockPoller.registerWaiter.mockImplementationOnce(() =>
-      Promise.resolve({
-        id: "resp_1",
-        status: "completed",
-        output: [{ type: "message", role: "assistant", content: "Hi" }],
-      }),
+      waiterFor(
+        Promise.resolve({
+          id: "resp_1",
+          status: "completed",
+          output: [{ type: "message", role: "assistant", content: "Hi" }],
+        }),
+      ),
     );
 
     const result = await submitAndWait(baseParams());
@@ -132,11 +138,13 @@ describe("submitAndWait", () => {
       },
     ]);
     mockPoller.registerWaiter.mockImplementationOnce(() =>
-      Promise.resolve({
-        id: "resp_inflight",
-        status: "completed",
-        output: [{ type: "message", role: "assistant", content: "Finally!" }],
-      }),
+      waiterFor(
+        Promise.resolve({
+          id: "resp_inflight",
+          status: "completed",
+          output: [{ type: "message", role: "assistant", content: "Finally!" }],
+        }),
+      ),
     );
 
     const result = await submitAndWait(baseParams());
@@ -153,6 +161,39 @@ describe("submitAndWait", () => {
     expect(mockPoller.registerWaiter).toHaveBeenCalledWith("resp_inflight");
   });
 
+  test("falls through to fresh submit when dedup match is completed but has no responseBody", async () => {
+    // Defensive: a completed row with null responseBody must not be latched
+    // onto (the poller won't re-process it; the waiter would hang). Submit
+    // fresh instead.
+    mockPrismaFindMany.mockResolvedValueOnce([
+      {
+        sailResponseId: "resp_orphan",
+        status: "completed",
+        responseBody: null,
+      },
+    ]);
+    mockCreateResponse.mockResolvedValueOnce({
+      status: 202,
+      data: { id: "resp_fresh", status: "queued", model: "test-model" },
+    });
+    mockPoller.registerWaiter.mockImplementationOnce(() =>
+      waiterFor(
+        Promise.resolve({
+          id: "resp_fresh",
+          status: "completed",
+          output: [],
+        }),
+      ),
+    );
+
+    const result = await submitAndWait(baseParams());
+
+    expect(result.ok).toBe(true);
+    // Should have submitted fresh, NOT latched onto resp_orphan.
+    expect(mockCreateResponse).toHaveBeenCalledTimes(1);
+    expect(mockPoller.registerWaiter).toHaveBeenCalledWith("resp_fresh");
+  });
+
   test("does not match failed or cancelled jobs", async () => {
     // findExistingJob filters out failed/cancelled — findMany returns empty
     mockPrismaFindMany.mockResolvedValueOnce([]);
@@ -162,11 +203,13 @@ describe("submitAndWait", () => {
       data: { id: "resp_new", status: "queued", model: "test-model" },
     });
     mockPoller.registerWaiter.mockImplementationOnce(() =>
-      Promise.resolve({
-        id: "resp_new",
-        status: "completed",
-        output: [],
-      }),
+      waiterFor(
+        Promise.resolve({
+          id: "resp_new",
+          status: "completed",
+          output: [],
+        }),
+      ),
     );
 
     const result = await submitAndWait(baseParams());

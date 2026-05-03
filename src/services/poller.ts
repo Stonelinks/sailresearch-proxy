@@ -14,9 +14,23 @@ export function getBackoffMs(pollCount: number): number {
   return 30000;
 }
 
+export interface WaiterRegistration {
+  /** Resolves with the Sail job result, rejects on failure / cancellation. */
+  promise: Promise<any>;
+  /**
+   * Remove this specific waiter from the poller. Safe to call multiple
+   * times; safe to call after the waiter has already resolved/rejected.
+   * Other waiters on the same `sailResponseId` are unaffected.
+   */
+  cancel: () => void;
+}
+
 export class Poller {
   private task: RecurringTask | null = null;
-  private waiters = new Map<string, JobWaiter>();
+  // Multiple waiters per sailResponseId — concurrent dedup-hit requests
+  // both register here, both must be resolved/rejected when the job settles.
+  // Using a Set so cancel() can remove a specific waiter by reference.
+  private waiters = new Map<string, Set<JobWaiter>>();
   private inFlight = new Set<string>();
 
   constructor(private prisma: PrismaClient) {}
@@ -33,25 +47,52 @@ export class Poller {
 
   stop() {
     this.task?.stop();
-    // Reject all waiters
-    for (const [id, waiter] of this.waiters) {
-      waiter.reject(new Error("Poller stopped"));
+    // Reject every waiter across every job.
+    for (const set of this.waiters.values()) {
+      for (const waiter of set) {
+        waiter.reject(new Error("Poller stopped"));
+      }
     }
     this.waiters.clear();
   }
 
-  registerWaiter(sailResponseId: string): Promise<any> {
-    return new Promise((resolve, reject) => {
-      this.waiters.set(sailResponseId, {
-        resolve,
-        reject,
-        createdAt: now(),
-      });
+  registerWaiter(sailResponseId: string): WaiterRegistration {
+    let cancel!: () => void;
+    const promise = new Promise<any>((resolve, reject) => {
+      const waiter: JobWaiter = { resolve, reject, createdAt: now() };
+      let set = this.waiters.get(sailResponseId);
+      if (!set) {
+        set = new Set();
+        this.waiters.set(sailResponseId, set);
+      }
+      set.add(waiter);
+      cancel = () => {
+        const s = this.waiters.get(sailResponseId);
+        if (!s) return;
+        s.delete(waiter);
+        if (s.size === 0) this.waiters.delete(sailResponseId);
+      };
     });
+    return { promise, cancel };
   }
 
-  unregisterWaiter(sailResponseId: string) {
+  /**
+   * Resolve every waiter registered for this sailResponseId with `data`,
+   * then drop the entry. Safe to call when no waiters are registered.
+   */
+  private resolveWaiters(sailResponseId: string, data: any) {
+    const set = this.waiters.get(sailResponseId);
+    if (!set) return;
     this.waiters.delete(sailResponseId);
+    for (const waiter of set) waiter.resolve(data);
+  }
+
+  /** Reject every waiter registered for this sailResponseId. */
+  private rejectWaiters(sailResponseId: string, error: any) {
+    const set = this.waiters.get(sailResponseId);
+    if (!set) return;
+    this.waiters.delete(sailResponseId);
+    for (const waiter of set) waiter.reject(error);
   }
 
   private async tick() {
@@ -91,15 +132,11 @@ export class Poller {
           },
         });
         this.broadcastUpdate(job.id);
-        const waiter = this.waiters.get(job.sailResponseId);
-        if (waiter) {
-          waiter.reject({
-            error: {
-              message: `Job timed out after ${timeoutMs}ms (window: ${job.completionWindow})`,
-            },
-          });
-          this.waiters.delete(job.sailResponseId);
-        }
+        this.rejectWaiters(job.sailResponseId, {
+          error: {
+            message: `Job timed out after ${timeoutMs}ms (window: ${job.completionWindow})`,
+          },
+        });
       }
     }
 
@@ -163,12 +200,7 @@ export class Poller {
         });
 
         this.broadcastUpdate(job.id);
-
-        const waiter = this.waiters.get(job.sailResponseId);
-        if (waiter) {
-          waiter.resolve(data);
-          this.waiters.delete(job.sailResponseId);
-        }
+        this.resolveWaiters(job.sailResponseId, data);
         log.info(`[poller] completed ${job.sailResponseId}`);
       } else if (sailStatus === "failed" || sailStatus === "cancelled") {
         const errorBody = JSON.stringify(data);
@@ -178,12 +210,7 @@ export class Poller {
         });
 
         this.broadcastUpdate(job.id);
-
-        const waiter = this.waiters.get(job.sailResponseId);
-        if (waiter) {
-          waiter.reject(data);
-          this.waiters.delete(job.sailResponseId);
-        }
+        this.rejectWaiters(job.sailResponseId, data);
         log.info(`[poller] ${sailStatus} ${job.sailResponseId}`);
       } else {
         // Still pending or running

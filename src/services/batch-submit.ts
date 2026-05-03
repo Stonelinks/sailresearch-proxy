@@ -85,16 +85,26 @@ export async function submitAndWait(
       return { ok: true, data: cachedData };
     }
 
-    // In-flight job — latch onto it
-    log.info(
-      `[${logPrefix}] dedup hit: in-flight job id=${existing.sailResponseId} status=${existing.status} hash=${hash.slice(0, 12)}`,
-    );
-    return waitForJob(
-      existing.sailResponseId,
-      completionWindow,
-      poller,
-      logPrefix,
-    );
+    // Defensive: a row marked completed without a body should never exist
+    // (the poller writes both atomically), but if it does, latching onto it
+    // would hang forever — the poller won't re-process a completed row. Fall
+    // through to a fresh submit instead.
+    if (existing.status === "completed" && !existing.responseBody) {
+      log.warn(
+        `[${logPrefix}] dedup skip: completed job has no responseBody, submitting fresh id=${existing.sailResponseId}`,
+      );
+    } else {
+      // In-flight job — latch onto it
+      log.info(
+        `[${logPrefix}] dedup hit: in-flight job id=${existing.sailResponseId} status=${existing.status} hash=${hash.slice(0, 12)}`,
+      );
+      return waitForJob(
+        existing.sailResponseId,
+        completionWindow,
+        poller,
+        logPrefix,
+      );
+    }
   }
 
   // ── No match — submit to Sail ─────────────────────────────────────────
@@ -190,8 +200,8 @@ export async function waitForJob(
     `[${logPrefix}] waiter registered id=${sailResponseId} window=${completionWindow} timeoutMs=${timeoutMs}`,
   );
 
-  const resultPromise = poller
-    .registerWaiter(sailResponseId)
+  const { promise, cancel } = poller.registerWaiter(sailResponseId);
+  const resultPromise = promise
     .then((result) => ({ ok: true as const, result }))
     .catch((error) => ({ ok: false as const, error }));
 
@@ -212,8 +222,10 @@ export async function waitForJob(
     // Always clear the timer — without this, the resolved-first path leaves a
     // long-lived (5–60 min) timer in the event loop per successful request.
     if (timer) clearTimeout(timer);
-    // Always unregister — safe no-op if the poller already deleted the entry.
-    poller.unregisterWaiter(sailResponseId);
+    // Always cancel — removes only this waiter; safe no-op if it has already
+    // resolved/rejected. Critical for the dedup case where multiple waiters
+    // share a sailResponseId: cancelling one must not affect the others.
+    cancel();
   }
 
   log.debug(`[${logPrefix}] outcome id=${sailResponseId} ok=${outcome.ok}`);

@@ -37,10 +37,15 @@ const { handleMessages } = await import("../routes/messages.ts");
 // Minimal mock poller
 const mockPoller = {
   registerWaiter: mock(),
-  unregisterWaiter: mock(),
   start: mock(),
   stop: mock(),
 } as any;
+
+// Wrap a plain Promise into the {promise, cancel} shape the real
+// poller.registerWaiter returns.
+function waiterFor(p: Promise<any>) {
+  return { promise: p, cancel: mock() };
+}
 
 function makeMessagesRequest(body: any, headers: Record<string, string> = {}) {
   return new Request("http://localhost/v1/messages", {
@@ -58,7 +63,6 @@ describe("handleMessages", () => {
     mockCreateMessage.mockReset();
     mockCreateResponse.mockReset();
     mockPoller.registerWaiter.mockReset();
-    mockPoller.unregisterWaiter.mockReset();
     mockPrismaCreate.mockReset().mockResolvedValue({ id: "db_1" });
     mockPrismaFindMany.mockReset().mockResolvedValue([]); // no dedup hits by default
   });
@@ -321,21 +325,23 @@ describe("handleMessages", () => {
       });
 
       // Mock the poller waiter to resolve immediately with a completed response
-      mockPoller.registerWaiter.mockImplementationOnce((id: string) => {
-        return Promise.resolve({
-          id: "resp_batch_123",
-          status: "completed",
-          model: "test-model",
-          output: [
-            {
-              type: "message",
-              role: "assistant",
-              content: [{ type: "output_text", text: "Hello from batch!" }],
-            },
-          ],
-          usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15 },
-        });
-      });
+      mockPoller.registerWaiter.mockImplementationOnce((_id: string) =>
+        waiterFor(
+          Promise.resolve({
+            id: "resp_batch_123",
+            status: "completed",
+            model: "test-model",
+            output: [
+              {
+                type: "message",
+                role: "assistant",
+                content: [{ type: "output_text", text: "Hello from batch!" }],
+              },
+            ],
+            usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15 },
+          }),
+        ),
+      );
 
       const req = makeMessagesRequest(
         {
@@ -384,11 +390,13 @@ describe("handleMessages", () => {
         },
       });
 
-      mockPoller.registerWaiter.mockImplementationOnce(() => {
-        return Promise.reject({
-          error: { message: "Job failed on Sail" },
-        });
-      });
+      mockPoller.registerWaiter.mockImplementationOnce(() =>
+        waiterFor(
+          Promise.reject({
+            error: { message: "Job failed on Sail" },
+          }),
+        ),
+      );
 
       const req = makeMessagesRequest(
         {
@@ -416,21 +424,23 @@ describe("handleMessages", () => {
         },
       });
 
-      mockPoller.registerWaiter.mockImplementationOnce(() => {
-        return Promise.resolve({
-          id: "resp_img",
-          status: "completed",
-          model: "moonshotai/Kimi-K2.5",
-          output: [
-            {
-              type: "message",
-              role: "assistant",
-              content: [{ type: "output_text", text: "A cat" }],
-            },
-          ],
-          usage: { input_tokens: 100, output_tokens: 5, total_tokens: 105 },
-        });
-      });
+      mockPoller.registerWaiter.mockImplementationOnce(() =>
+        waiterFor(
+          Promise.resolve({
+            id: "resp_img",
+            status: "completed",
+            model: "moonshotai/Kimi-K2.5",
+            output: [
+              {
+                type: "message",
+                role: "assistant",
+                content: [{ type: "output_text", text: "A cat" }],
+              },
+            ],
+            usage: { input_tokens: 100, output_tokens: 5, total_tokens: 105 },
+          }),
+        ),
+      );
 
       const req = makeMessagesRequest(
         {
@@ -476,21 +486,23 @@ describe("handleMessages", () => {
         },
       });
 
-      mockPoller.registerWaiter.mockImplementationOnce(() => {
-        return Promise.resolve({
-          id: "resp_strip",
-          status: "completed",
-          model: "test-model",
-          output: [
-            {
-              type: "message",
-              role: "assistant",
-              content: [{ type: "output_text", text: "Done" }],
-            },
-          ],
-          usage: { input_tokens: 10, output_tokens: 2, total_tokens: 12 },
-        });
-      });
+      mockPoller.registerWaiter.mockImplementationOnce(() =>
+        waiterFor(
+          Promise.resolve({
+            id: "resp_strip",
+            status: "completed",
+            model: "test-model",
+            output: [
+              {
+                type: "message",
+                role: "assistant",
+                content: [{ type: "output_text", text: "Done" }],
+              },
+            ],
+            usage: { input_tokens: 10, output_tokens: 2, total_tokens: 12 },
+          }),
+        ),
+      );
 
       const req = makeMessagesRequest(
         {
