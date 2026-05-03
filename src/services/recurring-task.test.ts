@@ -1,4 +1,4 @@
-import { describe, it, expect, mock, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, mock, beforeEach } from "bun:test";
 import { RecurringTask } from "./recurring-task.ts";
 
 describe("RecurringTask", () => {
@@ -12,18 +12,7 @@ describe("RecurringTask", () => {
     calls.length = 0;
   });
 
-  it("calls fn immediately when runImmediately is true", async () => {
-    const task = new RecurringTask("test", fn, 60000, { runImmediately: true });
-    task.start();
-
-    // Give microtask queue a chance
-    await new Promise((r) => setTimeout(r, 10));
-
-    expect(fn).toHaveBeenCalledTimes(1);
-    task.stop();
-  });
-
-  it("waits for interval before first call when runImmediately is false", async () => {
+  it("waits for interval before first call", async () => {
     const task = new RecurringTask("test", fn, 50);
     task.start();
 
@@ -40,16 +29,15 @@ describe("RecurringTask", () => {
       await new Promise((r) => setTimeout(r, 80));
     });
 
-    const task = new RecurringTask("test", slowFn, 50, {
-      runImmediately: true,
-    });
+    const task = new RecurringTask("test", slowFn, 30);
     task.start();
 
-    // After slow fn (80ms) + interval (50ms) = 130ms for second call
-    await new Promise((r) => setTimeout(r, 100));
-    expect(slowFn).toHaveBeenCalledTimes(1); // not yet called again
+    // First call fires at ~30ms, takes 80ms → completes at ~110ms.
+    // Second call should NOT have fired before another 30ms passes (~140ms).
+    await new Promise((r) => setTimeout(r, 130));
+    expect(slowFn).toHaveBeenCalledTimes(1);
 
-    await new Promise((r) => setTimeout(r, 60));
+    await new Promise((r) => setTimeout(r, 100));
     expect(slowFn).toHaveBeenCalledTimes(2);
     task.stop();
   });
@@ -61,9 +49,7 @@ describe("RecurringTask", () => {
       if (callCount === 1) throw new Error("boom");
     });
 
-    const task = new RecurringTask("test", failingFn, 30, {
-      runImmediately: true,
-    });
+    const task = new RecurringTask("test", failingFn, 20);
     task.start();
 
     await new Promise((r) => setTimeout(r, 80));
@@ -72,15 +58,34 @@ describe("RecurringTask", () => {
   });
 
   it("stop() prevents further calls", async () => {
-    const task = new RecurringTask("test", fn, 30, { runImmediately: true });
+    const task = new RecurringTask("test", fn, 20);
     task.start();
 
-    await new Promise((r) => setTimeout(r, 10));
+    // Wait long enough for at least one fire.
+    await new Promise((r) => setTimeout(r, 50));
     const countAfterStart = fn.mock.calls.length;
+    expect(countAfterStart).toBeGreaterThan(0);
 
     task.stop();
 
     await new Promise((r) => setTimeout(r, 80));
     expect(fn.mock.calls.length).toBe(countAfterStart);
+  });
+
+  it("running getter reflects start/stop state", () => {
+    const task = new RecurringTask("test", fn, 1000);
+    expect(task.running).toBe(false);
+    task.start();
+    expect(task.running).toBe(true);
+    task.stop();
+    expect(task.running).toBe(false);
+  });
+
+  it("start() is idempotent", () => {
+    const task = new RecurringTask("test", fn, 1000);
+    task.start();
+    task.start();
+    expect(task.running).toBe(true);
+    task.stop();
   });
 });

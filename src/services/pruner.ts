@@ -15,8 +15,9 @@ export class Pruner {
       "pruner",
       () => this.prune(),
       config.prune.intervalMs,
-      { runImmediately: true },
     );
+    // Run once on startup so we don't wait a full interval after restart.
+    void this.prune();
     this.task.start();
     log.info(`[pruner] retention=${config.prune.retentionDays}d`);
   }
