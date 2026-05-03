@@ -1,4 +1,5 @@
 import { toUnixSeconds, unixNow } from "../../shared/time.ts";
+import { extractTextFragments } from "./extract-text.ts";
 
 export function responsesToChatCompletion(sailResp: any): any {
   const content = extractOutputText(sailResp.output);
@@ -39,23 +40,8 @@ export function responsesToChatCompletion(sailResp: any): any {
 function extractOutputText(output: any): string | null {
   if (output == null) return null;
   if (typeof output === "string") return output;
-  if (Array.isArray(output)) {
-    const texts: string[] = [];
-    for (const item of output) {
-      if (item.type === "message" && Array.isArray(item.content)) {
-        for (const part of item.content) {
-          if (part.type === "output_text" && part.text) texts.push(part.text);
-          // input_image in output is echoed input, not new content — skip it
-        }
-      }
-    }
-    if (texts.length > 0) return texts.join("");
-    // Fallback: if no structured text found, try raw text
-    for (const item of output) {
-      if (item.text) return item.text;
-    }
-  }
-  return null;
+  const fragments = extractTextFragments(output);
+  return fragments.length > 0 ? fragments.join("") : null;
 }
 
 function extractToolCalls(output: any): any[] {

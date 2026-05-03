@@ -1,3 +1,5 @@
+import { extractTextFragments } from "./extract-text.ts";
+
 /**
  * Transform a Sail Responses API response back into Anthropic Messages API format.
  * Used when the /v1/messages endpoint goes through the batching path
@@ -37,34 +39,10 @@ export function responsesToMessage(sailResp: any): any {
 
 /**
  * Extract text content from a Sail Responses API output array and return
- * it in Anthropic Messages content block format.
+ * it in Anthropic Messages content block format. Always returns at least
+ * one block — Anthropic clients expect a non-empty content array.
  */
 function extractMessageText(output: any): any[] {
-  if (!Array.isArray(output)) {
-    return [{ type: "text", text: "" }];
-  }
-
-  const texts: string[] = [];
-  for (const item of output) {
-    if (item.type === "message" && Array.isArray(item.content)) {
-      for (const part of item.content) {
-        if (part.type === "output_text" && part.text) {
-          texts.push(part.text);
-        }
-      }
-    }
-  }
-
-  if (texts.length > 0) {
-    return [{ type: "text", text: texts.join("") }];
-  }
-
-  // Fallback: try raw .text on items
-  for (const item of output) {
-    if (item.text) {
-      return [{ type: "text", text: item.text }];
-    }
-  }
-
-  return [{ type: "text", text: "" }];
+  const text = extractTextFragments(output).join("");
+  return [{ type: "text", text }];
 }
