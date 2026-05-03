@@ -26,6 +26,7 @@ export const config = {
   sail: {
     apiKey: requireEnv("SAIL_API_KEY"),
     baseUrl: env("SAIL_BASE_URL", "https://api.sailresearch.com/v1"),
+    requestTimeoutMs: intEnv("SAIL_REQUEST_TIMEOUT_MS", 30 * SECOND),
   },
   server: {
     port: intEnv("PORT", 4000),

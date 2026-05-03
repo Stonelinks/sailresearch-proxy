@@ -11,26 +11,38 @@ async function request(
     typeof init.body === "string" ? init.body.length : init.body ? -1 : 0;
   log.debug(`[sail] → ${method} ${path} bodyBytes=${bodyBytes}`);
   const start = now();
-  const res = await fetch(`${config.sail.baseUrl}${path}`, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${config.sail.apiKey}`,
-      "Content-Type": "application/json",
-      ...(init.headers as Record<string, string> | undefined),
-    },
-  });
-  const data: any = await res.json();
-  const ms = now() - start;
-  const respBytes = JSON.stringify(data).length;
-  log.debug(
-    `[sail] ← ${method} ${path} status=${res.status} ms=${ms} bodyBytes=${respBytes}`,
-  );
-  if (res.status < 200 || res.status >= 300) {
-    log.warn(
-      `[sail] non-2xx ${method} ${path} status=${res.status} error=${data?.error?.message ?? "<none>"}`,
+  try {
+    const res = await fetch(`${config.sail.baseUrl}${path}`, {
+      ...init,
+      signal: AbortSignal.timeout(config.sail.requestTimeoutMs),
+      headers: {
+        Authorization: `Bearer ${config.sail.apiKey}`,
+        "Content-Type": "application/json",
+        ...(init.headers as Record<string, string> | undefined),
+      },
+    });
+    const data: any = await res.json();
+    const ms = now() - start;
+    const respBytes = JSON.stringify(data).length;
+    log.debug(
+      `[sail] ← ${method} ${path} status=${res.status} ms=${ms} bodyBytes=${respBytes}`,
     );
+    if (res.status < 200 || res.status >= 300) {
+      log.warn(
+        `[sail] non-2xx ${method} ${path} status=${res.status} error=${data?.error?.message ?? "<none>"}`,
+      );
+    }
+    return { status: res.status, data };
+  } catch (err) {
+    const ms = now() - start;
+    const isTimeout = err instanceof Error && err.name === "TimeoutError";
+    if (isTimeout) {
+      log.warn(
+        `[sail] timeout ${method} ${path} after ${ms}ms (limit=${config.sail.requestTimeoutMs}ms)`,
+      );
+    }
+    throw err;
   }
-  return { status: res.status, data };
 }
 
 export const sail = {

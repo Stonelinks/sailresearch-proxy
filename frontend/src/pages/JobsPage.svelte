@@ -61,10 +61,17 @@
 
   onMount(() => {
     load();
-    const disconnect = connectJobUpdates((job) => {
-      connected = true;
-      handleJobUpdate(job);
-    });
+    const disconnect = connectJobUpdates(
+      (job) => {
+        handleJobUpdate(job);
+      },
+      () => {
+        connected = true;
+      },
+      () => {
+        connected = false;
+      },
+    );
 
     return () => disconnect();
   });

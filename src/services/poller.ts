@@ -17,7 +17,7 @@ export function getBackoffMs(pollCount: number): number {
 export class Poller {
   private task: RecurringTask | null = null;
   private waiters = new Map<string, JobWaiter>();
-  private activePollCount = 0;
+  private inFlight = new Set<string>();
 
   constructor(private prisma: PrismaClient) {}
 
@@ -55,7 +55,7 @@ export class Poller {
   }
 
   private async tick() {
-    if (this.activePollCount >= config.polling.maxConcurrent) return;
+    if (this.inFlight.size >= config.polling.maxConcurrent) return;
 
     const now = new Date();
 
@@ -103,28 +103,34 @@ export class Poller {
       }
     }
 
-    // Poll jobs that are due
+    // Poll jobs that are due. Over-fetch slightly so that jobs already
+    // in-flight (and skipped below) don't reduce the per-tick batch size.
+    const slotsAvailable = config.polling.maxConcurrent - this.inFlight.size;
     const jobs = await this.prisma.pendingJob.findMany({
       where: {
         status: { notIn: ["completed", "failed", "cancelled"] },
         nextPollAt: { lte: now },
       },
-      take: config.polling.maxConcurrent - this.activePollCount,
+      take: slotsAvailable + this.inFlight.size,
     });
+
+    let started = 0;
+    for (const job of jobs) {
+      if (started >= slotsAvailable) break;
+      if (this.inFlight.has(job.id)) continue;
+      this.pollJob(job);
+      started++;
+    }
 
     if (jobs.length > 0) {
       log.debug(
-        `[poller] tick activePolls=${this.activePollCount} jobsFound=${jobs.length}`,
+        `[poller] tick inFlight=${this.inFlight.size} jobsFound=${jobs.length} started=${started}`,
       );
-    }
-
-    for (const job of jobs) {
-      this.pollJob(job);
     }
   }
 
   private async pollJob(job: any) {
-    this.activePollCount++;
+    this.inFlight.add(job.id);
     try {
       log.debug(
         `[poller] polling id=${job.sailResponseId} pollCount=${job.pollCount}`,
@@ -188,7 +194,7 @@ export class Poller {
       log.error(`[poller] fetch error for ${job.sailResponseId}:`, err);
       await this.scheduleRetry(job);
     } finally {
-      this.activePollCount--;
+      this.inFlight.delete(job.id);
     }
   }
 

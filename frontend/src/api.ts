@@ -76,13 +76,19 @@ export async function fetchModels(): Promise<SailModelsResponse> {
 }
 
 export type JobUpdateCallback = (job: Job) => void;
+export type ConnectCallback = () => void;
 
 /**
  * Connect to the WebSocket endpoint for real-time job updates.
  * Returns a cleanup function that closes the connection.
  * Automatically reconnects on disconnect with exponential backoff.
+ * `onConnect` is called when the server confirms the connection (or on open).
  */
-export function connectJobUpdates(onUpdate: JobUpdateCallback): () => void {
+export function connectJobUpdates(
+  onUpdate: JobUpdateCallback,
+  onConnect?: ConnectCallback,
+  onDisconnect?: ConnectCallback,
+): () => void {
   let ws: WebSocket | null = null;
   let disposed = false;
   let reconnectDelay = 1000;
@@ -101,7 +107,9 @@ export function connectJobUpdates(onUpdate: JobUpdateCallback): () => void {
     ws.addEventListener("message", (event) => {
       try {
         const msg = JSON.parse(event.data);
-        if (msg.type === "job_update" && msg.data) {
+        if (msg.type === "connected") {
+          onConnect?.();
+        } else if (msg.type === "job_update" && msg.data) {
           onUpdate(msg.data as Job);
         }
       } catch (e) {
@@ -111,6 +119,7 @@ export function connectJobUpdates(onUpdate: JobUpdateCallback): () => void {
 
     ws.addEventListener("close", () => {
       if (disposed) return;
+      onDisconnect?.();
       log.info("WebSocket disconnected, reconnecting in", reconnectDelay, "ms");
       // Reconnect with backoff
       setTimeout(() => {
