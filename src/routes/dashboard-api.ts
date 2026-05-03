@@ -2,6 +2,13 @@ import { prisma } from "../db.ts";
 import { openAIError, mapSailError } from "../errors.ts";
 import { log } from "../../shared/logger.ts";
 import { sail } from "../sail-client.ts";
+import {
+  JOB_SUMMARY_SELECT,
+  JOB_DETAIL_SELECT,
+  jobToSummary,
+  jobToDetail,
+  type JobSummary,
+} from "../services/job-shapes.ts";
 import type { ServerWebSocket } from "bun";
 
 /** Data attached to each dashboard WebSocket connection. */
@@ -13,19 +20,7 @@ export type WSDashboardData = {
 const dashboardClients = new Set<ServerWebSocket<WSDashboardData>>();
 
 /** Broadcast a job update to all connected WebSocket clients. */
-export function broadcastJobUpdate(job: {
-  id: string;
-  sailResponseId: string;
-  status: string;
-  model: string;
-  completionWindow: string;
-  apiType: string;
-  createdAt: string;
-  completedAt: string | null;
-  durationMs: number | null;
-  pollCount: number;
-  hasError: boolean;
-}) {
+export function broadcastJobUpdate(job: JobSummary) {
   const payload = JSON.stringify({ type: "job_update", data: job });
   for (const client of dashboardClients) {
     try {
@@ -71,39 +66,17 @@ export async function handleDashboardJobs(req: Request): Promise<Response> {
       orderBy: { createdAt: "desc" },
       take: limit,
       skip: offset,
-      select: {
-        id: true,
-        sailResponseId: true,
-        status: true,
-        model: true,
-        completionWindow: true,
-        apiType: true,
-        createdAt: true,
-        completedAt: true,
-        pollCount: true,
-        errorBody: true,
-      },
+      select: JOB_SUMMARY_SELECT,
     }),
     prisma.pendingJob.count({ where }),
   ]);
 
-  const result = jobs.map((job) => ({
-    id: job.id,
-    sailResponseId: job.sailResponseId,
-    status: job.status,
-    model: job.model,
-    completionWindow: job.completionWindow,
-    apiType: job.apiType,
-    createdAt: job.createdAt.toISOString(),
-    completedAt: job.completedAt?.toISOString() ?? null,
-    durationMs: job.completedAt
-      ? job.completedAt.getTime() - job.createdAt.getTime()
-      : null,
-    pollCount: job.pollCount,
-    hasError: job.errorBody !== null,
-  }));
-
-  return Response.json({ jobs: result, total, limit, offset });
+  return Response.json({
+    jobs: jobs.map(jobToSummary),
+    total,
+    limit,
+    offset,
+  });
 }
 
 export async function handleDashboardJobDetail(
@@ -117,42 +90,12 @@ export async function handleDashboardJobDetail(
 
   const job = await prisma.pendingJob.findUnique({
     where: { id },
-    select: {
-      id: true,
-      sailResponseId: true,
-      status: true,
-      model: true,
-      completionWindow: true,
-      apiType: true,
-      createdAt: true,
-      completedAt: true,
-      pollCount: true,
-      errorBody: true,
-      requestBody: true,
-      responseBody: true,
-    },
+    select: JOB_DETAIL_SELECT,
   });
 
   if (!job) return openAIError(404, "Job not found");
 
-  return Response.json({
-    id: job.id,
-    sailResponseId: job.sailResponseId,
-    status: job.status,
-    model: job.model,
-    completionWindow: job.completionWindow,
-    apiType: job.apiType,
-    createdAt: job.createdAt.toISOString(),
-    completedAt: job.completedAt?.toISOString() ?? null,
-    durationMs: job.completedAt
-      ? job.completedAt.getTime() - job.createdAt.getTime()
-      : null,
-    pollCount: job.pollCount,
-    hasError: job.errorBody !== null,
-    requestBody: job.requestBody,
-    responseBody: job.responseBody,
-    errorBody: job.errorBody,
-  });
+  return Response.json(jobToDetail(job));
 }
 
 // A malformed samplingPresets string would crash the entire /api/models

@@ -4,6 +4,7 @@ import { config, getTimeoutMs } from "../config.ts";
 import { log } from "../../shared/logger.ts";
 import { broadcastJobUpdate } from "../routes/dashboard-api.ts";
 import { RecurringTask } from "./recurring-task.ts";
+import { JOB_SUMMARY_SELECT, jobToSummary } from "./job-shapes.ts";
 import { now } from "../../shared/time.ts";
 import type { JobWaiter, CompletionWindow } from "../types.ts";
 
@@ -229,35 +230,10 @@ export class Poller {
     try {
       const job = await this.prisma.pendingJob.findUnique({
         where: { id: jobId },
-        select: {
-          id: true,
-          sailResponseId: true,
-          status: true,
-          model: true,
-          completionWindow: true,
-          apiType: true,
-          createdAt: true,
-          completedAt: true,
-          pollCount: true,
-          errorBody: true,
-        },
+        select: JOB_SUMMARY_SELECT,
       });
       if (!job) return;
-      broadcastJobUpdate({
-        id: job.id,
-        sailResponseId: job.sailResponseId,
-        status: job.status,
-        model: job.model,
-        completionWindow: job.completionWindow,
-        apiType: job.apiType,
-        createdAt: job.createdAt.toISOString(),
-        completedAt: job.completedAt?.toISOString() ?? null,
-        durationMs: job.completedAt
-          ? job.completedAt.getTime() - job.createdAt.getTime()
-          : null,
-        pollCount: job.pollCount,
-        hasError: job.errorBody !== null,
-      });
+      broadcastJobUpdate(jobToSummary(job));
     } catch {
       // Non-critical: don't let broadcast failures affect polling
     }
