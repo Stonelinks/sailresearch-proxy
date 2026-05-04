@@ -123,7 +123,7 @@ export function createApp(prisma: PrismaClient, port?: number): AppServer {
     if (pathname === "/v1/chat/completions" && req.method === "POST")
       return chatRoute(req);
     if (pathname === "/v1/models" && req.method === "GET")
-      return handleModels();
+      return handleModels(req);
     if (pathname === "/v1/messages" && req.method === "POST")
       return messagesRoute(req);
     if (pathname === "/v1/responses" && req.method === "POST")

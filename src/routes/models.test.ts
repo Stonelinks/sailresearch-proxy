@@ -25,6 +25,12 @@ mock.module("../db.ts", () => ({
 
 const { handleModels } = await import("./models.ts");
 
+function reqWithWindow(window?: string): Request {
+  const headers = new Headers();
+  if (window) headers.set("x-completion-window", window);
+  return new Request("http://x/v1/models", { headers });
+}
+
 describe("handleModels", () => {
   beforeEach(() => {
     mockListModels.mockReset();
@@ -65,10 +71,26 @@ describe("handleModels", () => {
             params: '{"temperature":1.2,"top_k":50}',
           },
         ],
+        prices: [
+          {
+            completionWindow: "standard",
+            inputPerMTok: 0.2,
+            cachedInputPerMTok: 0.1,
+            outputPerMTok: 1.2,
+            currency: "USD",
+          },
+          {
+            completionWindow: "flex",
+            inputPerMTok: 0.16,
+            cachedInputPerMTok: 0.05,
+            outputPerMTok: 0.8,
+            currency: "USD",
+          },
+        ],
       },
     ]);
 
-    const res = await handleModels();
+    const res = await handleModels(reqWithWindow());
     expect(res.status).toBe(200);
     const body: any = await res.json();
     expect(body.object).toBe("list");
@@ -87,11 +109,7 @@ describe("handleModels", () => {
     // default_parameters comes from the preset named "default".
     expect(m.default_parameters).toEqual({ temperature: 0.7, top_p: 0.95 });
     // supported_parameters is the sorted union across presets.
-    expect(m.supported_parameters).toEqual([
-      "temperature",
-      "top_k",
-      "top_p",
-    ]);
+    expect(m.supported_parameters).toEqual(["temperature", "top_k", "top_p"]);
     // Namespaced extension carries the full preset list.
     expect(m.x_sampling_presets).toHaveLength(2);
     expect(m.x_sampling_presets[0]).toEqual({
@@ -101,6 +119,29 @@ describe("handleModels", () => {
     });
     expect(m.x_source).toBe("https://hf.co/org-a/model-a");
     expect(m.x_researched_at).toBe("2025-06-01T00:00:00.000Z");
+    // Default unprefixed window is "standard" → mirror standard pricing.
+    expect(m.pricing).toEqual({
+      prompt: (0.2 / 1_000_000).toString(),
+      completion: (1.2 / 1_000_000).toString(),
+      input_cache_read: (0.1 / 1_000_000).toString(),
+    });
+    expect(m.x_billing_window).toBeUndefined();
+    expect(m.x_pricing_by_completion_window).toEqual([
+      {
+        completion_window: "standard",
+        input_per_mtok: 0.2,
+        cached_input_per_mtok: 0.1,
+        output_per_mtok: 1.2,
+        currency: "USD",
+      },
+      {
+        completion_window: "flex",
+        input_per_mtok: 0.16,
+        cached_input_per_mtok: 0.05,
+        output_per_mtok: 0.8,
+        currency: "USD",
+      },
+    ]);
   });
 
   test("omits enrichment fields entirely for un-researched models", async () => {
@@ -120,7 +161,7 @@ describe("handleModels", () => {
     });
     mockModelMetaFindMany.mockResolvedValueOnce([]);
 
-    const res = await handleModels();
+    const res = await handleModels(reqWithWindow());
     const body: any = await res.json();
     const m = body.data[0];
 
@@ -155,10 +196,11 @@ describe("handleModels", () => {
             params: '{"temperature":0}',
           },
         ],
+        prices: [],
       },
     ]);
 
-    const res = await handleModels();
+    const res = await handleModels(reqWithWindow());
     const body: any = await res.json();
     expect(body.data[0].default_parameters).toEqual({ temperature: 1.2 });
   });
@@ -169,7 +211,7 @@ describe("handleModels", () => {
       data: { error: { message: "upstream down" } },
     });
 
-    const res = await handleModels();
+    const res = await handleModels(reqWithWindow());
     // mapSailError translates upstream 5xx → 502 Bad Gateway.
     expect(res.status).toBe(502);
     expect(mockModelMetaFindMany).not.toHaveBeenCalled();
@@ -192,13 +234,175 @@ describe("handleModels", () => {
         samplingPresets: [
           { name: "broken", description: "", params: "{not json" },
         ],
+        prices: [],
       },
     ]);
 
-    const res = await handleModels();
+    const res = await handleModels(reqWithWindow());
     expect(res.status).toBe(200);
     const body: any = await res.json();
     expect(body.data[0].default_parameters).toEqual({});
     expect(body.data[0].supported_parameters).toEqual([]);
+    expect(body.data[0].pricing).toBeUndefined();
+    expect(body.data[0].x_pricing_by_completion_window).toBeUndefined();
+  });
+
+  test("x-completion-window header selects the pricing mirror", async () => {
+    mockListModels.mockResolvedValueOnce({
+      status: 200,
+      data: {
+        data: [{ id: "m", object: "model", created: 1, owned_by: "x" }],
+      },
+    });
+    mockModelMetaFindMany.mockResolvedValueOnce([
+      {
+        modelId: "m",
+        contextSize: 1,
+        description: null,
+        source: null,
+        researchedAt: new Date(),
+        samplingPresets: [],
+        prices: [
+          {
+            completionWindow: "standard",
+            inputPerMTok: 1,
+            cachedInputPerMTok: null,
+            outputPerMTok: 5,
+            currency: "USD",
+          },
+          {
+            completionWindow: "flex",
+            inputPerMTok: 0.5,
+            cachedInputPerMTok: null,
+            outputPerMTok: 2.5,
+            currency: "USD",
+          },
+        ],
+      },
+    ]);
+
+    const res = await handleModels(reqWithWindow("flex"));
+    const body: any = await res.json();
+    expect(body.data[0].pricing).toEqual({
+      prompt: (0.5 / 1_000_000).toString(),
+      completion: (2.5 / 1_000_000).toString(),
+    });
+    expect(body.data[0].x_billing_window).toBeUndefined();
+  });
+
+  test("falls back to flex pricing with x_billing_window when window is missing", async () => {
+    mockListModels.mockResolvedValueOnce({
+      status: 200,
+      data: {
+        data: [{ id: "m", object: "model", created: 1, owned_by: "x" }],
+      },
+    });
+    mockModelMetaFindMany.mockResolvedValueOnce([
+      {
+        modelId: "m",
+        contextSize: 1,
+        description: null,
+        source: null,
+        researchedAt: new Date(),
+        samplingPresets: [],
+        prices: [
+          {
+            completionWindow: "flex",
+            inputPerMTok: 0.04,
+            cachedInputPerMTok: 0.01,
+            outputPerMTok: 0.25,
+            currency: "USD",
+          },
+        ],
+      },
+    ]);
+
+    // Ask for "priority" — model only publishes flex.
+    const res = await handleModels(reqWithWindow("priority"));
+    const body: any = await res.json();
+    expect(body.data[0].pricing).toEqual({
+      prompt: (0.04 / 1_000_000).toString(),
+      completion: (0.25 / 1_000_000).toString(),
+      input_cache_read: (0.01 / 1_000_000).toString(),
+    });
+    expect(body.data[0].x_billing_window).toBe("flex");
+  });
+
+  test("omits pricing when window is missing and no flex row exists", async () => {
+    mockListModels.mockResolvedValueOnce({
+      status: 200,
+      data: {
+        data: [{ id: "m", object: "model", created: 1, owned_by: "x" }],
+      },
+    });
+    mockModelMetaFindMany.mockResolvedValueOnce([
+      {
+        modelId: "m",
+        contextSize: 1,
+        description: null,
+        source: null,
+        researchedAt: new Date(),
+        samplingPresets: [],
+        prices: [
+          {
+            completionWindow: "asap",
+            inputPerMTok: 1,
+            cachedInputPerMTok: null,
+            outputPerMTok: 5,
+            currency: "USD",
+          },
+        ],
+      },
+    ]);
+
+    const res = await handleModels(reqWithWindow("standard"));
+    const body: any = await res.json();
+    expect(body.data[0].pricing).toBeUndefined();
+    expect(body.data[0].x_billing_window).toBeUndefined();
+    // The full per-window list is still emitted regardless.
+    expect(body.data[0].x_pricing_by_completion_window).toEqual([
+      {
+        completion_window: "asap",
+        input_per_mtok: 1,
+        output_per_mtok: 5,
+        currency: "USD",
+      },
+    ]);
+  });
+
+  test("invalid x-completion-window header falls back to default window", async () => {
+    mockListModels.mockResolvedValueOnce({
+      status: 200,
+      data: {
+        data: [{ id: "m", object: "model", created: 1, owned_by: "x" }],
+      },
+    });
+    mockModelMetaFindMany.mockResolvedValueOnce([
+      {
+        modelId: "m",
+        contextSize: 1,
+        description: null,
+        source: null,
+        researchedAt: new Date(),
+        samplingPresets: [],
+        prices: [
+          {
+            completionWindow: "standard",
+            inputPerMTok: 1,
+            cachedInputPerMTok: null,
+            outputPerMTok: 5,
+            currency: "USD",
+          },
+        ],
+      },
+    ]);
+
+    const res = await handleModels(reqWithWindow("garbage"));
+    const body: any = await res.json();
+    // Default DEFAULT_COMPLETION_WINDOW is "standard".
+    expect(body.data[0].pricing).toEqual({
+      prompt: (1 / 1_000_000).toString(),
+      completion: (5 / 1_000_000).toString(),
+    });
   });
 });
