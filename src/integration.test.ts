@@ -41,7 +41,11 @@ let baseUrl: string;
 
 // ── Config ──────────────────────────────────────────────────────────────────
 
-const hasApiKey = !!process.env.SAIL_API_KEY;
+// `bin/test` defaults SAIL_API_KEY to "test" when unset, so a plain truthy
+// check would run the live suite against Sail with a placeholder key. Treat
+// "test" as "no key" so the suite cleanly skips on machines without secrets.
+const apiKey = process.env.SAIL_API_KEY;
+const hasApiKey = !!apiKey && apiKey !== "test";
 const runSlow = process.env.SAIL_SLOW_INTEGRATION === "1";
 
 const TEST_MODEL = "MiniMaxAI/MiniMax-M2.7";
@@ -324,6 +328,100 @@ describe.skipIf(!hasApiKey)("integration: proxy + Sail API", () => {
     }, 60_000);
   });
 
+  // ── Local handlers (no Sail call, but gated to share the live-suite server) ─
+
+  describe("local handlers", () => {
+    test("GET /health returns 200 with body 'ok'", async () => {
+      const res = await fetch(`${baseUrl}/health`);
+      expect(res.status).toBe(200);
+      expect(await res.text()).toBe("ok");
+    });
+
+    test("GET /v1/models returns OpenAI list shape", async () => {
+      const res = await fetch(`${baseUrl}/v1/models`);
+      expect(res.status).toBe(200);
+      const body: any = await res.json();
+      expect(body.object).toBe("list");
+      expect(Array.isArray(body.data)).toBe(true);
+      expect(body.data.length).toBeGreaterThan(0);
+      for (const m of body.data) expect(m.object).toBe("model");
+    }, 30_000);
+
+    test("unknown /v1/ route returns 404", async () => {
+      const res = await fetch(`${baseUrl}/v1/nonexistent`);
+      expect(res.status).toBe(404);
+    });
+  });
+
+  // ── asap input-format compatibility ─────────────────────────────────────
+
+  describe("asap input compatibility", () => {
+    test("deprecated max_tokens field still works", async () => {
+      const res = await fetch(`${baseUrl}/asap/v1/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${process.env.SAIL_API_KEY || ""}`,
+        },
+        body: JSON.stringify({
+          model: TEST_MODEL,
+          messages: [{ role: "user", content: "Say hi." }],
+          max_tokens: 10,
+        }),
+      });
+      expect(res.status).toBe(200);
+      const body: any = await res.json();
+      expect(body.error).toBeUndefined();
+      expect(body.choices?.[0]?.message?.content).toBeDefined();
+    }, 60_000);
+
+    test("X-Completion-Window header (no URL prefix) is honored", async () => {
+      const res = await fetch(`${baseUrl}/v1/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Completion-Window": "asap",
+          Authorization: `Bearer ${process.env.SAIL_API_KEY || ""}`,
+        },
+        body: JSON.stringify({
+          model: TEST_MODEL,
+          messages: [{ role: "user", content: "Say yes." }],
+          max_completion_tokens: 5,
+        }),
+      });
+      expect(res.status).toBe(200);
+      const body: any = await res.json();
+      expect(body.error).toBeUndefined();
+      expect(body.choices?.[0]?.message?.content).toBeDefined();
+    }, 60_000);
+  });
+
+  // ── asap streaming SSE format ───────────────────────────────────────────
+
+  describe("asap streaming", () => {
+    test("SSE body contains expected chunk markers", async () => {
+      const res = await fetch(`${baseUrl}/asap/v1/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${process.env.SAIL_API_KEY || ""}`,
+        },
+        body: JSON.stringify({
+          model: TEST_MODEL,
+          messages: [{ role: "user", content: "Count 1 to 3." }],
+          stream: true,
+          max_completion_tokens: 20,
+        }),
+      });
+      expect(res.status).toBe(200);
+      const text = await res.text();
+      expect(text).toContain("chat.completion.chunk");
+      expect(text).toContain('"role":"assistant"');
+      expect(text).toContain('"finish_reason":"stop"');
+      expect(text).toContain("[DONE]");
+    }, 60_000);
+  });
+
   // ── pi CLI smoke test (always run) ──────────────────────────────────────
 
   describe("pi CLI smoke test", () => {
@@ -496,6 +594,29 @@ print(f"OK: {response.choices[0].message.content[:50]}")
       expect(exitCode).toBe(0);
       expect(stdout).toContain("OK:");
     }, 120_000);
+
+    test("asap streaming via OpenAI SDK yields content chunks", async () => {
+      const script = `
+from openai import OpenAI
+client = OpenAI(
+    base_url="${baseUrl}/v1",
+    api_key="${process.env.SAIL_API_KEY}",
+)
+stream = client.chat.completions.create(
+    model="${TEST_MODEL}",
+    messages=[{"role": "user", "content": "Say hello."}],
+    max_tokens=128,
+    stream=True,
+    extra_body={"metadata": {"completion_window": "asap"}},
+)
+chunks = [c.choices[0].delta.content for c in stream if c.choices[0].delta.content]
+assert len(chunks) > 0, "no content chunks received"
+print(f"OK: {len(chunks)} chunks")
+`;
+      const { exitCode, stdout } = await runUvxPython(["openai"], script);
+      expect(exitCode).toBe(0);
+      expect(stdout).toContain("OK:");
+    }, 120_000);
   });
 
   // ── Slow batched-window tests (opt-in) ──────────────────────────────────
@@ -518,6 +639,54 @@ print(f"OK: {response.choices[0].message.content[:50]}")
       expect(status).toBe(200);
       expect(body.choices?.[0]?.message?.content).toBeDefined();
     }, 600_000);
+
+    test("standard streaming SSE body contains chunk markers", async () => {
+      const res = await fetch(`${baseUrl}/v1/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${process.env.SAIL_API_KEY || ""}`,
+        },
+        body: JSON.stringify({
+          model: TEST_MODEL,
+          messages: [{ role: "user", content: "Capital of France? One word." }],
+          metadata: { completion_window: "standard" },
+          stream: true,
+          max_tokens: 10,
+        }),
+      });
+      expect(res.status).toBe(200);
+      const text = await res.text();
+      expect(text).toContain("chat.completion.chunk");
+      expect(text).toContain("[DONE]");
+    }, 300_000);
+  });
+
+  // ── Slow OpenAI SDK batched (opt-in) ────────────────────────────────────
+
+  describe.skipIf(!runSlow)("OpenAI SDK batched (uvx, standard)", () => {
+    test("standard window via OpenAI SDK returns 200", async () => {
+      const script = `
+from openai import OpenAI
+client = OpenAI(
+    base_url="${baseUrl}/v1",
+    api_key="${process.env.SAIL_API_KEY}",
+    timeout=300,
+)
+r = client.chat.completions.create(
+    model="${TEST_MODEL}",
+    messages=[{"role": "user", "content": "What is 10/2? Just the number."}],
+    max_completion_tokens=10,
+    extra_body={"metadata": {"completion_window": "standard"}},
+)
+assert r.choices[0].message.content is not None
+assert r.choices[0].finish_reason == "stop"
+print(f"OK: {r.choices[0].message.content[:50]}")
+`;
+      const { exitCode, stdout } = await runUvxPython(["openai"], script);
+      expect(exitCode).toBe(0);
+      expect(stdout).toContain("OK:");
+    }, 300_000);
   });
 
   // ── Slow batched Responses API tests (opt-in) ───────────────────────────

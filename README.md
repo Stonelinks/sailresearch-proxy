@@ -344,8 +344,7 @@ All scripts are in `bin/` and available on `PATH` after `source env.sh`.
 | `format-ts` | Prettier on TypeScript files |
 | `format-shell` | shfmt on all bash scripts |
 | `typecheck` | `tsc --noEmit` |
-| `test` | Unit tests (`bun test`) |
-| `test-integration` | Live integration tests against Sail API (requires `SAIL_API_KEY`) |
+| `test` | Backend tests (`bun test`); live integration tests run automatically when a real `SAIL_API_KEY` is sourced |
 | `db-push` | Push Prisma schema to SQLite |
 | `db-studio` | Open Prisma Studio |
 
@@ -377,13 +376,13 @@ All scripts are in `bin/` and available on `PATH` after `source env.sh`.
 
 ```bash
 source env.sh
-check               # format + typecheck + unit tests
-test-integration     # live tests against Sail API
+check                # format + typecheck + tests (incl. live integration when SAIL_API_KEY is real)
+bun test:slow        # also runs slow batched-window integration tests
 ```
 
-The integration test suite starts an isolated proxy on a random port, runs tests covering passthrough, batching, streaming, the Python `openai` and `anthropic` clients (via `uvx`), the Responses API, image input, and error handling, then tears down.
+`src/integration.test.ts` starts an isolated proxy on a random port with a temp SQLite DB and covers passthrough, streaming, the Python `openai` and `anthropic` clients (via `uvx`), the Responses API, image input, and the local `/health` and `/v1/models` handlers. The suite skips automatically when `SAIL_API_KEY` is unset or the placeholder `test`.
 
-Set `SAIL_SLOW_INTEGRATION=1` to also test batched windows (priority/standard/flex), which wait for Sail to process and can take several minutes each.
+Set `SAIL_SLOW_INTEGRATION=1` (or run `bun test:slow`) to also test batched windows (priority/standard/flex), which wait for Sail to process and can take several minutes each.
 
 ## Architecture
 
