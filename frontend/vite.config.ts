@@ -3,12 +3,14 @@ import path from "path";
 import { defineConfig } from "vite";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import tailwindcss from "@tailwindcss/vite";
+import houdini from "houdini/vite";
 
 export default defineConfig({
-  plugins: [svelte(), tailwindcss()],
+  plugins: [houdini(), svelte(), tailwindcss()],
   resolve: {
     alias: {
       $shared: path.resolve(__dirname, "../shared"),
+      $houdini: path.resolve(__dirname, "./$houdini"),
     },
     // Use Svelte's browser entry under jsdom — without this, vitest pulls
     // the SSR build and component mount() throws "lifecycle_function_unavailable".
