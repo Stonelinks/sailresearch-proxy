@@ -31,6 +31,7 @@ describe("parseAndValidatePiOutput", () => {
 
     expect(result.contextSize).toBeNull();
     expect(result.samplingPresets).toEqual([]);
+    expect(result.prices).toEqual([]);
     expect(result.description).toBeNull();
     expect(result.source).toBeNull();
   });
@@ -94,5 +95,80 @@ describe("parseAndValidatePiOutput", () => {
 
     expect(result.samplingPresets[0]!.params.stream).toBe(true);
     expect(result.samplingPresets[0]!.params.mode).toBe("creative");
+  });
+
+  test("parses a valid prices array with cached and uncached entries", () => {
+    const result = parseAndValidatePiOutput(
+      JSON.stringify({
+        prices: [
+          {
+            completionWindow: "standard",
+            inputPerMTok: 0.2,
+            cachedInputPerMTok: 0.1,
+            outputPerMTok: 1.2,
+          },
+          {
+            completionWindow: "flex",
+            inputPerMTok: 0.16,
+            cachedInputPerMTok: null,
+            outputPerMTok: 0.8,
+          },
+        ],
+      }),
+    );
+
+    expect(result.prices).toHaveLength(2);
+    expect(result.prices[0]).toEqual({
+      completionWindow: "standard",
+      inputPerMTok: 0.2,
+      cachedInputPerMTok: 0.1,
+      outputPerMTok: 1.2,
+    });
+    expect(result.prices[1]!.cachedInputPerMTok).toBeNull();
+  });
+
+  test("rejects price entry with invalid completionWindow", () => {
+    expect(() =>
+      parseAndValidatePiOutput(
+        JSON.stringify({
+          prices: [
+            {
+              completionWindow: "bogus",
+              inputPerMTok: 1,
+              outputPerMTok: 2,
+            },
+          ],
+        }),
+      ),
+    ).toThrow('"completionWindow" must be one of asap|priority|standard|flex');
+  });
+
+  test("rejects price entry with non-numeric input price", () => {
+    expect(() =>
+      parseAndValidatePiOutput(
+        JSON.stringify({
+          prices: [
+            {
+              completionWindow: "flex",
+              inputPerMTok: "cheap",
+              outputPerMTok: 2,
+            },
+          ],
+        }),
+      ),
+    ).toThrow('"inputPerMTok" must be a number');
+  });
+
+  test("rejects duplicate completionWindow entries", () => {
+    expect(() =>
+      parseAndValidatePiOutput(
+        JSON.stringify({
+          prices: [
+            { completionWindow: "flex", inputPerMTok: 1, outputPerMTok: 2 },
+            { completionWindow: "flex", inputPerMTok: 3, outputPerMTok: 4 },
+          ],
+        }),
+      ),
+    ).toThrow('duplicate completionWindow "flex"');
   });
 });

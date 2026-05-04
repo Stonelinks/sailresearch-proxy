@@ -7,7 +7,9 @@
  * --sequential: researches models one at a time.
  */
 import { prisma } from "./db.ts";
+import { isValidCompletionWindow } from "./completion-window.ts";
 import {
+  type ModelPriceInput,
   type ModelResearchResult,
   type SamplingParamValue,
   type SamplingPresetInput,
@@ -70,6 +72,51 @@ function validateSamplingPreset(
   return { name: obj.name, description: obj.description, params };
 }
 
+function validatePriceEntry(raw: unknown, index: number): ModelPriceInput {
+  if (typeof raw !== "object" || raw === null) {
+    throw new Error(`prices[${index}]: expected object, got ${typeof raw}`);
+  }
+  const obj = raw as Record<string, unknown>;
+
+  if (
+    typeof obj.completionWindow !== "string" ||
+    !isValidCompletionWindow(obj.completionWindow)
+  ) {
+    throw new Error(
+      `prices[${index}]: "completionWindow" must be one of asap|priority|standard|flex, got ${JSON.stringify(obj.completionWindow)}`,
+    );
+  }
+  if (typeof obj.inputPerMTok !== "number") {
+    throw new Error(
+      `prices[${index}]: "inputPerMTok" must be a number, got ${typeof obj.inputPerMTok}`,
+    );
+  }
+  if (typeof obj.outputPerMTok !== "number") {
+    throw new Error(
+      `prices[${index}]: "outputPerMTok" must be a number, got ${typeof obj.outputPerMTok}`,
+    );
+  }
+  if (
+    obj.cachedInputPerMTok !== undefined &&
+    obj.cachedInputPerMTok !== null &&
+    typeof obj.cachedInputPerMTok !== "number"
+  ) {
+    throw new Error(
+      `prices[${index}]: "cachedInputPerMTok" must be a number or null, got ${typeof obj.cachedInputPerMTok}`,
+    );
+  }
+
+  return {
+    completionWindow: obj.completionWindow,
+    inputPerMTok: obj.inputPerMTok,
+    cachedInputPerMTok:
+      typeof obj.cachedInputPerMTok === "number"
+        ? obj.cachedInputPerMTok
+        : null,
+    outputPerMTok: obj.outputPerMTok,
+  };
+}
+
 /**
  * Parse and validate raw JSON string from the pi subprocess into a typed
  * ModelResearchResult. Throws with a descriptive message on validation failure.
@@ -119,6 +166,23 @@ export function parseAndValidatePiOutput(raw: string): ModelResearchResult {
     validateSamplingPreset(p, i),
   );
 
+  // prices
+  if (obj.prices !== undefined && !Array.isArray(obj.prices)) {
+    throw new Error(`"prices" must be an array, got ${typeof obj.prices}`);
+  }
+  const rawPrices: unknown[] = Array.isArray(obj.prices) ? obj.prices : [];
+  const seenWindows = new Set<string>();
+  const prices: ModelPriceInput[] = rawPrices.map((p, i) => {
+    const entry = validatePriceEntry(p, i);
+    if (seenWindows.has(entry.completionWindow)) {
+      throw new Error(
+        `prices[${i}]: duplicate completionWindow "${entry.completionWindow}"`,
+      );
+    }
+    seenWindows.add(entry.completionWindow);
+    return entry;
+  });
+
   // description
   if (
     obj.description !== undefined &&
@@ -145,7 +209,7 @@ export function parseAndValidatePiOutput(raw: string): ModelResearchResult {
   const source: string | null =
     typeof obj.source === "string" ? obj.source : null;
 
-  return { contextSize, samplingPresets, description, source };
+  return { contextSize, samplingPresets, prices, description, source };
 }
 
 // ─── Fetch model list from proxy ────────────────────────────────────────────
@@ -170,13 +234,14 @@ const PI_PROMPT_TEMPLATE = (modelId: string) =>
   `Research the AI model "${modelId}" and return ONLY a JSON object with these fields:
 - contextSize: maximum context window size in tokens (integer or null if unknown)
 - samplingPresets: array of recommended sampling parameter presets, each with {name, description, params}. params can include temperature, top_p, top_k, max_tokens, etc. Use an empty array if none found.
+- prices: array of per-completion-window pricing entries from https://docs.sailresearch.com/supported-models. Fetch that page and locate the row(s) for "${modelId}". Each entry: {completionWindow, inputPerMTok, cachedInputPerMTok, outputPerMTok}. completionWindow MUST be one of "asap", "priority", "standard", "flex". Numbers are USD per 1 million tokens (e.g. an "$0.20" cell becomes 0.20). Use null for cachedInputPerMTok if no cached price is published. Skip windows the model does not support (do not invent rows). Use an empty array if the model is not listed on the page.
 - description: a one-sentence description of the model
-- source: the URL where you found this information (e.g. HuggingFace model card)
+- source: prefer https://docs.sailresearch.com/supported-models if pricing was found there; otherwise the HuggingFace model card URL or other authoritative source
 
-Use web search or browser tools to find this information from official sources like HuggingFace model cards, documentation, or technical reports.
+Use web search or browser tools to find this information. For pricing, ALWAYS consult https://docs.sailresearch.com/supported-models first.
 
 Return ONLY the JSON object, no markdown fences, no commentary. Example:
-{"contextSize": 131072, "samplingPresets": [{"name": "default", "description": "General purpose", "params": {"temperature": 0.7, "top_p": 0.95}}], "description": "A large language model by ...", "source": "https://huggingface.co/..."}`;
+{"contextSize": 262144, "samplingPresets": [{"name": "default", "description": "General purpose", "params": {"temperature": 0.7, "top_p": 0.95}}], "prices": [{"completionWindow": "standard", "inputPerMTok": 0.20, "cachedInputPerMTok": 0.10, "outputPerMTok": 1.20}, {"completionWindow": "flex", "inputPerMTok": 0.16, "cachedInputPerMTok": 0.05, "outputPerMTok": 0.80}], "description": "A large language model by ...", "source": "https://docs.sailresearch.com/supported-models"}`;
 
 /**
  * Extract a JSON object from raw pi output.
@@ -285,6 +350,21 @@ export async function upsertModelMeta(
         },
       });
     }
+
+    // Delete old prices and re-create
+    await tx.modelPrice.deleteMany({ where: { modelMetaId: meta.id } });
+
+    for (const price of result.prices) {
+      await tx.modelPrice.create({
+        data: {
+          modelMetaId: meta.id,
+          completionWindow: price.completionWindow,
+          inputPerMTok: price.inputPerMTok,
+          cachedInputPerMTok: price.cachedInputPerMTok,
+          outputPerMTok: price.outputPerMTok,
+        },
+      });
+    }
   });
 }
 
@@ -309,7 +389,7 @@ async function researchSingleModel(
   try {
     const result = await runPiResearch(modelId);
     console.log(
-      `  ✓ ${modelId} — contextSize=${result.contextSize}, presets=${result.samplingPresets.length}, source=${result.source ?? "n/a"}`,
+      `  ✓ ${modelId} — contextSize=${result.contextSize}, presets=${result.samplingPresets.length}, prices=${result.prices.length}, source=${result.source ?? "n/a"}`,
     );
     await upsertModelMeta(modelId, result);
     console.log(`  ✓ Upserted ${modelId}`);
