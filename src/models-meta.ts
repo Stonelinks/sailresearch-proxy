@@ -144,14 +144,23 @@ function priceToRest(p: PriceWire): Record<string, unknown> {
   return out;
 }
 
+// USD per token as a fixed-point decimal string (OpenRouter convention).
+// Naive `(x / 1_000_000).toString()` leaks IEEE 754 noise (0.2/1e6 →
+// "2.0000000000000002e-7") and uses scientific notation for small values,
+// which trips up clients parsing the field. toFixed(12) gives plenty of
+// resolution for any plausible per-token price; the regex strips trailing
+// zeros (and a dangling dot) for cleanliness.
+function perTokenString(perMTok: number): string {
+  return (perMTok / 1_000_000).toFixed(12).replace(/\.?0+$/, "");
+}
+
 function priceToOpenRouter(p: PriceWire): Record<string, string> {
-  // OpenRouter quotes pricing as USD per token (not per MTok), as a string.
   const out: Record<string, string> = {
-    prompt: (p.inputPerMTok / 1_000_000).toString(),
-    completion: (p.outputPerMTok / 1_000_000).toString(),
+    prompt: perTokenString(p.inputPerMTok),
+    completion: perTokenString(p.outputPerMTok),
   };
   if (p.cachedInputPerMTok != null) {
-    out.input_cache_read = (p.cachedInputPerMTok / 1_000_000).toString();
+    out.input_cache_read = perTokenString(p.cachedInputPerMTok);
   }
   return out;
 }
