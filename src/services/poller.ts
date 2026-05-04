@@ -5,7 +5,7 @@ import { log } from "../../shared/logger.ts";
 import { broadcastJobUpdate } from "../routes/dashboard-api.ts";
 import { RecurringTask } from "./recurring-task.ts";
 import { JOB_SUMMARY_SELECT, jobToSummary } from "./job-shapes.ts";
-import { now } from "../../shared/time.ts";
+import { now, formatDuration } from "../../shared/time.ts";
 import type { JobWaiter, CompletionWindow } from "../types.ts";
 
 export function getBackoffMs(pollCount: number): number {
@@ -86,6 +86,11 @@ export class Poller {
     if (!set) return;
     this.waiters.delete(sailResponseId);
     for (const waiter of set) waiter.resolve(data);
+  }
+
+  /** How many waiters are currently registered for this id. For diagnostic logging. */
+  private peekWaiters(sailResponseId: string): number {
+    return this.waiters.get(sailResponseId)?.size ?? 0;
   }
 
   /** Reject every waiter registered for this sailResponseId. */
@@ -223,8 +228,15 @@ export class Poller {
         });
 
         this.broadcastUpdate(job.id);
+        // Peek before resolveWaiters drops the entry, so the log line tells us
+        // whether anyone was actually waiting (the orphaned-waiter bug shows up
+        // as waiters=0 for completions on jobs the request is still latching).
+        const waiterCount = this.peekWaiters(job.sailResponseId);
         this.resolveWaiters(job.sailResponseId, data);
-        log.info(`[poller] completed ${job.sailResponseId}`);
+        const pending = formatDuration(now() - job.createdAt.getTime());
+        log.info(
+          `[poller] completed ${job.sailResponseId} model=${job.model} window=${job.completionWindow} pending=${pending} polls=${job.pollCount + 1} waiters=${waiterCount}`,
+        );
       } else if (sailStatus === "failed" || sailStatus === "cancelled") {
         const errorBody = JSON.stringify(data);
         await this.prisma.pendingJob.update({
@@ -234,7 +246,10 @@ export class Poller {
 
         this.broadcastUpdate(job.id);
         this.rejectWaiters(job.sailResponseId, data);
-        log.info(`[poller] ${sailStatus} ${job.sailResponseId}`);
+        const pending = formatDuration(now() - job.createdAt.getTime());
+        log.info(
+          `[poller] ${sailStatus} ${job.sailResponseId} model=${job.model} window=${job.completionWindow} pending=${pending} polls=${job.pollCount + 1} reason=${data?.error?.message ?? "<none>"}`,
+        );
       } else {
         // Still pending or running
         await this.scheduleRetry(job, sailStatus);

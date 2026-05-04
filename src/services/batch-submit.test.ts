@@ -31,12 +31,14 @@ mock.module("../sail-client.ts", () => ({
 // Mock prisma
 const mockPrismaCreate = mock();
 const mockPrismaFindMany = mock();
+const mockPrismaFindUnique = mock();
 
 mock.module("../db.ts", () => ({
   prisma: {
     pendingJob: {
       create: mockPrismaCreate,
       findMany: mockPrismaFindMany,
+      findUnique: mockPrismaFindUnique,
     },
   },
 }));
@@ -71,6 +73,7 @@ const baseParams = () => ({
     pendingJob: {
       create: mockPrismaCreate,
       findMany: mockPrismaFindMany,
+      findUnique: mockPrismaFindUnique,
     },
   } as any,
   logPrefix: "test",
@@ -81,6 +84,13 @@ describe("submitAndWait", () => {
     mockCreateResponse.mockReset();
     mockPrismaCreate.mockReset().mockResolvedValue({ id: "db_1" });
     mockPrismaFindMany.mockReset().mockResolvedValue([]); // no existing jobs
+    // Default recheck: row is still in-flight, so latchOntoExistingJob falls
+    // through to the waiter race. Tests that need a terminal recheck override.
+    mockPrismaFindUnique.mockReset().mockResolvedValue({
+      status: "queued",
+      responseBody: null,
+      errorBody: null,
+    });
     mockPoller.registerWaiter.mockReset();
   });
 
@@ -246,6 +256,107 @@ describe("submitAndWait", () => {
     // We test the error formatting functions directly instead.
     // The timeout/waiter logic is already covered by the integration tests.
     expect(true).toBe(true);
+  });
+
+  /**
+   * Race-recheck: the poller settled the job between persist and registerWaiter
+   * (the production bug). The recheck inside latchOntoExistingJob must see the
+   * terminal state and return immediately, instead of leaving the request to
+   * hang on a waiter that will never fire.
+   */
+  test("race-recheck: returns cached body when poller completed during the persist→register gap", async () => {
+    mockCreateResponse.mockResolvedValueOnce({
+      status: 202,
+      data: { id: "resp_raced", status: "queued", model: "test-model" },
+    });
+    // registerWaiter returns a promise that never resolves — the test verifies
+    // that the recheck path returns without waiting on it. If the implementation
+    // ever falls through to the waiter race, the test will time out.
+    let cancelled = false;
+    mockPoller.registerWaiter.mockImplementationOnce(() => ({
+      promise: new Promise<any>(() => {}),
+      cancel: () => {
+        cancelled = true;
+      },
+    }));
+    // The recheck sees the job already finished by the poller.
+    const completedBody = {
+      id: "resp_raced",
+      status: "completed",
+      output: [{ type: "message", role: "assistant", content: "raced!" }],
+    };
+    mockPrismaFindUnique.mockResolvedValueOnce({
+      status: "completed",
+      responseBody: JSON.stringify(completedBody),
+      errorBody: null,
+    });
+
+    const result = await submitAndWait(baseParams());
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.output[0].content).toBe("raced!");
+    }
+    expect(mockPoller.registerWaiter).toHaveBeenCalledWith("resp_raced");
+    expect(cancelled).toBe(true);
+  });
+
+  test("race-recheck: returns BatchError when poller failed the job during the persist→register gap", async () => {
+    mockCreateResponse.mockResolvedValueOnce({
+      status: 202,
+      data: { id: "resp_raced_failed", status: "queued", model: "test-model" },
+    });
+    let cancelled = false;
+    mockPoller.registerWaiter.mockImplementationOnce(() => ({
+      promise: new Promise<any>(() => {}),
+      cancel: () => {
+        cancelled = true;
+      },
+    }));
+    // Poller wrote errorBody as JSON.stringify(data) — match that shape.
+    mockPrismaFindUnique.mockResolvedValueOnce({
+      status: "failed",
+      responseBody: null,
+      errorBody: JSON.stringify({ error: { message: "model OOM" } }),
+    });
+
+    const result = await submitAndWait(baseParams());
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.type).toBe("upstream");
+      expect(result.error.status).toBe(502);
+      expect(result.error.message).toBe("model OOM");
+    }
+    expect(cancelled).toBe(true);
+  });
+
+  test("race-recheck: still-in-flight falls through to waiter race", async () => {
+    mockCreateResponse.mockResolvedValueOnce({
+      status: 202,
+      data: { id: "resp_still_running", status: "queued", model: "test-model" },
+    });
+    // Default mockPrismaFindUnique returns status=queued (still in-flight),
+    // so the implementation must register a waiter and await it.
+    mockPoller.registerWaiter.mockImplementationOnce(() =>
+      waiterFor(
+        Promise.resolve({
+          id: "resp_still_running",
+          status: "completed",
+          output: [{ type: "message", role: "assistant", content: "later" }],
+        }),
+      ),
+    );
+
+    const result = await submitAndWait(baseParams());
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.output[0].content).toBe("later");
+    }
+    expect(mockPoller.registerWaiter).toHaveBeenCalledWith(
+      "resp_still_running",
+    );
   });
 });
 

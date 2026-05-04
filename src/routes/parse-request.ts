@@ -9,7 +9,7 @@ import { config } from "../config.ts";
 import { log } from "../../shared/logger.ts";
 import { openAIError } from "../errors.ts";
 import { resolveCompletionWindow } from "../completion-window.ts";
-import { now } from "../../shared/time.ts";
+import { now, formatDuration } from "../../shared/time.ts";
 import type { CompletionWindow } from "../types.ts";
 
 export interface ParsedRequest {
@@ -96,7 +96,7 @@ export function wrapRouteLogging(
     log.info(`[req] ${req.method} ${routePath}`);
     const res = await handler(req);
     log.info(
-      `[res] ${req.method} ${routePath} ${res.status} ${now() - start}ms`,
+      `[res] ${req.method} ${routePath} ${res.status} ${formatDuration(now() - start)}`,
     );
     return res;
   };

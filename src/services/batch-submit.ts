@@ -1,9 +1,10 @@
 import { sail } from "../sail-client.ts";
 import { config, getTimeoutMs } from "../config.ts";
 import { log } from "../../shared/logger.ts";
+import { now, formatDuration } from "../../shared/time.ts";
 import { openAIError, mapSailError } from "../errors.ts";
 import { computeSailBodyHash, findExistingJob } from "../dedup.ts";
-import type { Poller } from "./poller.ts";
+import type { Poller, WaiterRegistration } from "./poller.ts";
 import type { CompletionWindow } from "../types.ts";
 import type { PrismaClient } from "@prisma/client";
 
@@ -77,9 +78,12 @@ export async function submitAndWait(
   // ── Dedup lookup ──────────────────────────────────────────────────────
   const existing = await findExistingJob(db, hash);
   if (existing) {
+    const existingAge = existing.createdAt
+      ? formatDuration(now() - new Date(existing.createdAt).getTime())
+      : "unknown";
     if (existing.status === "completed" && existing.responseBody) {
       log.info(
-        `[${logPrefix}] dedup hit: completed job id=${existing.sailResponseId} hash=${hash.slice(0, 12)}`,
+        `[${logPrefix}] dedup hit: completed job id=${existing.sailResponseId} model=${model} window=${completionWindow} age=${existingAge} hash=${hash.slice(0, 12)}`,
       );
       const cachedData = JSON.parse(existing.responseBody);
       return { ok: true, data: cachedData };
@@ -96,12 +100,13 @@ export async function submitAndWait(
     } else {
       // In-flight job — latch onto it
       log.info(
-        `[${logPrefix}] dedup hit: in-flight job id=${existing.sailResponseId} status=${existing.status} hash=${hash.slice(0, 12)}`,
+        `[${logPrefix}] dedup hit: in-flight job id=${existing.sailResponseId} model=${model} window=${completionWindow} status=${existing.status} pending=${existingAge} hash=${hash.slice(0, 12)}`,
       );
-      return waitForJob(
+      return latchOntoExistingJob(
         existing.sailResponseId,
         completionWindow,
         poller,
+        db,
         logPrefix,
       );
     }
@@ -156,7 +161,7 @@ export async function submitAndWait(
   // Synchronous completion (unlikely but possible)
   if (data.status === "completed") {
     log.info(
-      `[${logPrefix}] sail returned completed synchronously id=${data.id}`,
+      `[${logPrefix}] sail returned completed synchronously id=${data.id} model=${model} window=${completionWindow}`,
     );
     return { ok: true, data };
   }
@@ -164,9 +169,6 @@ export async function submitAndWait(
   const sailResponseId = data.id;
 
   // Persist to DB
-  log.debug(
-    `[${logPrefix}] persisting job id=${sailResponseId} model=${model} window=${completionWindow} hash=${hash.slice(0, 12)}`,
-  );
   await db.pendingJob.create({
     data: {
       sailResponseId,
@@ -178,9 +180,21 @@ export async function submitAndWait(
       sailBodyHash: hash,
     },
   });
+  log.info(
+    `[${logPrefix}] submitted fresh id=${sailResponseId} model=${model} window=${completionWindow} sailStatus=${data.status ?? "pending"} hash=${hash.slice(0, 12)}`,
+  );
 
-  // Wait for the job to complete
-  return waitForJob(sailResponseId, completionWindow, poller, logPrefix);
+  // Wait for the job to complete. latchOntoExistingJob handles the
+  // register-then-recheck race window: between the create above and our
+  // registerWaiter call, the poller can complete the job and clear its waiter
+  // Set. The recheck inside latch catches that case.
+  return latchOntoExistingJob(
+    sailResponseId,
+    completionWindow,
+    poller,
+    db,
+    logPrefix,
+  );
 }
 
 /**
@@ -201,13 +215,229 @@ export async function waitForJob(
   if (completionWindow === "asap") {
     throw new Error("waitForJob called with asap window — caller bug");
   }
+  const reg = poller.registerWaiter(sailResponseId);
+  return raceWaiterAgainstTimeout(
+    reg,
+    completionWindow,
+    sailResponseId,
+    logPrefix,
+  );
+}
+
+/**
+ * Register a waiter on `sailResponseId`, then re-read the row to close the
+ * register-after-event race: if the poller settled the job *before* the
+ * register call (e.g. between `db.create` and here on the fresh-submit path,
+ * or between `findExistingJob` and here on the dedup-hit path), the waiter
+ * lands in an empty Set and would otherwise hang to the window timeout. The
+ * recheck catches that — registration is synchronous, so any settle that
+ * happens *after* it goes through the registered waiter normally.
+ */
+/** How often to re-poll the DB as a safety net for missed waiter notifications. */
+const PERIODIC_RECHECK_MS = 5000;
+
+async function latchOntoExistingJob(
+  sailResponseId: string,
+  completionWindow: CompletionWindow,
+  poller: Poller,
+  db: PrismaClient,
+  logPrefix: string,
+): Promise<BatchResult> {
+  if (completionWindow === "asap") {
+    throw new Error(
+      "latchOntoExistingJob called with asap window — caller bug",
+    );
+  }
+  const reg = poller.registerWaiter(sailResponseId);
+
+  const row = await db.pendingJob.findUnique({
+    where: { sailResponseId },
+    select: { status: true, responseBody: true, errorBody: true },
+  });
+
+  log.info(
+    `[${logPrefix}] latch: id=${sailResponseId} recheckStatus=${row?.status ?? "<missing>"} hasResponseBody=${!!row?.responseBody}`,
+  );
+
+  if (row?.status === "completed" && row.responseBody) {
+    log.info(
+      `[${logPrefix}] race-recheck: job already completed id=${sailResponseId}`,
+    );
+    reg.cancel();
+    return { ok: true, data: JSON.parse(row.responseBody) };
+  }
+
+  if (row?.status === "failed" || row?.status === "cancelled") {
+    log.info(
+      `[${logPrefix}] race-recheck: job already ${row.status} id=${sailResponseId}`,
+    );
+    reg.cancel();
+    const parsed = row.errorBody ? safeParseJson(row.errorBody) : null;
+    return {
+      ok: false,
+      error: {
+        type: "upstream",
+        status: 502,
+        message:
+          parsed?.error?.message || `Sail request ${sailResponseId} failed`,
+      },
+    };
+  }
+
+  return raceWaiterAgainstTimeoutWithRecheck(
+    reg,
+    completionWindow,
+    sailResponseId,
+    db,
+    logPrefix,
+  );
+}
+
+/**
+ * Like raceWaiterAgainstTimeout, but also polls the DB every PERIODIC_RECHECK_MS
+ * as a safety net. If the registered waiter is somehow not notified when the
+ * poller settles the job (we've seen this in production: rows updated to
+ * completed in DB without the corresponding waiter resolving), the periodic
+ * recheck rescues the request within ~5s instead of hanging to the window
+ * timeout. The waiter remains the fast path.
+ */
+async function raceWaiterAgainstTimeoutWithRecheck(
+  reg: WaiterRegistration,
+  completionWindow: Exclude<CompletionWindow, "asap">,
+  sailResponseId: string,
+  db: PrismaClient,
+  logPrefix: string,
+): Promise<BatchResult> {
+  const timeoutMs = getTimeoutMs(completionWindow);
+  log.debug(
+    `[${logPrefix}] waiter registered (with recheck) id=${sailResponseId} window=${completionWindow} timeoutMs=${timeoutMs}`,
+  );
+
+  const resultPromise = reg.promise
+    .then((result) => ({ ok: true as const, result }))
+    .catch((error) => ({ ok: false as const, error }));
+
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const timeoutPromise = new Promise<{ ok: false; error: "timeout" }>(
+    (resolve) => {
+      timer = setTimeout(
+        () => resolve({ ok: false, error: "timeout" }),
+        timeoutMs,
+      );
+    },
+  );
+
+  const stop = { value: false };
+  const recheckPromise = (async (): Promise<
+    { ok: true; result: any } | { ok: false; error: any } | null
+  > => {
+    while (!stop.value) {
+      await new Promise<void>((r) => setTimeout(r, PERIODIC_RECHECK_MS));
+      if (stop.value) return null;
+      try {
+        const row = await db.pendingJob.findUnique({
+          where: { sailResponseId },
+          select: { status: true, responseBody: true, errorBody: true },
+        });
+        if (row?.status === "completed" && row.responseBody) {
+          log.warn(
+            `[${logPrefix}] periodic-recheck rescued completion id=${sailResponseId} (waiter was not resolved)`,
+          );
+          return { ok: true, result: JSON.parse(row.responseBody) };
+        }
+        if (row?.status === "failed" || row?.status === "cancelled") {
+          log.warn(
+            `[${logPrefix}] periodic-recheck rescued ${row.status} id=${sailResponseId} (waiter was not rejected)`,
+          );
+          const parsed = row.errorBody ? safeParseJson(row.errorBody) : null;
+          return {
+            ok: false,
+            error: parsed ?? {
+              error: { message: `Sail request ${sailResponseId} failed` },
+            },
+          };
+        }
+      } catch (err) {
+        log.debug(
+          `[${logPrefix}] periodic-recheck DB error id=${sailResponseId}: ${err}`,
+        );
+      }
+    }
+    return null;
+  })();
+
+  let outcome: { ok: true; result: any } | { ok: false; error: any };
+  try {
+    const winner = await Promise.race([
+      resultPromise,
+      timeoutPromise,
+      recheckPromise,
+    ]);
+    if (winner === null) {
+      // recheckPromise returned null — only possible if `stop` was set, which
+      // only happens in finally, after race resolved. Defensive.
+      throw new Error(
+        "unreachable: recheck returned null before race resolved",
+      );
+    }
+    outcome = winner;
+  } finally {
+    stop.value = true;
+    if (timer) clearTimeout(timer);
+    reg.cancel();
+  }
+
+  log.debug(`[${logPrefix}] outcome id=${sailResponseId} ok=${outcome.ok}`);
+
+  if (!outcome.ok) {
+    if (outcome.error === "timeout") {
+      log.warn(
+        `[${logPrefix}] timeout id=${sailResponseId} window=${completionWindow} ms=${timeoutMs}`,
+      );
+      return {
+        ok: false,
+        error: {
+          type: "timeout",
+          status: 504,
+          message: `Request timed out after ${timeoutMs}ms (window: ${completionWindow}). Job ${sailResponseId} is still processing on Sail.`,
+        },
+      };
+    }
+    const errData = outcome.error;
+    return {
+      ok: false,
+      error: {
+        type: "upstream",
+        status: 502,
+        message:
+          errData?.error?.message || `Sail request ${sailResponseId} failed`,
+      },
+    };
+  }
+
+  return { ok: true, data: outcome.result };
+}
+
+function safeParseJson(s: string): any {
+  try {
+    return JSON.parse(s);
+  } catch {
+    return null;
+  }
+}
+
+async function raceWaiterAgainstTimeout(
+  reg: WaiterRegistration,
+  completionWindow: Exclude<CompletionWindow, "asap">,
+  sailResponseId: string,
+  logPrefix: string,
+): Promise<BatchResult> {
   const timeoutMs = getTimeoutMs(completionWindow);
   log.debug(
     `[${logPrefix}] waiter registered id=${sailResponseId} window=${completionWindow} timeoutMs=${timeoutMs}`,
   );
 
-  const { promise, cancel } = poller.registerWaiter(sailResponseId);
-  const resultPromise = promise
+  const resultPromise = reg.promise
     .then((result) => ({ ok: true as const, result }))
     .catch((error) => ({ ok: false as const, error }));
 
@@ -231,7 +461,7 @@ export async function waitForJob(
     // Always cancel — removes only this waiter; safe no-op if it has already
     // resolved/rejected. Critical for the dedup case where multiple waiters
     // share a sailResponseId: cancelling one must not affect the others.
-    cancel();
+    reg.cancel();
   }
 
   log.debug(`[${logPrefix}] outcome id=${sailResponseId} ok=${outcome.ok}`);

@@ -23,11 +23,17 @@ mock.module("../sail-client.ts", () => ({
 // Mock prisma to avoid hitting real DB in unit tests
 const mockPrismaCreate = mock();
 const mockPrismaFindMany = mock().mockResolvedValue([]); // no existing jobs by default
+const mockPrismaFindUnique = mock().mockResolvedValue({
+  status: "queued",
+  responseBody: null,
+  errorBody: null,
+});
 mock.module("../db.ts", () => ({
   prisma: {
     pendingJob: {
       create: mockPrismaCreate,
       findMany: mockPrismaFindMany,
+      findUnique: mockPrismaFindUnique,
     },
   },
 }));
@@ -61,6 +67,11 @@ describe("handleMessages", () => {
     mockPoller.registerWaiter.mockReset();
     mockPrismaCreate.mockReset().mockResolvedValue({ id: "db_1" });
     mockPrismaFindMany.mockReset().mockResolvedValue([]); // no dedup hits by default
+    mockPrismaFindUnique.mockReset().mockResolvedValue({
+      status: "queued",
+      responseBody: null,
+      errorBody: null,
+    });
   });
 
   test("returns 400 when model is missing", async () => {

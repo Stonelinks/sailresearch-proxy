@@ -21,6 +21,7 @@ import path from "node:path";
 import fs from "node:fs";
 import type { PrismaClient } from "@prisma/client";
 import type { ServerWebSocket } from "bun";
+import { now } from "../shared/time.ts";
 
 const SPA_DIR = path.resolve(import.meta.dir, "../frontend/dist");
 
@@ -161,7 +162,7 @@ export function createApp(prisma: PrismaClient, port?: number): AppServer {
       if (
         pathname === "/ws/dashboard" &&
         server.upgrade(req, {
-          data: { subscribedAt: Date.now() } as WSDashboardData,
+          data: { subscribedAt: now() } as WSDashboardData,
         })
       ) {
         return; // upgrade succeeded
