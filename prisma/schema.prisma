@@ -7,6 +7,10 @@ generator client {
   provider = "prisma-client-js"
 }
 
+generator pothos {
+  provider = "prisma-pothos-types"
+}
+
 model ModelMeta {
   id              String           @id @default(cuid())
   modelId         String           @unique

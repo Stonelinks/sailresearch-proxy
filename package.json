@@ -9,7 +9,10 @@
     "test": "bun test",
     "test:slow": "SAIL_SLOW_INTEGRATION=1 bun test",
     "db:push": "bunx prisma db push",
-    "db:studio": "bunx prisma studio"
+    "db:studio": "bunx prisma studio",
+    "codegen:schema": "bun run src/graphql/codegen.ts",
+    "codegen:client": "cd frontend && bunx houdini generate",
+    "codegen": "bun run codegen:schema && bun run codegen:client"
   },
   "devDependencies": {
     "@types/bun": "latest",
@@ -19,7 +22,12 @@
     "typescript": "^5"
   },
   "dependencies": {
+    "@pothos/core": "^4.12.0",
+    "@pothos/plugin-prisma": "^4.14.3",
     "@prisma/client": "^6",
+    "graphql": "^16.13.2",
+    "graphql-ws": "^6.0.8",
+    "graphql-yoga": "^5.21.0",
     "prisma": "^6"
   }
 }

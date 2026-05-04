@@ -5,6 +5,9 @@ cd $PROJECT_ROOT
 
 source env.sh
 
+echo "=== codegen ==="
+bun run codegen
+
 echo "=== format ==="
 format
 
