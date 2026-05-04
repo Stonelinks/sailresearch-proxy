@@ -1,27 +1,10 @@
 import SchemaBuilder from "@pothos/core";
 import type { PrismaClient } from "@prisma/client";
 import type { JobSummary, JobDetail } from "../services/job-shapes.ts";
+import type { ModelWire, PresetWire } from "../models-meta.ts";
 import type { pubsub } from "./pubsub.ts";
 
-/** Wire shape for sampling presets returned by the dashboard. params is parsed. */
-export interface PresetWire {
-  name: string;
-  description: string;
-  params: Record<string, number | string | boolean>;
-}
-
-/** Wire shape for a model row returned by the dashboard. Sail fields + meta. */
-export interface ModelWire {
-  id: string;
-  object: string;
-  created: number;
-  ownedBy: string;
-  contextSize: number | null;
-  samplingPresets: PresetWire[] | null;
-  description: string | null;
-  source: string | null;
-  researchedAt: string | null;
-}
+export type { ModelWire, PresetWire };
 
 export interface Context {
   prisma: PrismaClient;
