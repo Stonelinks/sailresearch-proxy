@@ -1,10 +1,10 @@
 import SchemaBuilder from "@pothos/core";
 import type { PrismaClient } from "@prisma/client";
 import type { JobSummary, JobDetail } from "../services/job-shapes.ts";
-import type { ModelWire, PresetWire } from "../models-meta.ts";
+import type { ModelWire, PresetWire, PriceWire } from "../models-meta.ts";
 import type { pubsub } from "./pubsub.ts";
 
-export type { ModelWire, PresetWire };
+export type { ModelWire, PresetWire, PriceWire };
 
 export interface Context {
   prisma: PrismaClient;
@@ -19,6 +19,7 @@ export const builder = new SchemaBuilder<{
     JobDetail: JobDetail;
     Model: ModelWire;
     SamplingPreset: PresetWire;
+    ModelPrice: PriceWire;
   };
   Scalars: {
     /** ISO 8601 date string. */

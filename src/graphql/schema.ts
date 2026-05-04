@@ -34,6 +34,16 @@ builder.objectType("SamplingPreset", {
   }),
 });
 
+builder.objectType("ModelPrice", {
+  fields: (t) => ({
+    completionWindow: t.exposeString("completionWindow"),
+    inputPerMTok: t.exposeFloat("inputPerMTok"),
+    cachedInputPerMTok: t.exposeFloat("cachedInputPerMTok", { nullable: true }),
+    outputPerMTok: t.exposeFloat("outputPerMTok"),
+    currency: t.exposeString("currency"),
+  }),
+});
+
 builder.objectType("Model", {
   fields: (t) => ({
     id: t.exposeID("id"),
@@ -52,6 +62,11 @@ builder.objectType("Model", {
       type: ["SamplingPreset"],
       nullable: true,
       resolve: (m) => m.samplingPresets,
+    }),
+    prices: t.field({
+      type: ["ModelPrice"],
+      nullable: true,
+      resolve: (m) => m.prices,
     }),
   }),
 });
@@ -123,7 +138,7 @@ async function loadModelWire(modelId: string, ctx: { prisma: any }) {
   if (!sailModel) return null;
   const meta = await ctx.prisma.modelMeta.findUnique({
     where: { modelId },
-    include: { samplingPresets: true },
+    include: { samplingPresets: true, prices: true },
   });
   return mergeModelMeta(sailModel, meta ?? undefined);
 }
@@ -179,7 +194,7 @@ builder.queryType({
         }
         const list = (sailRes.data?.data ?? []) as SailUpstreamModel[];
         const metas = await ctx.prisma.modelMeta.findMany({
-          include: { samplingPresets: true },
+          include: { samplingPresets: true, prices: true },
         });
         const byId = new Map(metas.map((m) => [m.modelId, m]));
         return list.map((m) => mergeModelMeta(m, byId.get(m.id) ?? undefined));
