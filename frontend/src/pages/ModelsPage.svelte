@@ -1,8 +1,22 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { graphql } from "$houdini";
-  import { shortOwner, formatContextSize } from "../format";
+  import {
+    shortOwner,
+    formatContextSize,
+    formatPriceFrom,
+    formatUsdPerMTok,
+  } from "../format";
   import { log } from "$shared/logger.ts";
+
+  // Canonical display order matches the docs page columns.
+  const WINDOW_ORDER = ["standard", "priority", "flex", "asap"] as const;
+  const WINDOW_LABELS: Record<(typeof WINDOW_ORDER)[number], string> = {
+    standard: "Standard",
+    priority: "Priority",
+    flex: "Flex",
+    asap: "ASAP",
+  };
 
   let search = $state("");
   let expandedPresets: Set<string> = $state(new Set());
@@ -24,6 +38,13 @@
           description
           params
         }
+        prices {
+          completionWindow
+          inputPerMTok
+          cachedInputPerMTok
+          outputPerMTok
+          currency
+        }
       }
     }
   `);
@@ -41,6 +62,13 @@
           description
           params
         }
+        prices {
+          completionWindow
+          inputPerMTok
+          cachedInputPerMTok
+          outputPerMTok
+          currency
+        }
       }
     }
   `);
@@ -56,6 +84,28 @@
         )
       : models,
   );
+
+  type PriceRow = {
+    completionWindow: string;
+    inputPerMTok: number;
+    cachedInputPerMTok: number | null;
+    outputPerMTok: number;
+    currency: string;
+  };
+
+  function orderedPrices(
+    prices: ReadonlyArray<PriceRow> | null | undefined,
+  ): PriceRow[] {
+    if (!prices) return [];
+    const byWindow = new Map(prices.map((p) => [p.completionWindow, p]));
+    return WINDOW_ORDER.map((w) => byWindow.get(w)).filter(
+      (p): p is PriceRow => !!p,
+    );
+  }
+
+  function windowLabel(window: string): string {
+    return (WINDOW_LABELS as Record<string, string>)[window] ?? window;
+  }
 
   function togglePresets(modelId: string) {
     const next = new Set(expandedPresets);
@@ -123,6 +173,7 @@
               <th class="text-left px-4 py-2.5 font-semibold text-slate-600 whitespace-nowrap">Model ID</th>
               <th class="text-left px-4 py-2.5 font-semibold text-slate-600 whitespace-nowrap">Owner</th>
               <th class="text-left px-4 py-2.5 font-semibold text-slate-600 whitespace-nowrap">Context</th>
+              <th class="text-left px-4 py-2.5 font-semibold text-slate-600 whitespace-nowrap">Price</th>
               <th class="text-left px-4 py-2.5 font-semibold text-slate-600 whitespace-nowrap">Description</th>
               <th class="text-left px-4 py-2.5 font-semibold text-slate-600 whitespace-nowrap">Presets</th>
               <th class="text-left px-4 py-2.5 font-semibold text-slate-600 whitespace-nowrap">Created</th>
@@ -132,7 +183,7 @@
           <tbody>
             {#if filtered.length === 0}
               <tr>
-                <td colspan="7" class="text-center py-10 text-slate-400">No models found.</td>
+                <td colspan="8" class="text-center py-10 text-slate-400">No models found.</td>
               </tr>
             {:else}
               {#each filtered as model (model.id)}
@@ -151,6 +202,13 @@
                       <span class="text-slate-300">—</span>
                     {/if}
                   </td>
+                  <td class="px-4 py-2.5 text-sm text-slate-500 whitespace-nowrap">
+                    {#if model.prices && model.prices.length > 0}
+                      <span class="font-mono text-xs">{formatPriceFrom(model.prices)}</span>
+                    {:else}
+                      <span class="text-slate-300">—</span>
+                    {/if}
+                  </td>
                   <td class="px-4 py-2.5 text-sm text-slate-500 max-w-xs truncate">
                     {#if model.description}
                       <span title={model.description}>{model.description}</span>
@@ -159,12 +217,16 @@
                     {/if}
                   </td>
                   <td class="px-4 py-2.5">
-                    {#if model.samplingPresets && model.samplingPresets.length > 0}
+                    {#if (model.samplingPresets && model.samplingPresets.length > 0) || (model.prices && model.prices.length > 0)}
                       <button
                         onclick={() => togglePresets(model.id)}
                         class="text-xs text-blue-600 hover:text-blue-800 font-medium cursor-pointer"
                       >
-                        {model.samplingPresets.length} preset{model.samplingPresets.length !== 1 ? 's' : ''}
+                        {#if model.samplingPresets && model.samplingPresets.length > 0}
+                          {model.samplingPresets.length} preset{model.samplingPresets.length !== 1 ? 's' : ''}
+                        {:else}
+                          Pricing
+                        {/if}
                         {expandedPresets.has(model.id) ? ' ▾' : ' ▸'}
                       </button>
                     {:else}
@@ -184,11 +246,42 @@
                     </button>
                   </td>
                 </tr>
-                {#if expandedPresets.has(model.id) && model.samplingPresets && model.samplingPresets.length > 0}
+                {#if expandedPresets.has(model.id) && ((model.samplingPresets && model.samplingPresets.length > 0) || (model.prices && model.prices.length > 0))}
                   <tr class="bg-slate-50/50">
-                    <td colspan="7" class="px-4 py-3">
+                    <td colspan="8" class="px-4 py-3">
+                      {#if model.prices && model.prices.length > 0}
+                        <div class="ml-4 mb-3">
+                          <div class="text-xs font-semibold text-slate-600 mb-1">Pricing (USD per 1M tokens)</div>
+                          <table class="text-xs font-mono">
+                            <thead>
+                              <tr class="text-slate-500">
+                                <th class="text-left pr-4 font-medium">Window</th>
+                                <th class="text-right pr-4 font-medium">Input</th>
+                                <th class="text-right pr-4 font-medium">Cached</th>
+                                <th class="text-right font-medium">Output</th>
+                              </tr>
+                            </thead>
+                            <tbody class="text-slate-700">
+                              {#each orderedPrices(model.prices) as price}
+                                <tr>
+                                  <td class="pr-4 py-0.5">{windowLabel(price.completionWindow)}</td>
+                                  <td class="pr-4 py-0.5 text-right">{formatUsdPerMTok(price.inputPerMTok)}</td>
+                                  <td class="pr-4 py-0.5 text-right">
+                                    {#if price.cachedInputPerMTok !== null}
+                                      {formatUsdPerMTok(price.cachedInputPerMTok)}
+                                    {:else}
+                                      <span class="text-slate-300">—</span>
+                                    {/if}
+                                  </td>
+                                  <td class="py-0.5 text-right">{formatUsdPerMTok(price.outputPerMTok)}</td>
+                                </tr>
+                              {/each}
+                            </tbody>
+                          </table>
+                        </div>
+                      {/if}
                       <div class="flex flex-wrap gap-2 ml-4">
-                        {#each model.samplingPresets as preset}
+                        {#each model.samplingPresets ?? [] as preset}
                           <div class="bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs shadow-sm max-w-xs">
                             <div class="font-semibold text-slate-700 mb-1">{preset.name}</div>
                             {#if preset.description}

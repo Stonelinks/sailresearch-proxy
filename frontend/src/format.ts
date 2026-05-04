@@ -29,3 +29,35 @@ export function formatContextSize(size: number | null): string {
   if (size >= 1_000) return `${(size / 1_000).toFixed(0)}K`;
   return String(size);
 }
+
+/** USD per 1M tokens at ≤2 significant decimals, e.g. 0.005 → "$0.005". */
+export function formatUsdPerMTok(price: number): string {
+  if (price === 0) return "$0";
+  // Show enough precision for fractions of a cent without trailing zeros.
+  const fixed =
+    price >= 1
+      ? price.toFixed(2)
+      : price >= 0.01
+        ? price.toFixed(3)
+        : price.toFixed(4);
+  // Strip trailing zeros after the decimal point.
+  const trimmed = fixed.replace(/\.?0+$/, "");
+  return `$${trimmed}`;
+}
+
+interface PriceLike {
+  inputPerMTok: number;
+}
+
+/**
+ * Cheapest input rate across a model's prices, formatted as "from $X/MTok".
+ * Empty/null array → em-dash.
+ */
+export function formatPriceFrom(
+  prices: ReadonlyArray<PriceLike> | null | undefined,
+): string {
+  if (!prices || prices.length === 0) return "—";
+  let min = prices[0]!.inputPerMTok;
+  for (const p of prices) if (p.inputPerMTok < min) min = p.inputPerMTok;
+  return `from ${formatUsdPerMTok(min)}/MTok`;
+}
