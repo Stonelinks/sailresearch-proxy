@@ -120,10 +120,11 @@ describe("handleModels", () => {
     expect(m.x_source).toBe("https://hf.co/org-a/model-a");
     expect(m.x_researched_at).toBe("2025-06-01T00:00:00.000Z");
     // Default unprefixed window is "standard" → mirror standard pricing.
+    // Prices are USD per token as fixed-decimal strings (OpenRouter convention).
     expect(m.pricing).toEqual({
-      prompt: (0.2 / 1_000_000).toString(),
-      completion: (1.2 / 1_000_000).toString(),
-      input_cache_read: (0.1 / 1_000_000).toString(),
+      prompt: "0.0000002",
+      completion: "0.0000012",
+      input_cache_read: "0.0000001",
     });
     expect(m.x_billing_window).toBeUndefined();
     expect(m.x_pricing_by_completion_window).toEqual([
@@ -284,8 +285,8 @@ describe("handleModels", () => {
     const res = await handleModels(reqWithWindow("flex"));
     const body: any = await res.json();
     expect(body.data[0].pricing).toEqual({
-      prompt: (0.5 / 1_000_000).toString(),
-      completion: (2.5 / 1_000_000).toString(),
+      prompt: "0.0000005",
+      completion: "0.0000025",
     });
     expect(body.data[0].x_billing_window).toBeUndefined();
   });
@@ -321,9 +322,9 @@ describe("handleModels", () => {
     const res = await handleModels(reqWithWindow("priority"));
     const body: any = await res.json();
     expect(body.data[0].pricing).toEqual({
-      prompt: (0.04 / 1_000_000).toString(),
-      completion: (0.25 / 1_000_000).toString(),
-      input_cache_read: (0.01 / 1_000_000).toString(),
+      prompt: "0.00000004",
+      completion: "0.00000025",
+      input_cache_read: "0.00000001",
     });
     expect(body.data[0].x_billing_window).toBe("flex");
   });
@@ -401,8 +402,8 @@ describe("handleModels", () => {
     const body: any = await res.json();
     // Default DEFAULT_COMPLETION_WINDOW is "standard".
     expect(body.data[0].pricing).toEqual({
-      prompt: (1 / 1_000_000).toString(),
-      completion: (5 / 1_000_000).toString(),
+      prompt: "0.000001",
+      completion: "0.000005",
     });
   });
 });
