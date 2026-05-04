@@ -347,6 +347,80 @@ All scripts are in `bin/` and available on `PATH` after `source env.sh`.
 | `test` | Backend tests (`bun test`); live integration tests run automatically when a real `SAIL_API_KEY` is sourced |
 | `db-push` | Push Prisma schema to SQLite |
 | `db-studio` | Open Prisma Studio |
+| `publish` | Build and push Docker image to registry |
+
+## Docker Deployment
+
+The proxy runs as a single Docker image with an embedded SQLite database. The container self-initializes its database on first start.
+
+### Standalone Docker
+
+```bash
+# Pull from registry
+docker pull containers.cricket.routers.stonelinks.org/sailresearch-proxy:latest
+
+# Run with a Sail API key
+docker run -d \
+  --name sailresearch-proxy \
+  -p 4000:4000 \
+  -e SAIL_API_KEY=sk-sail-... \
+  -v sailresearch-proxy-data:/app/data \
+  --restart unless-stopped \
+  containers.cricket.routers.stonelinks.org/sailresearch-proxy:latest
+
+# Optional: protect the proxy with a shared key
+docker run -d \
+  --name sailresearch-proxy \
+  -p 4000:4000 \
+  -e SAIL_API_KEY=sk-sail-... \
+  -e PROXY_API_KEY=your-proxy-key \
+  -v sailresearch-proxy-data:/app/data \
+  --restart unless-stopped \
+  containers.cricket.routers.stonelinks.org/sailresearch-proxy:latest
+```
+
+The proxy will be available at `http://localhost:4000`. Data is persisted in the `/app/data` volume.
+
+### Docker Compose
+
+A `docker-compose.yaml` is included in the repo. Copy the env template and fill in your API key:
+
+```bash
+cp .env.docker .env
+# Edit .env and add your SAIL_API_KEY
+```
+
+Then start:
+
+```bash
+docker compose up -d
+```
+
+### Dockge / TrueNAS Scale / Portainer
+
+To add the proxy as a custom app in a Docker management platform, use these settings:
+
+| Setting | Value |
+|---------|-------|
+| **Image** | `containers.cricket.routers.stonelinks.org/sailresearch-proxy:latest` |
+| **Port** | `4000` (HTTP) |
+| **Volume** | Mount a persistent volume at `/app/data` (stores the SQLite DB) |
+| **Environment** | `SAIL_API_KEY=sk-sail-...` (required), `PROXY_API_KEY=` (optional) |
+| **Restart policy** | Unless stopped |
+
+The container has no dependencies — no external database or Redis required.
+
+### Publishing a New Version
+
+From a development machine with access to the repo:
+
+```bash
+source env.sh
+publish                       # tags with git SHA + :latest
+publish --version v1.0.0      # explicit version tag + :latest
+```
+
+The script builds the image, tags it with the version and `latest`, pushes both to the registry, and verifies the published tags.
 
 ## Configuration
 
@@ -354,6 +428,9 @@ All scripts are in `bin/` and available on `PATH` after `source env.sh`.
 
 - `SAIL_API_KEY` — Sail Research API key (required)
 - `PROXY_API_KEY` — optional key to protect the proxy itself
+- `CONTAINER_REG_URL` — Docker registry hostname
+- `CONTAINER_REG_USERNAME` — Docker registry username
+- `CONTAINER_REG_PASSWORD` — Docker registry password
 
 **Environment variables** (set in `env.sh` or override via shell):
 

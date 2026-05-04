@@ -165,10 +165,9 @@ describe("Query.jobs", () => {
       responseBody: null,
     });
 
-    const res = await run(
-      `query Q($id: ID!) { job(id: $id) { id status } }`,
-      { id: "job-ip" },
-    );
+    const res = await run(`query Q($id: ID!) { job(id: $id) { id status } }`, {
+      id: "job-ip",
+    });
 
     expect(res.errors).toBeUndefined();
     expect(res.data?.job?.status).toBe("running");

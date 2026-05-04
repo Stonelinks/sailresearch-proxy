@@ -1,0 +1,19 @@
+services:
+  sailresearch-proxy:
+    image: containers.cricket.routers.stonelinks.org/sailresearch-proxy:latest
+    container_name: sailresearch-proxy
+    volumes:
+      - sailresearch-proxy-data:/app/data
+    ports:
+      - '4000:4000'
+    environment:
+      - SAIL_API_KEY=${SAIL_API_KEY}
+      - PORT=4000
+      - HOST=0.0.0.0
+      - DEFAULT_COMPLETION_WINDOW=standard
+      - LOG_LEVEL=info
+      - PROXY_API_KEY=${PROXY_API_KEY:-}
+    restart: unless-stopped
+
+volumes:
+  sailresearch-proxy-data:

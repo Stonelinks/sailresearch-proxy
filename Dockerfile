@@ -1,5 +1,5 @@
 # -- build stage --
-FROM oven/bun:latest AS build
+FROM oven/bun:1 AS build
 WORKDIR /app
 
 COPY package.json bun.lock ./
@@ -16,7 +16,7 @@ RUN bun install --frozen-lockfile
 RUN bun run build
 
 # -- runtime stage --
-FROM oven/bun:latest
+FROM oven/bun:1
 WORKDIR /app
 
 COPY --from=build /app/node_modules ./node_modules
@@ -25,9 +25,12 @@ COPY --from=build /app/src ./src
 COPY --from=build /app/shared ./shared
 COPY --from=build /app/frontend/dist ./frontend/dist
 COPY --from=build /app/package.json ./
+COPY --from=build /app/entrypoint.sh ./
+
+RUN chmod +x entrypoint.sh
 
 ENV DATABASE_URL=file:/app/data/proxy.db
 VOLUME /app/data
 EXPOSE 4000
 
-CMD ["bun", "run", "src/index.ts"]
+CMD ["./entrypoint.sh"]

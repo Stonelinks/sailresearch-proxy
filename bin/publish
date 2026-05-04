@@ -1,0 +1,37 @@
+#!/bin/bash
+set -e
+
+cd "$PROJECT_ROOT"
+
+if [ ! -f secrets.sh ]; then
+	echo "No secrets.sh file found. Please create one, see README."
+	exit 1
+fi
+
+source env.sh
+
+# Allow --version override, otherwise derive from git
+if [ "$1" = "--version" ] && [ -n "$2" ]; then
+	PUBLISH_VERSION="$2"
+	shift 2
+else
+	PUBLISH_VERSION=$(git describe --tags --always 2>/dev/null)
+fi
+
+IMAGE="$CONTAINER_REG_URL/sailresearch-proxy"
+
+echo "Publishing $IMAGE:$PUBLISH_VERSION ..."
+
+docker login "$CONTAINER_REG_URL" -u "$CONTAINER_REG_USERNAME" -p "$CONTAINER_REG_PASSWORD"
+
+docker build -t "$IMAGE:$PUBLISH_VERSION" .
+docker tag "$IMAGE:$PUBLISH_VERSION" "$IMAGE:latest"
+
+docker push "$IMAGE:$PUBLISH_VERSION"
+docker push "$IMAGE:latest"
+
+echo ""
+echo "Published $IMAGE:$PUBLISH_VERSION (also tagged :latest)"
+echo ""
+echo "Verifying tags on registry..."
+curl -s -u "$CONTAINER_REG_USERNAME:$CONTAINER_REG_PASSWORD" "https://$CONTAINER_REG_URL/v2/sailresearch-proxy/tags/list"

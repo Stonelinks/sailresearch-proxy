@@ -23,7 +23,14 @@ describe("jobToSummary", () => {
   });
 
   test("passes through native JobStatus values unchanged", () => {
-    for (const status of ["pending", "queued", "running", "completed", "failed", "cancelled"] as const) {
+    for (const status of [
+      "pending",
+      "queued",
+      "running",
+      "completed",
+      "failed",
+      "cancelled",
+    ] as const) {
       const row = { ...baseRow(), status };
       expect(jobToSummary(row).status).toBe(status);
     }

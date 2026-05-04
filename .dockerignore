@@ -4,5 +4,8 @@ data
 .cursor
 .env
 secrets.sh
+secrets.sh.example
+TODO.md
+AGENTS.md
 frontend/node_modules
 frontend/dist

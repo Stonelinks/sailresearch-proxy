@@ -40,6 +40,9 @@ prisma/*.db-journal
 # Secrets
 secrets.sh
 
+# Docker env
+.env.docker
+
 # Data
 data/
 
