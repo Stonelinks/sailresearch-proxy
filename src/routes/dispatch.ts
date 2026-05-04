@@ -32,7 +32,12 @@ export function rewriteForWindowPrefix(req: Request): RewriteResult | null {
   const newUrl = new URL(stripped, url.origin);
   const headers = new Headers(req.headers);
   headers.set("x-completion-window", prefix);
-  const init: RequestInit = { method: req.method, headers };
+  // `duplex: "half"` is required when streaming a Request body but isn't
+  // yet in the lib.dom RequestInit type; cast keeps the runtime field.
+  const init: RequestInit & { duplex?: "half" | "full" } = {
+    method: req.method,
+    headers,
+  };
   if (req.method === "POST" || req.method === "PUT" || req.method === "PATCH") {
     init.body = req.body;
     init.duplex = "half";

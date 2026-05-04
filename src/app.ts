@@ -7,21 +7,16 @@ import { handleModels } from "./routes/models.ts";
 import { handleMessages } from "./routes/messages.ts";
 import { handleResponses } from "./routes/responses.ts";
 import { wrapRouteLogging } from "./routes/parse-request.ts";
-import {
-  handleDashboardJobs,
-  handleDashboardJobDetail,
-  handleDashboardModels,
-  registerDashboardClient,
-  unregisterDashboardClient,
-  type WSDashboardData,
-} from "./routes/dashboard-api.ts";
 import { openAIError } from "./errors.ts";
 import { rewriteForWindowPrefix } from "./routes/dispatch.ts";
+import { createGraphQLYoga } from "./graphql/yoga.ts";
+import { schema as gqlSchema } from "./graphql/schema.ts";
+import { pubsub } from "./graphql/pubsub.ts";
+import { handleProtocols, makeHandler } from "graphql-ws/use/bun";
 import path from "node:path";
 import fs from "node:fs";
 import type { PrismaClient } from "@prisma/client";
-import type { ServerWebSocket } from "bun";
-import { now } from "../shared/time.ts";
+import type { Context } from "./graphql/builder.ts";
 
 const SPA_DIR = path.resolve(import.meta.dir, "../frontend/dist");
 
@@ -41,11 +36,11 @@ function serveSPA(req: Request): Response {
   const url = new URL(req.url);
   const pathname = url.pathname;
 
-  // Only serve GET requests for non-API, non-WS paths
+  // Only serve GET requests for non-API, non-graphql paths
   if (
     req.method !== "GET" ||
-    pathname.startsWith("/api/") ||
-    pathname.startsWith("/ws/")
+    pathname.startsWith("/v1/") ||
+    pathname.startsWith("/graphql")
   ) {
     return openAIError(404, "Not found", "invalid_request_error");
   }
@@ -103,6 +98,12 @@ export function createApp(prisma: PrismaClient, port?: number): AppServer {
   const pruner = new Pruner(prisma);
   pruner.start();
 
+  const yoga = createGraphQLYoga(prisma);
+  const wsHandler = makeHandler({
+    schema: gqlSchema,
+    context: () => ({ prisma, pubsub }) satisfies Context,
+  });
+
   // Pre-build per-route logging wrappers once; allocating new wrappers per
   // request would defeat the point of the wrapper closure.
   const chatRoute = wrapRouteLogging("/v1/chat/completions", (req) =>
@@ -135,37 +136,28 @@ export function createApp(prisma: PrismaClient, port?: number): AppServer {
     hostname: config.server.host,
     idleTimeout: 255,
 
-    websocket: {
-      data: {} as WSDashboardData,
-
-      open(ws: ServerWebSocket<WSDashboardData>) {
-        registerDashboardClient(ws);
-      },
-
-      message(
-        ws: ServerWebSocket<WSDashboardData>,
-        message: string | ArrayBuffer | Uint8Array,
-      ) {
-        // Dashboard WS is server-push only; ignore incoming messages
-      },
-
-      close(ws: ServerWebSocket<WSDashboardData>) {
-        unregisterDashboardClient(ws);
-      },
-    },
+    websocket: wsHandler,
 
     fetch(req, server) {
       const url = new URL(req.url);
       const pathname = url.pathname;
 
-      // WebSocket upgrade for dashboard real-time updates
-      if (
-        pathname === "/ws/dashboard" &&
-        server.upgrade(req, {
-          data: { subscribedAt: now() } as WSDashboardData,
-        })
-      ) {
-        return; // upgrade succeeded
+      // GraphQL — single endpoint serves both HTTP queries/mutations and
+      // WebSocket subscriptions. The graphql-ws Bun adapter validates the
+      // sec-websocket-protocol header and refuses non-graphql upgrades.
+      if (pathname === "/graphql") {
+        if (req.headers.get("upgrade") === "websocket") {
+          if (
+            !handleProtocols(req.headers.get("sec-websocket-protocol") || "")
+          ) {
+            return new Response("Bad Request", { status: 400 });
+          }
+          if (!server.upgrade(req)) {
+            return new Response("Upgrade Failed", { status: 500 });
+          }
+          return undefined as unknown as Response; // upgrade succeeded
+        }
+        return yoga(req);
       }
 
       // Window-prefixed routes (e.g. /flex/v1/chat/completions): strip the
@@ -178,14 +170,8 @@ export function createApp(prisma: PrismaClient, port?: number): AppServer {
       // /v1/* and /v1/models — delegate to dispatch
       if (pathname.startsWith("/v1/")) return dispatch(req, pathname);
 
-      // Health + dashboard API
+      // Health
       if (pathname === "/health") return new Response("ok");
-      if (pathname === "/api/dashboard/jobs" && req.method === "GET")
-        return handleDashboardJobs(req);
-      if (pathname.startsWith("/api/dashboard/jobs/") && req.method === "GET")
-        return handleDashboardJobDetail(req);
-      if (pathname === "/api/models" && req.method === "GET")
-        return handleDashboardModels();
 
       // SPA static files / fallback
       return serveSPA(req);

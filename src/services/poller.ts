@@ -2,7 +2,7 @@ import type { PrismaClient } from "@prisma/client";
 import { sail } from "../sail-client.ts";
 import { config, getTimeoutMs } from "../config.ts";
 import { log } from "../../shared/logger.ts";
-import { broadcastJobUpdate } from "../routes/dashboard-api.ts";
+import { pubsub } from "../graphql/pubsub.ts";
 import { RecurringTask } from "./recurring-task.ts";
 import { JOB_SUMMARY_SELECT, jobToSummary } from "./job-shapes.ts";
 import { now, formatDuration } from "../../shared/time.ts";
@@ -270,7 +270,7 @@ export class Poller {
         select: JOB_SUMMARY_SELECT,
       });
       if (!job) return;
-      broadcastJobUpdate(jobToSummary(job));
+      pubsub.publish("jobUpdated", jobToSummary(job));
     } catch {
       // Non-critical: don't let broadcast failures affect polling
     }

@@ -220,7 +220,9 @@ function extractJson(raw: string): string | null {
   return null;
 }
 
-async function runPiResearch(modelId: string): Promise<ModelResearchResult> {
+export async function runPiResearch(
+  modelId: string,
+): Promise<ModelResearchResult> {
   const prompt = PI_PROMPT_TEMPLATE(modelId);
 
   const proc = Bun.spawn(["pi", "-p", "--no-session", prompt], {
@@ -248,7 +250,7 @@ async function runPiResearch(modelId: string): Promise<ModelResearchResult> {
 
 // ─── Upsert model metadata ─────────────────────────────────────────────────
 
-async function upsertModelMeta(
+export async function upsertModelMeta(
   modelId: string,
   result: ModelResearchResult,
 ): Promise<void> {
@@ -400,4 +402,9 @@ async function main() {
   await prisma.$disconnect();
 }
 
-main();
+// Only run main() when invoked as a script (bun run src/research-models.ts).
+// When this file is imported as a module (e.g. by the GraphQL refetchModel
+// resolver), the exported helpers are used directly.
+if (import.meta.main) {
+  main();
+}
