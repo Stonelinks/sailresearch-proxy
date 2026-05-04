@@ -7,6 +7,7 @@ import { RecurringTask } from "./recurring-task.ts";
 import { JOB_SUMMARY_SELECT, jobToSummary } from "./job-shapes.ts";
 import { now, formatDuration } from "../../shared/time.ts";
 import type { JobWaiter, CompletionWindow } from "../types.ts";
+import { mapSailStatus } from "../types.ts";
 
 export function getBackoffMs(pollCount: number): number {
   if (pollCount < 3) return 2000;
@@ -252,7 +253,7 @@ export class Poller {
         );
       } else {
         // Still pending or running
-        await this.scheduleRetry(job, sailStatus);
+        await this.scheduleRetry(job, mapSailStatus(sailStatus));
         this.broadcastUpdate(job.id);
       }
     } catch (err) {
@@ -270,7 +271,8 @@ export class Poller {
         select: JOB_SUMMARY_SELECT,
       });
       if (!job) return;
-      pubsub.publish("jobUpdated", jobToSummary(job));
+      const summary = jobToSummary(job);
+      pubsub.publish("jobUpdated", summary);
     } catch {
       // Non-critical: don't let broadcast failures affect polling
     }

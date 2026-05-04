@@ -124,6 +124,56 @@ describe("Query.jobs", () => {
     expect(mockPendingJobFindMany.mock.calls[0]![0].take).toBe(200);
   });
 
+  test("maps in_progress status to running", async () => {
+    mockPendingJobFindMany.mockResolvedValueOnce([
+      {
+        id: "job-ip",
+        sailResponseId: "resp-ip",
+        status: "in_progress",
+        model: "test-model",
+        completionWindow: "flex",
+        apiType: "responses",
+        createdAt: new Date("2025-01-01T00:00:00Z"),
+        completedAt: null,
+        pollCount: 2,
+        errorBody: null,
+      },
+    ]);
+    mockPendingJobCount.mockResolvedValueOnce(1);
+
+    const res = await run(`
+      { jobs { jobs { id status } } }
+    `);
+
+    expect(res.errors).toBeUndefined();
+    expect((res.data?.jobs as any).jobs[0].status).toBe("running");
+  });
+
+  test("maps in_progress status to running on job detail", async () => {
+    mockPendingJobFindUnique.mockResolvedValueOnce({
+      id: "job-ip",
+      sailResponseId: "resp-ip",
+      status: "in_progress",
+      model: "test-model",
+      completionWindow: "flex",
+      apiType: "responses",
+      createdAt: new Date("2025-01-01T00:00:00Z"),
+      completedAt: null,
+      pollCount: 2,
+      errorBody: null,
+      requestBody: null,
+      responseBody: null,
+    });
+
+    const res = await run(
+      `query Q($id: ID!) { job(id: $id) { id status } }`,
+      { id: "job-ip" },
+    );
+
+    expect(res.errors).toBeUndefined();
+    expect(res.data?.job?.status).toBe("running");
+  });
+
   test("marks hasError true when errorBody is not null", async () => {
     mockPendingJobFindMany.mockResolvedValueOnce([
       {

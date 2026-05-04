@@ -4,7 +4,7 @@
  * drift independently — three call sites previously each declared their own
  * Prisma `select` and inline mapping.
  */
-import type { JobStatus } from "../types.ts";
+import { type JobStatus, mapSailStatus } from "../types.ts";
 
 export const JOB_SUMMARY_SELECT = {
   id: true,
@@ -68,7 +68,7 @@ export function jobToSummary(job: JobSummaryRow): JobSummary {
   return {
     id: job.id,
     sailResponseId: job.sailResponseId,
-    status: job.status as JobStatus,
+    status: mapSailStatus(job.status),
     model: job.model,
     completionWindow: job.completionWindow,
     apiType: job.apiType,

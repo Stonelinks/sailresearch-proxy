@@ -6,6 +6,7 @@ import { openAIError, mapSailError } from "../errors.ts";
 import { computeSailBodyHash, findExistingJob } from "../dedup.ts";
 import type { Poller, WaiterRegistration } from "./poller.ts";
 import type { CompletionWindow } from "../types.ts";
+import { mapSailStatus } from "../types.ts";
 import type { PrismaClient } from "@prisma/client";
 
 /**
@@ -172,7 +173,8 @@ export async function submitAndWait(
   await db.pendingJob.create({
     data: {
       sailResponseId,
-      status: data.status ?? "pending",
+      // Map Sail's "in_progress" to our "running" enum value
+      status: mapSailStatus(data.status ?? "pending"),
       requestBody: JSON.stringify(originalRequestBody),
       model,
       completionWindow,

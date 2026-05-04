@@ -211,6 +211,27 @@ describe("submitAndWait", () => {
     expect(mockPoller.registerWaiter).toHaveBeenCalledWith("resp_fresh");
   });
 
+  test("maps in_progress to running when persisting new job", async () => {
+    mockCreateResponse.mockResolvedValueOnce({
+      status: 202,
+      data: { id: "resp_ip", status: "in_progress", model: "test-model" },
+    });
+    mockPoller.registerWaiter.mockImplementationOnce(() =>
+      waiterFor(
+        Promise.resolve({
+          id: "resp_ip",
+          status: "completed",
+          output: [],
+        }),
+      ),
+    );
+
+    await submitAndWait(baseParams());
+
+    const createData = mockPrismaCreate.mock.calls[0]![0].data;
+    expect(createData.status).toBe("running");
+  });
+
   test("does not match failed or cancelled jobs", async () => {
     // findExistingJob filters out failed/cancelled — findMany returns empty
     mockPrismaFindMany.mockResolvedValueOnce([]);
