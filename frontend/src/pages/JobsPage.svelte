@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import { graphql } from "$houdini";
   import { onWsConnected } from "../lib/houdini-client";
   import { applyJobUpdate, type Job } from "../jobs-reducer";
@@ -92,13 +92,19 @@
   $effect(() => {
     const updated = $JobUpdated.data?.jobUpdated;
     if (!updated) return;
-    const result = applyJobUpdate({
-      state: { jobs, total },
-      updatedJob: updated as Job,
-      statusFilter,
-      offset,
-      pageSize: PAGE_SIZE,
-    });
+    // Use untrack so reading jobs/total/statusFilter/offset doesn't
+    // subscribe this effect to them — only $JobUpdated.data should
+    // trigger it. Otherwise writing jobs/total back re-triggers the
+    // effect, causing effect_update_depth_exceeded.
+    const result = applyJobUpdate(
+      untrack(() => ({
+        state: { jobs, total },
+        updatedJob: updated as Job,
+        statusFilter,
+        offset,
+        pageSize: PAGE_SIZE,
+      })),
+    );
     if (result.action !== "ignored") {
       log.debug("Job update", result.action, updated.id, "→", updated.status);
       jobs = result.state.jobs;

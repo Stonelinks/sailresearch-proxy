@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import { graphql } from "$houdini";
   import { onWsConnected } from "../lib/houdini-client";
   import { shortModel } from "../format";
@@ -68,7 +68,7 @@
   // because the bodies aren't published — they live only in the DB.
   $effect(() => {
     const update = $JobUpdated.data?.jobUpdated;
-    if (!update || update.id !== params.id) return;
+    if (!update || update.id !== untrack(() => params.id)) return;
     log.debug("Detail page got update for", params.id, "→", update.status);
     load();
   });
