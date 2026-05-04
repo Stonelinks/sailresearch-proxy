@@ -98,21 +98,29 @@ export async function handleDashboardJobDetail(
   return Response.json(jobToDetail(job));
 }
 
-// A malformed samplingPresets string would crash the entire /api/models
-// endpoint and make every model in the dashboard unrenderable. Treat any
-// parse failure as "no presets" and keep going.
-function parseSamplingPresets(meta: {
-  modelId: string;
-  samplingPresets: string;
-}): unknown[] {
+// A malformed params JSON string would crash the entire /api/models
+// endpoint. Treat any parse failure as "no presets" and keep going.
+function parseSamplingParams(preset: {
+  name: string;
+  description: string;
+  params: string;
+}): {
+  name: string;
+  description: string;
+  params: Record<string, unknown>;
+} {
   try {
-    const parsed = JSON.parse(meta.samplingPresets);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch (e) {
-    log.warn(
-      `[models] failed to parse samplingPresets for ${meta.modelId}: ${(e as Error).message}`,
-    );
-    return [];
+    const parsed = JSON.parse(preset.params);
+    return {
+      name: preset.name,
+      description: preset.description,
+      params:
+        typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+          ? parsed
+          : {},
+    };
+  } catch {
+    return { name: preset.name, description: preset.description, params: {} };
   }
 }
 
@@ -121,8 +129,10 @@ export async function handleDashboardModels(): Promise<Response> {
   const { status, data } = await sail.listModels();
   if (status !== 200) return mapSailError(status, data);
 
-  // Fetch all metadata and index by modelId
-  const metaRows = await prisma.modelMeta.findMany();
+  // Fetch all metadata with presets and index by modelId
+  const metaRows = await prisma.modelMeta.findMany({
+    include: { samplingPresets: true },
+  });
   const metaByModelId = new Map(metaRows.map((m) => [m.modelId, m]));
 
   // Enrich each model with its metadata (nulls if not researched)
@@ -131,7 +141,9 @@ export async function handleDashboardModels(): Promise<Response> {
     return {
       ...model,
       contextSize: meta?.contextSize ?? null,
-      samplingPresets: meta ? parseSamplingPresets(meta) : null,
+      samplingPresets: meta
+        ? meta.samplingPresets.map((p) => parseSamplingParams(p))
+        : null,
       description: meta?.description ?? null,
       source: meta?.source ?? null,
       researchedAt: meta?.researchedAt?.toISOString() ?? null,

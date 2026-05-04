@@ -8,14 +8,28 @@ generator client {
 }
 
 model ModelMeta {
-  id              String   @id @default(cuid())
-  modelId         String   @unique
+  id              String           @id @default(cuid())
+  modelId         String           @unique
   contextSize     Int?
-  samplingPresets String   @default("[]")
   description     String?
   source          String?
-  researchedAt    DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  researchedAt    DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  samplingPresets SamplingPreset[]
+}
+
+model SamplingPreset {
+  id          String    @id @default(cuid())
+  modelMetaId String
+  name        String
+  description String    @default("")
+  params      String    @default("{}")
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  modelMeta   ModelMeta @relation(fields: [modelMetaId], references: [id], onDelete: Cascade)
+
+  @@index([modelMetaId])
 }
 
 model PendingJob {

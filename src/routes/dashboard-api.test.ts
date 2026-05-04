@@ -212,8 +212,13 @@ describe("handleDashboardModels", () => {
       {
         modelId: "model-a",
         contextSize: 131072,
-        samplingPresets:
-          '[{"name":"default","description":"General purpose","params":{"temperature":0.7}}]',
+        samplingPresets: [
+          {
+            name: "default",
+            description: "General purpose",
+            params: '{"temperature":0.7}',
+          },
+        ],
         description: "A large language model",
         source: "https://huggingface.co/org-a/model-a",
         researchedAt: new Date("2025-06-01T00:00:00Z"),
@@ -275,7 +280,7 @@ describe("handleDashboardModels", () => {
     expect(body.data[0].description).toBeNull();
   });
 
-  test("falls back to [] when samplingPresets is malformed JSON", async () => {
+  test("falls back to [] when samplingPresets params is malformed JSON", async () => {
     mockListModels.mockResolvedValueOnce({
       status: 200,
       data: {
@@ -287,7 +292,13 @@ describe("handleDashboardModels", () => {
       {
         modelId: "model-bad",
         contextSize: 4096,
-        samplingPresets: "{not json",
+        samplingPresets: [
+          {
+            name: "broken",
+            description: "",
+            params: "{not json",
+          },
+        ],
         description: null,
         source: null,
         researchedAt: new Date(),
@@ -297,7 +308,9 @@ describe("handleDashboardModels", () => {
     const res = await handleDashboardModels();
     expect(res.status).toBe(200);
     const body: any = await res.json();
-    expect(body.data[0].samplingPresets).toEqual([]);
+    expect(body.data[0].samplingPresets).toEqual([
+      { name: "broken", description: "", params: {} },
+    ]);
     expect(body.data[0].contextSize).toBe(4096);
   });
 
