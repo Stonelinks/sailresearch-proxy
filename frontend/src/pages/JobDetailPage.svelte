@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { fetchJob, connectJobUpdates, type JobDetail } from "../api";
+  import { graphql } from "$houdini";
+  import { onWsConnected } from "../lib/houdini-client";
   import { shortModel } from "../format";
   import { log } from "$shared/logger.ts";
   import StatusBadge from "../components/StatusBadge.svelte";
@@ -9,25 +10,51 @@
 
   let { params }: { params: { id: string } } = $props();
 
-  let job: JobDetail | null = $state(null);
-  let error = $state("");
   let activeTab = $state<"request" | "response" | "error">("request");
   // Track whether the user has interacted with the tabs so a late-arriving
   // response doesn't yank them off the tab they're reading.
   let userPickedTab = $state(false);
 
-  async function load() {
-    try {
-      log.debug("Loading job", params.id);
-      const fresh = await fetchJob(params.id);
-      job = fresh;
-      if (!userPickedTab) {
-        if (fresh.errorBody) activeTab = "error";
-        else if (fresh.responseBody) activeTab = "response";
+  const JobQ = graphql(`
+    query JobDetailQuery($id: ID!) {
+      job(id: $id) {
+        id
+        sailResponseId
+        status
+        model
+        completionWindow
+        apiType
+        createdAt
+        completedAt
+        durationMs
+        pollCount
+        hasError
+        requestBody
+        responseBody
+        errorBody
       }
-    } catch (e: any) {
-      log.error("Failed to load job", params.id, ":", e);
-      error = e.message ?? "Failed to load job";
+    }
+  `);
+
+  const JobUpdated = graphql(`
+    subscription JobDetailUpdates($id: ID!) {
+      jobUpdated(id: $id) {
+        id
+        status
+      }
+    }
+  `);
+
+  let job = $derived($JobQ.data?.job ?? null);
+  let error = $derived($JobQ.errors?.[0]?.message ?? "");
+
+  async function load() {
+    log.debug("Loading job", params.id);
+    await JobQ.fetch({ variables: { id: params.id } });
+    const fresh = $JobQ.data?.job;
+    if (fresh && !userPickedTab) {
+      if (fresh.errorBody) activeTab = "error";
+      else if (fresh.responseBody) activeTab = "response";
     }
   }
 
@@ -36,33 +63,35 @@
     userPickedTab = true;
   }
 
-  onMount(() => {
+  // Refetch when the subscription reports a state change for THIS job.
+  // The subscription payload is intentionally minimal (just id + status)
+  // because the bodies aren't published — they live only in the DB.
+  $effect(() => {
+    const update = $JobUpdated.data?.jobUpdated;
+    if (!update || update.id !== params.id) return;
+    log.debug("Detail page got update for", params.id, "→", update.status);
     load();
-    // Subscribe to job updates; refetch on any update for this job. The WS
-    // payload omits requestBody/responseBody/errorBody, so we need a full
-    // fetchJob to pick up bodies once the job completes. Also resync on
-    // reconnect in case we missed the terminal update while disconnected.
-    let firstConnect = true;
-    const disconnect = connectJobUpdates(
-      (updated) => {
-        if (updated.id === params.id) {
-          log.debug("Detail page got update for", params.id, "→", updated.status);
-          load();
-        }
-      },
-      () => {
-        if (!firstConnect) {
-          log.debug("WS reconnected, refetching job detail");
-          load();
-        }
-        firstConnect = false;
-      },
-    );
-
-    return () => disconnect();
   });
 
-  function formatJson(raw: string | null): string {
+  onMount(() => {
+    load();
+    JobUpdated.listen({ id: params.id });
+    let firstConnect = true;
+    const offWs = onWsConnected(() => {
+      if (firstConnect) {
+        firstConnect = false;
+        return;
+      }
+      log.debug("WS reconnected, refetching job detail");
+      load();
+    });
+    return () => {
+      offWs();
+      JobUpdated.unlisten();
+    };
+  });
+
+  function formatJson(raw: string | null | undefined): string {
     if (!raw) return "";
     try {
       return JSON.stringify(JSON.parse(raw), null, 2);
@@ -178,7 +207,7 @@
       <div class="relative">
         {#if activeTab === "request" && job.requestBody}
           <button
-            onclick={() => copyToClipboard(formatJson(job.requestBody!))}
+            onclick={() => copyToClipboard(formatJson(job.requestBody))}
             class="absolute top-3 right-3 text-xs text-slate-400 hover:text-slate-600 px-2 py-1 rounded border border-slate-200 bg-white transition-colors cursor-pointer"
           >
             Copy
@@ -186,7 +215,7 @@
           <pre class="p-4 overflow-x-auto text-xs font-mono text-slate-700 leading-relaxed">{formatJson(job.requestBody)}</pre>
         {:else if activeTab === "response" && job.responseBody}
           <button
-            onclick={() => copyToClipboard(formatJson(job.responseBody!))}
+            onclick={() => copyToClipboard(formatJson(job.responseBody))}
             class="absolute top-3 right-3 text-xs text-slate-400 hover:text-slate-600 px-2 py-1 rounded border border-slate-200 bg-white transition-colors cursor-pointer"
           >
             Copy

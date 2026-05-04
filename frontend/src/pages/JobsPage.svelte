@@ -1,12 +1,8 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import {
-    fetchJobs,
-    connectJobUpdates,
-    type Job,
-    type JobUpdateCallback,
-  } from "../api";
-  import { applyJobUpdate } from "../jobs-reducer";
+  import { graphql } from "$houdini";
+  import { onWsConnected } from "../lib/houdini-client";
+  import { applyJobUpdate, type Job } from "../jobs-reducer";
   import { shortModel } from "../format";
   import { log } from "$shared/logger.ts";
   import StatusBadge from "../components/StatusBadge.svelte";
@@ -16,26 +12,72 @@
 
   const PAGE_SIZE = 50;
 
+  type StatusOpt = "" | "pending" | "queued" | "running" | "completed" | "failed" | "cancelled";
+
+  let offset = $state(0);
+  let statusFilter: StatusOpt = $state("");
+  let connected = $state(false);
+
+  // Local mirror of jobs/total so we can apply WS updates incrementally
+  // without refetching the whole page on every status change.
   let jobs: Job[] = $state([]);
   let total = $state(0);
-  let offset = $state(0);
-  let statusFilter = $state("");
-  let connected = $state(false);
 
   let page = $derived(Math.floor(offset / PAGE_SIZE) + 1);
   let totalPages = $derived(Math.max(Math.ceil(total / PAGE_SIZE), 1));
 
+  const Jobs = graphql(`
+    query JobsList($limit: Int, $offset: Int, $status: JobStatus) {
+      jobs(limit: $limit, offset: $offset, status: $status) {
+        total
+        limit
+        offset
+        jobs {
+          id
+          sailResponseId
+          status
+          model
+          completionWindow
+          apiType
+          createdAt
+          completedAt
+          durationMs
+          pollCount
+          hasError
+        }
+      }
+    }
+  `);
+
+  const JobUpdated = graphql(`
+    subscription JobUpdates {
+      jobUpdated {
+        id
+        sailResponseId
+        status
+        model
+        completionWindow
+        apiType
+        createdAt
+        completedAt
+        durationMs
+        pollCount
+        hasError
+      }
+    }
+  `);
+
   async function load() {
-    try {
-      const data = await fetchJobs({
-        limit: PAGE_SIZE,
-        offset,
-        status: statusFilter || undefined,
-      });
-      jobs = data.jobs;
+    const variables = {
+      limit: PAGE_SIZE,
+      offset,
+      status: statusFilter || null,
+    };
+    await Jobs.fetch({ variables });
+    const data = $Jobs.data?.jobs;
+    if (data) {
+      jobs = data.jobs as Job[];
       total = data.total;
-    } catch (e) {
-      log.error("Failed to load jobs:", e);
     }
   }
 
@@ -43,45 +85,47 @@
     window.location.hash = `#/job/${id}`;
   }
 
-  const handleJobUpdate: JobUpdateCallback = (updatedJob) => {
-    const { state, action } = applyJobUpdate({
+  // Apply incoming subscription payloads through the same pure reducer as
+  // before. The reducer is transport-agnostic — it only cares about the
+  // wire shape, which is identical between the old WS and the GraphQL
+  // subscription.
+  $effect(() => {
+    const updated = $JobUpdated.data?.jobUpdated;
+    if (!updated) return;
+    const result = applyJobUpdate({
       state: { jobs, total },
-      updatedJob,
+      updatedJob: updated as Job,
       statusFilter,
       offset,
       pageSize: PAGE_SIZE,
     });
-    if (action !== "ignored") {
-      log.debug("Job update", action, updatedJob.id, "→", updatedJob.status);
-      jobs = state.jobs;
-      total = state.total;
+    if (result.action !== "ignored") {
+      log.debug("Job update", result.action, updated.id, "→", updated.status);
+      jobs = result.state.jobs;
+      total = result.state.total;
     }
-  };
+  });
 
   onMount(() => {
     load();
+    JobUpdated.listen();
     let firstConnect = true;
-    const disconnect = connectJobUpdates(
-      (job) => {
-        handleJobUpdate(job);
-      },
-      () => {
-        // Resync on every reconnect: any updates that fired while the WS was
-        // down were dropped, so the local state is stale. Skip the very first
-        // connect since onMount already called load().
-        if (!firstConnect) {
-          log.debug("WS reconnected, resyncing jobs");
-          load();
-        }
+    // Resync on every reconnect: any updates that fired while the WS was
+    // down were dropped, so the local state is stale. Skip the very first
+    // connect since onMount already called load().
+    const offWs = onWsConnected(() => {
+      connected = true;
+      if (firstConnect) {
         firstConnect = false;
-        connected = true;
-      },
-      () => {
-        connected = false;
-      },
-    );
-
-    return () => disconnect();
+        return;
+      }
+      log.debug("WS reconnected, resyncing jobs");
+      load();
+    });
+    return () => {
+      offWs();
+      JobUpdated.unlisten();
+    };
   });
 </script>
 

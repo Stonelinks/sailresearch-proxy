@@ -1,4 +1,22 @@
-import type { Job } from "./api";
+/**
+ * Minimal job shape consumed by the reducer. Lives here (not re-exported
+ * from a transport layer) so the reducer stays pure: it only cares that
+ * each job has an `id` and `status`. The full wire shape comes from the
+ * generated GraphQL types but flows through this interface unchanged.
+ */
+export interface Job {
+  id: string;
+  sailResponseId: string;
+  status: string;
+  model: string;
+  completionWindow: string;
+  apiType: string;
+  createdAt: string;
+  completedAt: string | null;
+  durationMs: number | null;
+  pollCount: number;
+  hasError: boolean;
+}
 
 export type JobUpdateAction = "updated" | "removed" | "prepended" | "ignored";
 

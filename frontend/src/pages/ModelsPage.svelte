@@ -1,14 +1,53 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { fetchModels, type SailModel, type SamplingPreset } from "../api";
+  import { graphql } from "$houdini";
   import { shortOwner, formatContextSize } from "../format";
   import { log } from "$shared/logger.ts";
 
-  let models: SailModel[] = $state([]);
-  let loading = $state(true);
-  let error = $state("");
   let search = $state("");
   let expandedPresets: Set<string> = $state(new Set());
+  let refetchingId = $state<string | null>(null);
+
+  const Models = graphql(`
+    query ModelsList {
+      models {
+        id
+        object
+        created
+        ownedBy
+        contextSize
+        description
+        source
+        researchedAt
+        samplingPresets {
+          name
+          description
+          params
+        }
+      }
+    }
+  `);
+
+  const RefetchModel = graphql(`
+    mutation RefetchModel($modelId: ID!) {
+      refetchModel(modelId: $modelId) {
+        id
+        contextSize
+        description
+        source
+        researchedAt
+        samplingPresets {
+          name
+          description
+          params
+        }
+      }
+    }
+  `);
+
+  let models = $derived($Models.data?.models ?? []);
+  let loading = $derived($Models.fetching);
+  let error = $derived($Models.errors?.[0]?.message ?? "");
 
   let filtered = $derived(
     search
@@ -28,17 +67,28 @@
     expandedPresets = next;
   }
 
-  onMount(async () => {
+  async function refetchOne(modelId: string) {
+    refetchingId = modelId;
     try {
-      log.debug("Loading models");
-      const data = await fetchModels();
-      models = data.data ?? [];
-    } catch (e: any) {
-      log.error("Failed to load models:", e);
-      error = e.message ?? "Failed to load models";
+      log.debug("Refetching model", modelId);
+      const result = await RefetchModel.mutate({ modelId });
+      if (result.errors?.length) {
+        log.error("Refetch failed:", result.errors[0].message);
+        // Surface the error to the user; the list query stays as-is.
+        // eslint-disable-next-line no-alert
+        alert(`Refetch failed: ${result.errors[0].message}`);
+      } else {
+        // Houdini's normalized cache merges the mutation result into the
+        // list query automatically — no manual list refetch needed.
+        log.debug("Refetched", modelId);
+      }
     } finally {
-      loading = false;
+      refetchingId = null;
     }
+  }
+
+  onMount(() => {
+    Models.fetch();
   });
 </script>
 
@@ -57,7 +107,7 @@
     </div>
   </div>
 
-  {#if loading}
+  {#if loading && models.length === 0}
     <div class="text-center py-16 text-slate-400">Loading…</div>
   {:else if error}
     <div class="text-center py-16 text-slate-400">
@@ -76,12 +126,13 @@
               <th class="text-left px-4 py-2.5 font-semibold text-slate-600 whitespace-nowrap">Description</th>
               <th class="text-left px-4 py-2.5 font-semibold text-slate-600 whitespace-nowrap">Presets</th>
               <th class="text-left px-4 py-2.5 font-semibold text-slate-600 whitespace-nowrap">Created</th>
+              <th class="text-left px-4 py-2.5 font-semibold text-slate-600 whitespace-nowrap"></th>
             </tr>
           </thead>
           <tbody>
             {#if filtered.length === 0}
               <tr>
-                <td colspan="6" class="text-center py-10 text-slate-400">No models found.</td>
+                <td colspan="7" class="text-center py-10 text-slate-400">No models found.</td>
               </tr>
             {:else}
               {#each filtered as model (model.id)}
@@ -92,7 +143,7 @@
                       <span class="ml-1.5 inline-block text-[10px] font-sans font-medium text-amber-600 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">Not researched</span>
                     {/if}
                   </td>
-                  <td class="px-4 py-2.5 text-sm text-slate-600">{shortOwner(model.owned_by)}</td>
+                  <td class="px-4 py-2.5 text-sm text-slate-600">{shortOwner(model.ownedBy)}</td>
                   <td class="px-4 py-2.5 text-sm text-slate-500 whitespace-nowrap">
                     {#if model.contextSize !== null}
                       <span class="font-mono text-xs">{formatContextSize(model.contextSize)}</span>
@@ -123,10 +174,19 @@
                   <td class="px-4 py-2.5 text-sm text-slate-500">
                     {new Date(model.created * 1000).toLocaleDateString()}
                   </td>
+                  <td class="px-4 py-2.5 text-right">
+                    <button
+                      onclick={() => refetchOne(model.id)}
+                      disabled={refetchingId === model.id}
+                      class="text-xs px-2 py-1 rounded border border-slate-200 text-slate-500 hover:text-slate-700 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                    >
+                      {refetchingId === model.id ? "Refetching…" : "Refetch"}
+                    </button>
+                  </td>
                 </tr>
                 {#if expandedPresets.has(model.id) && model.samplingPresets && model.samplingPresets.length > 0}
                   <tr class="bg-slate-50/50">
-                    <td colspan="6" class="px-4 py-3">
+                    <td colspan="7" class="px-4 py-3">
                       <div class="flex flex-wrap gap-2 ml-4">
                         {#each model.samplingPresets as preset}
                           <div class="bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs shadow-sm max-w-xs">

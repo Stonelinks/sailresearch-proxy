@@ -1,6 +1,5 @@
 import { describe, test, expect } from "vitest";
-import { applyJobUpdate, type JobsState } from "./jobs-reducer";
-import type { Job } from "./api";
+import { applyJobUpdate, type JobsState, type Job } from "./jobs-reducer";
 
 function job(overrides: Partial<Job> = {}): Job {
   return {
