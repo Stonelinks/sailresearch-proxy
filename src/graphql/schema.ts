@@ -7,7 +7,7 @@ import {
 } from "../services/job-shapes.ts";
 import { sail } from "../sail-client.ts";
 import { researchAndUpsertOne } from "./research-models-runner.ts";
-import type { ModelWire, PresetWire } from "./builder.ts";
+import { mergeModelMeta, type SailUpstreamModel } from "../models-meta.ts";
 import type { JobStatus } from "../types.ts";
 
 const JOB_STATUS_VALUES = [
@@ -115,60 +115,17 @@ const JobsResult = builder
     }),
   });
 
-// A malformed params JSON string would crash the entire `models` query. Treat
-// any parse failure as "no presets" and keep going. Mirrors the equivalent
-// helper that lived in dashboard-api.ts.
-function parseSamplingParams(p: {
-  name: string;
-  description: string;
-  params: string;
-}): PresetWire {
-  try {
-    const parsed = JSON.parse(p.params);
-    return {
-      name: p.name,
-      description: p.description,
-      params:
-        typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
-          ? (parsed as Record<string, number | string | boolean>)
-          : {},
-    };
-  } catch {
-    return { name: p.name, description: p.description, params: {} };
-  }
-}
-
-async function loadModelWire(
-  modelId: string,
-  ctx: { prisma: any },
-): Promise<ModelWire | null> {
+async function loadModelWire(modelId: string, ctx: { prisma: any }) {
   const sailRes = await sail.listModels();
   if (sailRes.status !== 200) return null;
-  const list = (sailRes.data?.data ?? []) as Array<{
-    id: string;
-    object: string;
-    created: number;
-    owned_by: string;
-  }>;
+  const list = (sailRes.data?.data ?? []) as SailUpstreamModel[];
   const sailModel = list.find((m) => m.id === modelId);
   if (!sailModel) return null;
   const meta = await ctx.prisma.modelMeta.findUnique({
     where: { modelId },
     include: { samplingPresets: true },
   });
-  return {
-    id: sailModel.id,
-    object: sailModel.object,
-    created: sailModel.created,
-    ownedBy: sailModel.owned_by,
-    contextSize: meta?.contextSize ?? null,
-    samplingPresets: meta
-      ? meta.samplingPresets.map(parseSamplingParams)
-      : null,
-    description: meta?.description ?? null,
-    source: meta?.source ?? null,
-    researchedAt: meta?.researchedAt?.toISOString() ?? null,
-  };
+  return mergeModelMeta(sailModel, meta ?? undefined);
 }
 
 builder.queryType({
@@ -220,32 +177,12 @@ builder.queryType({
             `Sail upstream returned ${sailRes.status} for /v1/models`,
           );
         }
-        const list = (sailRes.data?.data ?? []) as Array<{
-          id: string;
-          object: string;
-          created: number;
-          owned_by: string;
-        }>;
+        const list = (sailRes.data?.data ?? []) as SailUpstreamModel[];
         const metas = await ctx.prisma.modelMeta.findMany({
           include: { samplingPresets: true },
         });
         const byId = new Map(metas.map((m) => [m.modelId, m]));
-        return list.map((m): ModelWire => {
-          const meta = byId.get(m.id);
-          return {
-            id: m.id,
-            object: m.object,
-            created: m.created,
-            ownedBy: m.owned_by,
-            contextSize: meta?.contextSize ?? null,
-            samplingPresets: meta
-              ? meta.samplingPresets.map(parseSamplingParams)
-              : null,
-            description: meta?.description ?? null,
-            source: meta?.source ?? null,
-            researchedAt: meta?.researchedAt?.toISOString() ?? null,
-          };
-        });
+        return list.map((m) => mergeModelMeta(m, byId.get(m.id) ?? undefined));
       },
     }),
   }),
