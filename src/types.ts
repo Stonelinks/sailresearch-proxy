@@ -47,4 +47,5 @@ export interface ModelResearchResult {
   prices: ModelPriceInput[];
   description: string | null;
   source: string | null;
+  supportsImage: boolean;
 }

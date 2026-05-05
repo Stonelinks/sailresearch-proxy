@@ -17,6 +17,7 @@ model ModelMeta {
   contextSize     Int?
   description     String?
   source          String?
+  supportsImage   Boolean         @default(false)
   researchedAt    DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
   samplingPresets SamplingPreset[]

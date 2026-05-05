@@ -60,6 +60,7 @@ type Model {
   researchedAt: DateTime
   samplingPresets: [SamplingPreset!]
   source: String
+  supportsImage: Boolean!
 }
 
 type ModelPrice {
@@ -77,6 +78,7 @@ type Mutation {
 type Query {
   job(id: ID!): JobDetail
   jobs(limit: Int = 50, offset: Int = 0, status: JobStatus): JobsResult!
+  model(id: ID!): Model
   models: [Model!]!
 }
 

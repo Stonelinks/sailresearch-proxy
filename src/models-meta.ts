@@ -38,6 +38,7 @@ export interface ModelWire {
   prices: PriceWire[] | null;
   description: string | null;
   source: string | null;
+  supportsImage: boolean;
   researchedAt: string | null;
 }
 
@@ -55,6 +56,7 @@ export interface MetaRow {
   contextSize: number | null;
   description: string | null;
   source: string | null;
+  supportsImage: boolean;
   researchedAt: Date;
   samplingPresets: Array<{ name: string; description: string; params: string }>;
   prices: Array<{
@@ -127,6 +129,7 @@ export function mergeModelMeta(
       : null,
     description: meta?.description ?? null,
     source: meta?.source ?? null,
+    supportsImage: meta?.supportsImage ?? false,
     researchedAt: meta?.researchedAt?.toISOString() ?? null,
   };
 }
@@ -193,6 +196,9 @@ export function toRestShape(
   if (m.contextSize != null) {
     out.context_length = m.contextSize;
     out.top_provider = { context_length: m.contextSize };
+  }
+  if (m.supportsImage) {
+    out.supports_image = true;
   }
   if (m.description != null) out.description = m.description;
   const presets = m.samplingPresets ?? [];
