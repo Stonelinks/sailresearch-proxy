@@ -3,11 +3,13 @@
   import JobsPage from "./pages/JobsPage.svelte";
   import JobDetailPage from "./pages/JobDetailPage.svelte";
   import ModelsPage from "./pages/ModelsPage.svelte";
+  import ModelDetailPage from "./pages/ModelDetailPage.svelte";
 
   const routes = {
     "/": JobsPage,
     "/job/:id": JobDetailPage,
     "/models": ModelsPage,
+    "/models/:id": ModelDetailPage,
   };
 </script>
 
