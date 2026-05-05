@@ -7,6 +7,7 @@
   import StatusBadge from "../components/StatusBadge.svelte";
   import RelativeTime from "../components/RelativeTime.svelte";
   import Duration from "../components/Duration.svelte";
+  import JsonBlock from "../components/JsonBlock.svelte";
 
   let { params }: { params: { id: string } } = $props();
 
@@ -91,18 +92,7 @@
     };
   });
 
-  function formatJson(raw: string | null | undefined): string {
-    if (!raw) return "";
-    try {
-      return JSON.stringify(JSON.parse(raw), null, 2);
-    } catch {
-      return raw;
-    }
-  }
 
-  function copyToClipboard(text: string) {
-    navigator.clipboard.writeText(text);
-  }
 </script>
 
 {#if error}
@@ -204,25 +194,13 @@
         </button>
       </div>
 
-      <div class="relative">
+      <div>
         {#if activeTab === "request" && job.requestBody}
-          <button
-            onclick={() => copyToClipboard(formatJson(job.requestBody))}
-            class="absolute top-3 right-3 text-xs text-slate-400 hover:text-slate-600 px-2 py-1 rounded border border-slate-200 bg-white transition-colors cursor-pointer"
-          >
-            Copy
-          </button>
-          <pre class="p-4 overflow-x-auto text-xs font-mono text-slate-700 leading-relaxed">{formatJson(job.requestBody)}</pre>
+          <JsonBlock json={job.requestBody} />
         {:else if activeTab === "response" && job.responseBody}
-          <button
-            onclick={() => copyToClipboard(formatJson(job.responseBody))}
-            class="absolute top-3 right-3 text-xs text-slate-400 hover:text-slate-600 px-2 py-1 rounded border border-slate-200 bg-white transition-colors cursor-pointer"
-          >
-            Copy
-          </button>
-          <pre class="p-4 overflow-x-auto text-xs font-mono text-slate-700 leading-relaxed">{formatJson(job.responseBody)}</pre>
+          <JsonBlock json={job.responseBody} />
         {:else if activeTab === "error" && job.errorBody}
-          <pre class="p-4 overflow-x-auto text-xs font-mono text-red-600 leading-relaxed">{job.errorBody}</pre>
+          <JsonBlock json={job.errorBody} error={true} />
         {:else}
           <p class="p-4 text-sm text-slate-400">No data available.</p>
         {/if}
