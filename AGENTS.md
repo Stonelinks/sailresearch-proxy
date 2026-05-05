@@ -28,6 +28,49 @@ This project uses Bun. Do not use Node.js, npm, pnpm, yarn, vite, or their ecosy
 - Prefer `Bun.file` over `node:fs`'s readFile/writeFile.
 - `Bun.$` for shell commands instead of `execa`.
 
+## Running a Live Copy
+
+The host typically has a long-running proxy already listening on the default port (4000), and the dev Vite server on 5173. **Do not start your own copy on those ports** — you'll either fail to bind or knock the user's instance offline.
+
+When you need to run the proxy yourself (manual testing, reproducing a bug against a live Sail backend, etc.), override `PORT` to a free port in the 4100–4999 range:
+
+```bash
+PORT=4100 bin/run
+```
+
+Avoid `bin/dev` unless you also override Vite's port (it hardcodes `vite --host` which defaults to 5173 and will collide). For most agent work, running just the backend on a non-default port is enough — hit `http://localhost:4100/health`, `http://localhost:4100/v1/...`, etc. directly.
+
+Stop your copy when you're done — don't leave a stray process running. The integration test suite (`bun test`) already binds to a random port and a temp DB, so it doesn't conflict; prefer it over a manually-started server when you can.
+
+## Database Schema Changes
+
+Use real Prisma migrations, not `db push`, whenever you change `prisma/schema.prisma`.
+
+`db push` syncs the schema directly and discards columns/tables without history. It's fine for throwaway exploration, but it leaves no trail and breaks deployed databases the moment a column is removed (it refuses without `--accept-data-loss`, which silently destroys data).
+
+### Workflow
+
+1. Edit `prisma/schema.prisma`.
+2. Generate and apply a migration locally:
+
+   ```bash
+   bunx prisma migrate dev --name <short_description>
+   ```
+
+   This creates a new directory under `prisma/migrations/` containing the SQL, applies it to your local SQLite DB, and regenerates the Prisma client. **Commit the generated migration directory along with the schema change.**
+
+3. For destructive changes (dropping a column, narrowing a type), write a custom migration that preserves data when possible — e.g. backfill a new column before dropping the old one across two migrations.
+
+### Deployment
+
+Production startup should run `bunx prisma migrate deploy` (apply committed migrations only, no schema diffing). Migrations are append-only — never edit a migration that has been applied to any environment; add a new one instead.
+
+### Don't
+
+- Don't run `prisma db push` against a database that has migrations applied — it bypasses the migration history and the next `migrate deploy` will fail.
+- Don't pass `--accept-data-loss` to silence a `db push` warning. That's the signal to write a migration instead.
+- Don't hand-edit `prisma/migrations/` after the migration has been committed/applied.
+
 ## Frontend
 
 The frontend is a Svelte SPA in `frontend/` built with Vite + Tailwind. `svelte-spa-router` handles routing.
