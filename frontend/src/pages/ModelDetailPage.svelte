@@ -9,6 +9,8 @@
   } from "../format";
   import { log } from "$shared/logger.ts";
 
+  import JsonBlock from "../components/JsonBlock.svelte";
+
   const WINDOW_ORDER = ["standard", "priority", "flex", "asap"] as const;
   const WINDOW_LABELS: Record<(typeof WINDOW_ORDER)[number], string> = {
     standard: "Standard",
@@ -291,7 +293,7 @@
               {#if preset.description}
                 <p class="text-xs text-slate-500 mb-2">{preset.description}</p>
               {/if}
-              <pre class="text-xs font-mono text-slate-600 bg-slate-50 rounded px-3 py-2 overflow-x-auto whitespace-pre-wrap">{formatJsonParams(preset.params)}</pre>
+              <JsonBlock json={formatJsonParams(preset.params)} />
             </div>
           {/each}
         </div>
