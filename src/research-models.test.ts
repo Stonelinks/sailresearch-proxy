@@ -24,6 +24,7 @@ describe("parseAndValidatePiOutput", () => {
     expect(result.samplingPresets[0]!.params.temperature).toBe(0.7);
     expect(result.description).toBe("A large language model");
     expect(result.source).toBe("https://huggingface.co/org/model");
+    expect(result.supportsImage).toBe(false);
   });
 
   test("handles null fields gracefully", () => {
@@ -34,6 +35,7 @@ describe("parseAndValidatePiOutput", () => {
     expect(result.prices).toEqual([]);
     expect(result.description).toBeNull();
     expect(result.source).toBeNull();
+    expect(result.supportsImage).toBe(false);
   });
 
   test("rejects invalid JSON", () => {
@@ -170,5 +172,26 @@ describe("parseAndValidatePiOutput", () => {
         }),
       ),
     ).toThrow('duplicate completionWindow "flex"');
+  });
+
+  test("parses supportsImage true", () => {
+    const result = parseAndValidatePiOutput(
+      JSON.stringify({ supportsImage: true }),
+    );
+    expect(result.supportsImage).toBe(true);
+  });
+
+  test("parses supportsImage false", () => {
+    const result = parseAndValidatePiOutput(
+      JSON.stringify({ supportsImage: false }),
+    );
+    expect(result.supportsImage).toBe(false);
+  });
+
+  test("defaults supportsImage to false when absent", () => {
+    const result = parseAndValidatePiOutput(
+      JSON.stringify({ contextSize: 8192 }),
+    );
+    expect(result.supportsImage).toBe(false);
   });
 });

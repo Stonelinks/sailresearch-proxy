@@ -14,6 +14,7 @@ import {
   type SamplingParamValue,
   type SamplingPresetInput,
 } from "./types.ts";
+import { scrapeImageCapabilities, scrapePricing } from "./docs-scraper.ts";
 
 // ─── CLI arg parsing ────────────────────────────────────────────────────────
 
@@ -209,7 +210,15 @@ export function parseAndValidatePiOutput(raw: string): ModelResearchResult {
   const source: string | null =
     typeof obj.source === "string" ? obj.source : null;
 
-  return { contextSize, samplingPresets, prices, description, source };
+  return {
+    contextSize,
+    samplingPresets,
+    prices,
+    description,
+    source,
+    supportsImage:
+      typeof obj.supportsImage === "boolean" ? obj.supportsImage : false,
+  };
 }
 
 // ─── Fetch model list from proxy ────────────────────────────────────────────
@@ -234,14 +243,13 @@ const PI_PROMPT_TEMPLATE = (modelId: string) =>
   `Research the AI model "${modelId}" and return ONLY a JSON object with these fields:
 - contextSize: maximum context window size in tokens (integer or null if unknown)
 - samplingPresets: array of recommended sampling parameter presets, each with {name, description, params}. params can include temperature, top_p, top_k, max_tokens, etc. Use an empty array if none found.
-- prices: array of per-completion-window pricing entries from https://docs.sailresearch.com/supported-models. Fetch that page and locate the row(s) for "${modelId}". Each entry: {completionWindow, inputPerMTok, cachedInputPerMTok, outputPerMTok}. completionWindow MUST be one of "asap", "priority", "standard", "flex". Numbers are USD per 1 million tokens (e.g. an "$0.20" cell becomes 0.20). Use null for cachedInputPerMTok if no cached price is published. Skip windows the model does not support (do not invent rows). Use an empty array if the model is not listed on the page.
 - description: a one-sentence description of the model
-- source: prefer https://docs.sailresearch.com/supported-models if pricing was found there; otherwise the HuggingFace model card URL or other authoritative source
+- source: the HuggingFace model card URL or other authoritative source
 
-Use web search or browser tools to find this information. For pricing, ALWAYS consult https://docs.sailresearch.com/supported-models first.
+Do NOT include pricing — that is scraped separately from the Sail docs.
 
 Return ONLY the JSON object, no markdown fences, no commentary. Example:
-{"contextSize": 262144, "samplingPresets": [{"name": "default", "description": "General purpose", "params": {"temperature": 0.7, "top_p": 0.95}}], "prices": [{"completionWindow": "standard", "inputPerMTok": 0.20, "cachedInputPerMTok": 0.10, "outputPerMTok": 1.20}, {"completionWindow": "flex", "inputPerMTok": 0.16, "cachedInputPerMTok": 0.05, "outputPerMTok": 0.80}], "description": "A large language model by ...", "source": "https://docs.sailresearch.com/supported-models"}`;
+{"contextSize": 262144, "samplingPresets": [{"name": "default", "description": "General purpose", "params": {"temperature": 0.7, "top_p": 0.95}}], "description": "A large language model by ...", "source": "https://huggingface.co/org/model"}`;
 
 /**
  * Extract a JSON object from raw pi output.
@@ -327,6 +335,7 @@ export async function upsertModelMeta(
         contextSize: result.contextSize,
         description: result.description,
         source: result.source,
+        supportsImage: result.supportsImage,
         researchedAt: new Date(),
       },
       create: {
@@ -334,6 +343,7 @@ export async function upsertModelMeta(
         contextSize: result.contextSize,
         description: result.description,
         source: result.source,
+        supportsImage: result.supportsImage,
       },
     });
 
@@ -382,14 +392,29 @@ async function researchSingleModel(
   modelId: string,
   index: number,
   total: number,
+  scrapedPrices: Map<string, ModelPriceInput[]>,
+  imageCapabilities: Map<string, boolean>,
 ): Promise<ResearchOutcome> {
   const prefix = sequential ? `[${index}/${total}]` : `[${index}/${total}]`;
   console.log(`${prefix} Researching: ${modelId}`);
 
   try {
     const result = await runPiResearch(modelId);
+
+    // Merge scraped pricing (authoritative source) over pi-researched prices
+    const scraped = scrapedPrices.get(modelId);
+    if (scraped && scraped.length > 0) {
+      result.prices = scraped;
+    }
+
+    // Merge scraped image capability
+    const imageCap = imageCapabilities.get(modelId);
+    if (imageCap !== undefined) {
+      result.supportsImage = imageCap;
+    }
+
     console.log(
-      `  ✓ ${modelId} — contextSize=${result.contextSize}, presets=${result.samplingPresets.length}, prices=${result.prices.length}, source=${result.source ?? "n/a"}`,
+      `  ✓ ${modelId} — contextSize=${result.contextSize}, presets=${result.samplingPresets.length}, prices=${result.prices.length}, supportsImage=${result.supportsImage}, source=${result.source ?? "n/a"}`,
     );
     await upsertModelMeta(modelId, result);
     console.log(`  ✓ Upserted ${modelId}`);
@@ -408,6 +433,8 @@ async function researchSingleModel(
 
 async function researchAllModels(
   modelIds: string[],
+  scrapedPrices: Map<string, ModelPriceInput[]>,
+  imageCapabilities: Map<string, boolean>,
 ): Promise<ResearchOutcome[]> {
   const total = modelIds.length;
 
@@ -415,7 +442,13 @@ async function researchAllModels(
     console.log(`Running in sequential mode (${total} models)\n`);
     const outcomes: ResearchOutcome[] = [];
     for (let i = 0; i < modelIds.length; i++) {
-      const outcome = await researchSingleModel(modelIds[i]!, i + 1, total);
+      const outcome = await researchSingleModel(
+        modelIds[i]!,
+        i + 1,
+        total,
+        scrapedPrices,
+        imageCapabilities,
+      );
       outcomes.push(outcome);
     }
     return outcomes;
@@ -425,7 +458,15 @@ async function researchAllModels(
 
   // Fire all at once, but collect results with index for logging
   const outcomes = await Promise.all(
-    modelIds.map((modelId, i) => researchSingleModel(modelId, i + 1, total)),
+    modelIds.map((modelId, i) =>
+      researchSingleModel(
+        modelId,
+        i + 1,
+        total,
+        scrapedPrices,
+        imageCapabilities,
+      ),
+    ),
   );
   return outcomes;
 }
@@ -459,8 +500,42 @@ async function main() {
     process.exit(1);
   }
 
+  // Scrape docs pages for pricing and image capabilities
+  console.log("Scraping Sail docs for pricing ...");
+  let scrapedPrices: Map<string, ModelPriceInput[]>;
+  try {
+    scrapedPrices = await scrapePricing();
+    console.log(
+      `  ✓ Pricing scraped for ${scrapedPrices.size} models from docs\n`,
+    );
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`  ⚠ Pricing scrape failed: ${msg}`);
+    console.warn(
+      "  Continuing without scraped pricing — pi research may provide it.\n",
+    );
+    scrapedPrices = new Map();
+  }
+
+  console.log("Scraping Sail docs for image capabilities ...");
+  let imageCapabilities: Map<string, boolean>;
+  try {
+    imageCapabilities = await scrapeImageCapabilities();
+    console.log(
+      `  ✓ Image capabilities scraped: ${[...imageCapabilities.entries()].filter(([, v]) => v).length} models support images\n`,
+    );
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`  ⚠ Image capability scrape failed: ${msg}\n`);
+    imageCapabilities = new Map();
+  }
+
   // Research
-  const outcomes = await researchAllModels(modelIds);
+  const outcomes = await researchAllModels(
+    modelIds,
+    scrapedPrices,
+    imageCapabilities,
+  );
 
   // Summary
   const succeeded = outcomes.filter((o) => o.status === "success");
