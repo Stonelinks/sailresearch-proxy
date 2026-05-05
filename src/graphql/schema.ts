@@ -53,6 +53,7 @@ builder.objectType("Model", {
     contextSize: t.exposeInt("contextSize", { nullable: true }),
     description: t.exposeString("description", { nullable: true }),
     source: t.exposeString("source", { nullable: true }),
+    supportsImage: t.exposeBoolean("supportsImage"),
     researchedAt: t.field({
       type: "DateTime",
       nullable: true,
@@ -180,6 +181,15 @@ builder.queryType({
           select: JOB_DETAIL_SELECT,
         });
         return row ? jobToDetail(row) : null;
+      },
+    }),
+
+    model: t.field({
+      type: "Model",
+      nullable: true,
+      args: { id: t.arg.id({ required: true }) },
+      resolve: async (_root, { id }, ctx) => {
+        return loadModelWire(String(id), ctx);
       },
     }),
 
