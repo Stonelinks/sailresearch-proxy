@@ -195,7 +195,8 @@
       </div>
       <div class="bg-white border border-slate-200 rounded-lg px-4 py-3">
         <p class="text-xs text-slate-400 mb-0.5">Context Window</p>
-        <p class="font-mono text-sm">{formatContextSize(model.contextSize)}</p>
+        <p class="font-mono text-sm select-all" title="Click to select & copy">{model.contextSize ?? '—'}</p>
+        <p class="text-xs text-slate-400">{formatContextSize(model.contextSize)}</p>
       </div>
       <div class="bg-white border border-slate-200 rounded-lg px-4 py-3">
         <p class="text-xs text-slate-400 mb-0.5">Object Type</p>
