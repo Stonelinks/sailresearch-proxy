@@ -269,6 +269,16 @@ describe("buildPiModelEntry", () => {
     expect(entry.cost?.cacheRead).toBe(0);
   });
 
+  test("omits cost when price is null", () => {
+    const data = makeModelData();
+    const preset = makePreset();
+
+    const entry = buildPiModelEntry(data, preset, null);
+
+    expect(entry.id).toBe("test-org/test-model");
+    expect(entry.cost).toBeUndefined();
+  });
+
   test("combines reasoning + multimodal", () => {
     const data = makeModelData({
       supportsImage: true,
@@ -342,7 +352,7 @@ describe("buildProvider", () => {
     expect(provider!.baseUrl).toBe("http://localhost:4000/flex/v1");
   });
 
-  test("excludes models without pricing for that window", () => {
+  test("includes models without pricing for that window (no cost field)", () => {
     // Model only has standard pricing, not asap
     const data = makeModelData({ modelId: "org/model" });
     const modelsData = new Map([["org/model", data]]);
@@ -353,7 +363,28 @@ describe("buildProvider", () => {
       "http://localhost:4000/v1",
     );
 
-    expect(provider).toBeNull();
+    expect(provider).not.toBeNull();
+    expect(provider!.models).toHaveLength(1);
+    expect(provider!.models[0]!.cost).toBeUndefined();
+  });
+
+  test("includes model with no pricing at all in any window", () => {
+    const data = makeModelData({
+      modelId: "org/no-price-model",
+      pricesByWindow: new Map(),
+    });
+    const modelsData = new Map([["org/no-price-model", data]]);
+
+    const provider = buildProvider(
+      "standard",
+      modelsData,
+      "http://localhost:4000/v1",
+    );
+
+    expect(provider).not.toBeNull();
+    expect(provider!.models).toHaveLength(1);
+    expect(provider!.models[0]!.id).toBe("org/no-price-model");
+    expect(provider!.models[0]!.cost).toBeUndefined();
   });
 
   test("creates multiple entries for model with multiple presets", () => {

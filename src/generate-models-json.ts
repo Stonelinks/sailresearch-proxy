@@ -268,7 +268,7 @@ export function buildModelName(modelId: string, presetName?: string): string {
 export function buildPiModelEntry(
   data: ModelData,
   preset: PresetWire,
-  price: PriceWire,
+  price: PriceWire | null,
 ): PiModelEntry {
   const isDefaultPreset = preset.name === "default";
   const entry: PiModelEntry = {
@@ -308,13 +308,15 @@ export function buildPiModelEntry(
     entry.maxTokens = maxTokens;
   }
 
-  // Cost
-  entry.cost = {
-    input: price.inputPerMTok,
-    output: price.outputPerMTok,
-    cacheRead: price.cachedInputPerMTok ?? 0,
-    cacheWrite: 0,
-  };
+  // Cost — only include when pricing data is available
+  if (price) {
+    entry.cost = {
+      input: price.inputPerMTok,
+      output: price.outputPerMTok,
+      cacheRead: price.cachedInputPerMTok ?? 0,
+      cacheWrite: 0,
+    };
+  }
 
   // Compat — for Sail's OpenAI-compatible endpoint, we set defaults
   // that work with most models served there.
@@ -367,8 +369,7 @@ export function buildProvider(
   }
 
   for (const data of [...modelsData.values()]) {
-    const price = data.pricesByWindow.get(window);
-    if (!price) continue; // model not available in this window
+    const price = data.pricesByWindow.get(window) ?? null;
 
     if (data.samplingPresets.length === 0) {
       // No presets — create a single entry with default values
