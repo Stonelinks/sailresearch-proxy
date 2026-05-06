@@ -2,9 +2,13 @@
 
 All AI agents working on this project must follow these rules.
 
+## Slow Tests
+
+Tests in this project are slow — they involve real HTTP servers, WebSocket connections, and database operations. **2× your normal timeout estimates** when running `bun test` or `bin/check`. A typical `bun test` run takes 30–60+ seconds, and `bin/check` even longer due to formatting and typechecking before tests. Plan accordingly and don't kill a test run prematurely thinking it's hung.
+
 ## Completion Gate
 
-Before considering any work complete, run `bin/check` and ensure it passes with no errors. This runs formatting, typechecking, and tests. Do not submit or mark work done if `bin/check` fails.
+Before considering any work complete, run `bin/check` and ensure it passes with no errors. This runs formatting, typechecking, and tests. Do not submit or mark work done if `bin/check` fails. Allow ample time — `bin/check` is not a fast script.
 
 ## Use Bun
 
