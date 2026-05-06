@@ -48,6 +48,8 @@ data/
 
 # TODO
 TODO.md
+TODO*.md
+*TODO.md
 
 # Frontend
 frontend/node_modules
