@@ -29,7 +29,7 @@ export async function researchAndUpsertOne(modelId: string): Promise<void> {
     log.warn(`[refetchModel] image capability scrape failed: ${msg}`);
   }
 
-  // Run pi research for contextSize, samplingPresets, description, source
+  // Run research for contextSize, samplingPresets, description, source
   const result = await runPiResearch(modelId);
 
   // Merge scraped data (authoritative)

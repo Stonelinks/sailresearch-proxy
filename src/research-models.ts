@@ -1,5 +1,5 @@
 /**
- * Research AI model metadata using the `pi` CLI and upsert into the database.
+ * Research AI model metadata using the pi SDK and upsert into the database.
  *
  * Usage: bun run src/research-models.ts [--sequential]
  *
@@ -15,6 +15,7 @@ import {
   type SamplingPresetInput,
 } from "./types.ts";
 import { scrapeImageCapabilities, scrapePricing } from "./docs-scraper.ts";
+import { runPiPrompt } from "./pi-session.ts";
 
 // ─── CLI arg parsing ────────────────────────────────────────────────────────
 
@@ -149,7 +150,7 @@ function validateThinkingLevelMap(
 }
 
 /**
- * Parse and validate raw JSON string from the pi subprocess into a typed
+ * Parse and validate raw JSON string from the pi SDK response into a typed
  * ModelResearchResult. Throws with a descriptive message on validation failure.
  */
 export function parseAndValidatePiOutput(raw: string): ModelResearchResult {
@@ -285,7 +286,7 @@ async function fetchModelList(proxyUrl: string): Promise<string[]> {
   return body.data.map((m) => m.id);
 }
 
-// ─── Run pi research for a single model ─────────────────────────────────────
+// ─── Run research for a single model ─────────────────────────────────────────
 
 const PI_PROMPT_TEMPLATE = (modelId: string) =>
   `Research the AI model "${modelId}" and return ONLY a JSON object with these fields:
@@ -294,7 +295,7 @@ const PI_PROMPT_TEMPLATE = (modelId: string) =>
 - description: a one-sentence description of the model
 - source: the HuggingFace model card URL or other authoritative source
 - reasoning: boolean — true if the model supports extended thinking / chain-of-thought reasoning, false otherwise
-- thinkingLevelMap: if reasoning is true, an object mapping pi thinking levels to provider values. Keys: "off", "minimal", "low", "medium", "high", "xhigh". Values: a string to send to the provider, or null if the level is unsupported. If reasoning is false, omit this field or set to null.
+- thinkingLevelMap: if reasoning is true, an object mapping thinking levels to provider values. Keys: "off", "minimal", "low", "medium", "high", "xhigh". Values: a string to send to the provider, or null if the level is unsupported. If reasoning is false, omit this field or set to null.
 
 Do NOT include pricing — that is scraped separately from the Sail docs.
 
@@ -307,7 +308,7 @@ Reasoning model:
 {"contextSize": 262144, "samplingPresets": [{"name": "default", "description": "General purpose", "params": {"temperature": 0.7, "top_p": 0.95}}], "description": "A reasoning model by ...", "source": "https://huggingface.co/org/model", "reasoning": true, "thinkingLevelMap": {"off": null, "minimal": null, "low": "low", "medium": "medium", "high": "high", "xhigh": "xhigh"}}`;
 
 /**
- * Extract a JSON object from raw pi output.
+ * Extract a JSON object from raw SDK output.
  * Handles both raw JSON and markdown-fenced JSON.
  */
 function extractJson(raw: string): string | null {
@@ -353,24 +354,11 @@ export async function runPiResearch(
 ): Promise<ModelResearchResult> {
   const prompt = PI_PROMPT_TEMPLATE(modelId);
 
-  const proc = Bun.spawn(["pi", "-p", "--no-session", prompt], {
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-
-  const stdout = await new Response(proc.stdout).text();
-  const stderr = await new Response(proc.stderr).text();
-  const exitCode = await proc.exited;
-
-  if (exitCode !== 0) {
-    throw new Error(
-      `pi exited with code ${exitCode}${stderr ? `: ${stderr.trim()}` : ""}`,
-    );
-  }
+  const stdout = await runPiPrompt(prompt);
 
   const jsonStr = extractJson(stdout);
   if (!jsonStr) {
-    throw new Error("No JSON object found in pi output");
+    throw new Error("No JSON object found in pi SDK response");
   }
 
   return parseAndValidatePiOutput(jsonStr);
@@ -464,7 +452,7 @@ async function researchSingleModel(
   try {
     const result = await runPiResearch(modelId);
 
-    // Merge scraped pricing (authoritative source) over pi-researched prices
+    // Merge scraped pricing (authoritative source) over researched prices
     const scraped = scrapedPrices.get(modelId);
     if (scraped && scraped.length > 0) {
       result.prices = scraped;
@@ -575,7 +563,7 @@ async function main() {
     const msg = err instanceof Error ? err.message : String(err);
     console.warn(`  ⚠ Pricing scrape failed: ${msg}`);
     console.warn(
-      "  Continuing without scraped pricing — pi research may provide it.\n",
+      "  Continuing without scraped pricing — research may provide it.\n",
     );
     scrapedPrices = new Map();
   }

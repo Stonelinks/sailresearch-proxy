@@ -44,7 +44,7 @@ export const config = {
       | "priority"
       | "standard"
       | "flex",
-    model: env("DEFAULT_MODEL", "deepseek-ai/DeepSeek-V3.2"),
+    model: env("DEFAULT_MODEL", "zai-org/GLM-5.1-FP8"),
   },
   windowTimeouts: {
     priority: intEnv("TIMEOUT_PRIORITY_MS", FIVE_MINUTES),

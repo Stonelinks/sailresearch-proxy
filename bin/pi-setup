@@ -1,0 +1,123 @@
+#!/usr/bin/env bash
+# Generate ~/.pi/agent/models.json and auth.json so the embedded pi SDK
+# can find the sail-standard provider pointing at the proxy itself.
+#
+# This is only needed in environments where ~/.pi/agent/ is not already
+# configured (e.g. Docker containers). If the files exist and contain
+# a sail-standard provider, this script is a no-op.
+#
+# Environment variables:
+#   PI_SAIL_BASE_URL  — base URL for the Sail provider (default: http://localhost:4000/v1)
+#   PI_SAIL_API_KEY   — API key for the Sail provider (default: from SAIL_API_KEY env)
+
+set -euo pipefail
+
+PI_DIR="${PI_DIR:-$HOME/.pi/agent}"
+PI_MODELS="${PI_DIR}/models.json"
+PI_AUTH="${PI_DIR}/auth.json"
+
+BASE_URL="${PI_SAIL_BASE_URL:-http://localhost:4000/v1}"
+API_KEY="${PI_SAIL_API_KEY:-${SAIL_API_KEY:-}}"
+
+mkdir -p "$PI_DIR"
+
+# ─── models.json ────────────────────────────────────────────────────────────
+
+NEEDS_MODELS=false
+
+if [ ! -f "$PI_MODELS" ]; then
+	NEEDS_MODELS=true
+else
+	# Check if sail-standard provider exists
+	if ! python3 -c "import json,sys; d=json.load(open(sys.argv[1])); exit(0 if 'sail-standard' in d.get('providers',{}) else 1)" "$PI_MODELS" 2>/dev/null; then
+		NEEDS_MODELS=true
+	fi
+fi
+
+if [ "$NEEDS_MODELS" = true ]; then
+	echo "[pi-setup] Writing $PI_MODELS with sail-standard provider → $BASE_URL"
+
+	# If models.json exists, merge; otherwise create fresh
+	if [ -f "$PI_MODELS" ] && command -v python3 &>/dev/null; then
+		python3 -c "
+import json, sys
+with open(sys.argv[1]) as f:
+    d = json.load(f)
+providers = d.setdefault('providers', {})
+providers['sail-standard'] = {
+    'baseUrl': sys.argv[2],
+    'api': 'openai-completions',
+    'apiKey': 'sail',
+    'models': []
+}
+# Also add as 'sail' for convenience
+providers['sail'] = providers['sail-standard']
+with open(sys.argv[1], 'w') as f:
+    json.dump(d, f, indent=2)
+" "$PI_MODELS" "$BASE_URL"
+	else
+		cat >"$PI_MODELS" <<EOF
+{
+  "providers": {
+    "sail-standard": {
+      "baseUrl": "${BASE_URL}",
+      "api": "openai-completions",
+      "apiKey": "sail",
+      "models": []
+    },
+    "sail": {
+      "baseUrl": "${BASE_URL}",
+      "api": "openai-completions",
+      "apiKey": "sail",
+      "models": []
+    }
+  }
+}
+EOF
+	fi
+fi
+
+# ─── auth.json ──────────────────────────────────────────────────────────────
+
+NEEDS_AUTH=false
+
+if [ ! -f "$PI_AUTH" ]; then
+	NEEDS_AUTH=true
+else
+	# Check if sail-standard key exists
+	if ! python3 -c "import json,sys; d=json.load(open(sys.argv[1])); exit(0 if 'sail-standard' in d else 1)" "$PI_AUTH" 2>/dev/null; then
+		NEEDS_AUTH=true
+	fi
+fi
+
+if [ "$NEEDS_AUTH" = true ]; then
+	if [ -z "$API_KEY" ]; then
+		echo "[pi-setup] WARNING: No API key set (PI_SAIL_API_KEY or SAIL_API_KEY). pi SDK calls may fail."
+		API_KEY="missing"
+	fi
+
+	echo "[pi-setup] Writing $PI_AUTH with sail-standard API key"
+
+	if [ -f "$PI_AUTH" ] && command -v python3 &>/dev/null; then
+		python3 -c "
+import json, sys
+with open(sys.argv[1]) as f:
+    d = json.load(f)
+d['sail-standard'] = sys.argv[2]
+d['sail'] = sys.argv[2]
+with open(sys.argv[1], 'w') as f:
+    json.dump(d, f, indent=2)
+" "$PI_AUTH" "$API_KEY"
+	else
+		cat >"$PI_AUTH" <<EOF
+{
+  "sail-standard": "${API_KEY}",
+  "sail": "${API_KEY}"
+}
+EOF
+	fi
+
+	chmod 600 "$PI_AUTH"
+fi
+
+echo "[pi-setup] Done. pi SDK will use sail-standard provider at ${BASE_URL}"

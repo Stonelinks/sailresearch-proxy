@@ -1,25 +1,22 @@
 /**
  * Scrape Sail Research documentation pages and extract structured model
- * metadata using a one-shot LLM call through our own proxy.
+ * metadata using a one-shot LLM call through the embedded pi SDK.
  *
  * Two scrapers share the same pattern:
  *   1. fetch markdown page from docs.sailresearch.com
- *   2. send the raw markdown to the proxy default model with an extraction prompt
+ *   2. send the raw markdown to the pi SDK with an extraction prompt
  *   3. validate the LLM JSON response
  *   4. return a typed Map<modelId, data>
  *
- * This replaces per-model pi research for pricing (which was slow and
- * expensive) and adds image capability metadata (which pi couldn't provide).
+ * This replaces per-model research for pricing (which was slow and
+ * expensive) and adds image capability metadata (which research couldn't provide).
  */
-import { sail } from "./sail-client.ts";
-import { config } from "./config.ts";
 import { log } from "../shared/logger.ts";
 import { type ModelPriceInput, type CompletionWindow } from "./types.ts";
 import { isValidCompletionWindow } from "./completion-window.ts";
+import { runPiPrompt } from "./pi-session.ts";
 
 // ─── Shared LLM extraction ──────────────────────────────────────────────────
-
-const EXTRACTION_SYSTEM_PROMPT = `You are a data extraction assistant. You will be given a documentation page in markdown format. Extract the requested information and return ONLY a valid JSON object — no markdown fences, no commentary, no trailing text. If a field is unknown, use null.`;
 
 interface ExtractionResult<T> {
   data: T;
@@ -27,7 +24,7 @@ interface ExtractionResult<T> {
 }
 
 /**
- * Fetch a Sail docs markdown page, send it to the default model with an
+ * Fetch a Sail docs markdown page, send it to the pi SDK with an
  * extraction prompt, and return the parsed JSON. Validates that the LLM
  * returned valid JSON; throws with a descriptive message otherwise.
  */
@@ -44,7 +41,7 @@ async function fetchAndParseDocsPage<T>(
   const markdown = await res.text();
   log.info(`[docs-scraper] fetched ${url} (${markdown.length} chars)`);
 
-  // 2. Send to LLM for extraction
+  // 2. Prepare content — truncate large pages to fit context window
   // For the pricing page, the main pricing table ends around byte 34K, and
   // the ASAP section starts around byte 35K. We concatenate the head (main
   // table, enough to capture all models) and the tail (ASAP section) so the
@@ -65,28 +62,14 @@ async function fetchAndParseDocsPage<T>(
         : markdown;
   }
 
-  const llmResponse = await sail.chatCompletions({
-    model: config.defaults.model,
-    messages: [
-      { role: "system", content: EXTRACTION_SYSTEM_PROMPT },
-      { role: "user", content: `${userPrompt}\n\n---\n\n${content}` },
-    ],
-    max_completion_tokens: 4096,
-    temperature: 0,
-  });
+  // 3. Send to pi SDK for extraction
+  const raw = await runPiPrompt(`${userPrompt}\n\n---\n\n${content}`);
 
-  if (llmResponse.status !== 200) {
-    throw new Error(
-      `LLM extraction failed: status=${llmResponse.status} data=${JSON.stringify(llmResponse.data)}`,
-    );
-  }
-
-  const raw = llmResponse.data?.choices?.[0]?.message?.content;
   if (typeof raw !== "string" || raw.trim().length === 0) {
     throw new Error("LLM returned empty content");
   }
 
-  // 3. Extract JSON from the response (handles markdown fences)
+  // 4. Extract JSON from the response (handles markdown fences)
   const jsonStr = extractJson(raw);
   if (!jsonStr) {
     throw new Error(`No JSON object found in LLM output: ${raw.slice(0, 200)}`);

@@ -1,7 +1,7 @@
 import { describe, test, expect, mock, beforeEach } from "bun:test";
 import { scrapeImageCapabilities, scrapePricing } from "./docs-scraper.ts";
 
-// We mock the `sail` module's chatCompletions to return controlled responses.
+// We mock `runPiPrompt` from the pi-session module to return controlled responses.
 // The `fetch` global is also mocked to return markdown content.
 
 const MOCK_IMAGES_MD = `# Image Input

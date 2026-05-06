@@ -13,6 +13,8 @@ services:
       - DEFAULT_COMPLETION_WINDOW=standard
       - LOG_LEVEL=info
       - PROXY_API_KEY=${PROXY_API_KEY:-}
+      - PI_SAIL_BASE_URL=http://localhost:4000/v1
+      - PI_SAIL_API_KEY=${SAIL_API_KEY:-}
     restart: unless-stopped
 
 volumes:

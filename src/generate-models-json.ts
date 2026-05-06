@@ -18,6 +18,7 @@ import { type CompletionWindow } from "./types.ts";
 import { scrapeImageCapabilities, scrapePricing } from "./docs-scraper.ts";
 import type { ModelPriceInput } from "./types.ts";
 import type { PriceWire, PresetWire } from "./models-meta.ts";
+import { runPiChat } from "./pi-session.ts";
 
 // ─── CLI arg parsing ────────────────────────────────────────────────────────
 
@@ -408,54 +409,23 @@ interface SmokeTestResult {
 }
 
 /**
- * Run a smoke test by invoking pi with the given provider/model and a simple
- * "hi" prompt. Checks that tokens come back.
+ * Run a smoke test by invoking the pi SDK with the given provider/model
+ * and a simple "hi" prompt. Checks that tokens come back.
  */
 async function smokeTestEntry(
   providerName: string,
   modelId: string,
   preset: string,
 ): Promise<SmokeTestResult> {
-  const piModelArg = `${providerName}/${modelId}`;
   const start = Date.now();
 
   try {
-    const proc = Bun.spawn(
-      ["pi", "-p", "--no-session", "--model", piModelArg, "hi"],
-      {
-        stdout: "pipe",
-        stderr: "pipe",
-      },
-    );
-
-    // 30 second timeout
-    const timeout = setTimeout(() => {
-      try {
-        proc.kill();
-      } catch {}
-    }, 30_000);
-
-    const stdout = await new Response(proc.stdout).text();
-    const stderr = await new Response(proc.stderr).text();
-    clearTimeout(timeout);
-
-    const exitCode = await proc.exited;
+    const output = await runPiChat(providerName, modelId, "hi");
     const durationMs = Date.now() - start;
 
-    if (exitCode !== 0) {
-      return {
-        providerName,
-        modelId,
-        preset,
-        status: "fail",
-        error: stderr.trim() || `exit code ${exitCode}`,
-        durationMs,
-      };
-    }
-
     // Check that we got some output
-    const output = stdout.trim();
-    if (output.length === 0) {
+    const trimmed = output.trim();
+    if (trimmed.length === 0) {
       return {
         providerName,
         modelId,
@@ -467,7 +437,7 @@ async function smokeTestEntry(
     }
 
     // Rough token count estimate (words / 0.75 ≈ tokens)
-    const tokenCount = Math.round(output.split(/\s+/).length / 0.75);
+    const tokenCount = Math.round(trimmed.split(/\s+/).length / 0.75);
 
     return {
       providerName,

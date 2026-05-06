@@ -25,7 +25,7 @@ export interface JobWaiter {
 /** Allowed values in a sampling preset's `params` object. */
 export type SamplingParamValue = number | string | boolean;
 
-/** A single sampling preset as returned by the pi subprocess. */
+/** A single sampling preset as returned by the research LLM. */
 export interface SamplingPresetInput {
   name: string;
   description: string;
