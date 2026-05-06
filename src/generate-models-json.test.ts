@@ -4,6 +4,7 @@ import {
   buildProvider,
   buildModelName,
   inferThinkingFormat,
+  restShapeToModelData,
   type ModelData,
 } from "./generate-models-json.ts";
 import type { PresetWire, PriceWire } from "./models-meta.ts";
@@ -448,5 +449,153 @@ describe("buildProvider", () => {
     );
 
     expect(provider!.baseUrl).toBe("http://localhost:4000/priority/v1");
+  });
+});
+
+// ─── restShapeToModelData ────────────────────────────────────────────────────
+
+describe("restShapeToModelData", () => {
+  test("converts full /v1/models entry with all fields", () => {
+    const entry = {
+      id: "org/test-model",
+      object: "model",
+      created: 1700000000,
+      owned_by: "org",
+      context_length: 131072,
+      description: "A test model",
+      supports_image: true,
+      reasoning: true,
+      thinking_level_map: { off: null, low: "low", high: "high" },
+      default_parameters: { temperature: 0.7 },
+      x_sampling_presets: [
+        {
+          name: "default",
+          description: "General",
+          params: { temperature: 0.7 },
+        },
+        {
+          name: "creative",
+          description: "Creative",
+          params: { temperature: 1.0 },
+        },
+      ],
+      x_pricing_by_completion_window: [
+        {
+          completion_window: "standard",
+          input_per_mtok: 0.2,
+          cached_input_per_mtok: 0.1,
+          output_per_mtok: 1.2,
+          currency: "USD",
+        },
+        {
+          completion_window: "flex",
+          input_per_mtok: 0.16,
+          output_per_mtok: 0.8,
+          currency: "USD",
+        },
+      ],
+    };
+
+    const data = restShapeToModelData(entry);
+
+    expect(data.modelId).toBe("org/test-model");
+    expect(data.contextSize).toBe(131072);
+    expect(data.description).toBe("A test model");
+    expect(data.supportsImage).toBe(true);
+    expect(data.reasoning).toBe(true);
+    expect(data.thinkingLevelMap).toEqual({
+      off: null,
+      low: "low",
+      high: "high",
+    });
+    expect(data.samplingPresets).toHaveLength(2);
+    expect(data.samplingPresets[0]!.name).toBe("default");
+    expect(data.samplingPresets[1]!.name).toBe("creative");
+    expect(data.pricesByWindow.size).toBe(2);
+    expect(data.pricesByWindow.get("standard")!.inputPerMTok).toBe(0.2);
+    expect(data.pricesByWindow.get("flex")!.inputPerMTok).toBe(0.16);
+    expect(data.pricesByWindow.get("flex")!.cachedInputPerMTok).toBeNull();
+  });
+
+  test("converts minimal /v1/models entry with only canonical fields", () => {
+    const entry = {
+      id: "org/plain-model",
+      object: "model",
+      created: 1,
+      owned_by: "org",
+    };
+
+    const data = restShapeToModelData(entry);
+
+    expect(data.modelId).toBe("org/plain-model");
+    expect(data.contextSize).toBeNull();
+    expect(data.description).toBeNull();
+    expect(data.supportsImage).toBe(false);
+    expect(data.reasoning).toBe(false);
+    expect(data.thinkingLevelMap).toBeNull();
+    expect(data.samplingPresets).toEqual([]);
+    expect(data.pricesByWindow.size).toBe(0);
+  });
+
+  test("creates default preset from default_parameters when no x_sampling_presets", () => {
+    const entry = {
+      id: "org/model",
+      default_parameters: { temperature: 0.5, top_p: 0.9 },
+    };
+
+    const data = restShapeToModelData(entry);
+
+    expect(data.samplingPresets).toHaveLength(1);
+    expect(data.samplingPresets[0]!.name).toBe("default");
+    expect(data.samplingPresets[0]!.params).toEqual({
+      temperature: 0.5,
+      top_p: 0.9,
+    });
+  });
+
+  test("handles missing id gracefully", () => {
+    const data = restShapeToModelData({});
+    expect(data.modelId).toBe("unknown");
+  });
+
+  test("ignores invalid completion windows in pricing", () => {
+    const entry = {
+      id: "org/model",
+      x_pricing_by_completion_window: [
+        {
+          completion_window: "bogus",
+          input_per_mtok: 1,
+          output_per_mtok: 2,
+          currency: "USD",
+        },
+        {
+          completion_window: "standard",
+          input_per_mtok: 0.2,
+          output_per_mtok: 1.2,
+          currency: "USD",
+        },
+      ],
+    };
+
+    const data = restShapeToModelData(entry);
+    expect(data.pricesByWindow.size).toBe(1);
+    expect(data.pricesByWindow.get("standard")).toBeDefined();
+  });
+
+  test("handles camelCase completionWindow in pricing", () => {
+    const entry = {
+      id: "org/model",
+      x_pricing_by_completion_window: [
+        {
+          completionWindow: "asap",
+          inputPerMTok: 0.5,
+          outputPerMTok: 2.0,
+          currency: "USD",
+        },
+      ],
+    };
+
+    const data = restShapeToModelData(entry);
+    expect(data.pricesByWindow.get("asap")!.inputPerMTok).toBe(0.5);
   });
 });

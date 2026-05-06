@@ -1,12 +1,19 @@
 /**
  * Research AI model metadata using the pi SDK and upsert into the database.
  *
+ * This module has two modes:
+ *  - **Library**: exports `parseAndValidatePiOutput`, `runPiResearch`, and
+ *    `upsertModelMeta` for server-side use (e.g. GraphQL `refetchModel`
+ *    mutation via `research-models-runner.ts`). These use the DB directly.
+ *  - **CLI**: `main()` is a thin HTTP client that calls the proxy's REST API
+ *    (`POST /api/models/:modelId/research`) for each model. No DB access
+ *    needed — the server handles scraping, research, and upsert internally.
+ *
  * Usage: bun run src/research-models.ts [--sequential]
  *
  * Default: runs research in parallel for all models.
  * --sequential: researches models one at a time.
  */
-import { prisma } from "./db.ts";
 import { isValidCompletionWindow } from "./completion-window.ts";
 import {
   type ModelPriceInput,
@@ -14,13 +21,7 @@ import {
   type SamplingParamValue,
   type SamplingPresetInput,
 } from "./types.ts";
-import { scrapeImageCapabilities, scrapePricing } from "./docs-scraper.ts";
 import { runPiPrompt } from "./pi-session.ts";
-
-// ─── CLI arg parsing ────────────────────────────────────────────────────────
-
-const args = process.argv.slice(2);
-const sequential = args.includes("--sequential");
 
 // ─── Validation ─────────────────────────────────────────────────────────────
 
@@ -370,6 +371,10 @@ export async function upsertModelMeta(
   modelId: string,
   result: ModelResearchResult,
 ): Promise<void> {
+  // Lazy import so the CLI path (which never calls this function) doesn't
+  // require a DB connection. Server-side callers (research-models-runner.ts)
+  // get prisma just fine.
+  const { prisma } = await import("./db.ts");
   await prisma.$transaction(async (tx) => {
     // Upsert ModelMeta
     const meta = await tx.modelMeta.upsert({
@@ -439,41 +444,54 @@ interface ResearchOutcome {
   presetCount?: number;
 }
 
-async function researchSingleModel(
+/**
+ * Research a single model by calling the proxy's REST API.
+ * The server handles scraping, pi SDK research, and DB upsert internally.
+ */
+async function researchSingleModelViaApi(
+  proxyUrl: string,
   modelId: string,
   index: number,
   total: number,
-  scrapedPrices: Map<string, ModelPriceInput[]>,
-  imageCapabilities: Map<string, boolean>,
 ): Promise<ResearchOutcome> {
-  const prefix = sequential ? `[${index}/${total}]` : `[${index}/${total}]`;
+  const prefix = `[${index}/${total}]`;
   console.log(`${prefix} Researching: ${modelId}`);
 
   try {
-    const result = await runPiResearch(modelId);
+    const encodedId = encodeURIComponent(modelId);
+    const res = await fetch(`${proxyUrl}/api/models/${encodedId}/research`, {
+      method: "POST",
+    });
 
-    // Merge scraped pricing (authoritative source) over researched prices
-    const scraped = scrapedPrices.get(modelId);
-    if (scraped && scraped.length > 0) {
-      result.prices = scraped;
+    if (!res.ok) {
+      const body = await res.text();
+      let msg: string;
+      try {
+        const parsed = JSON.parse(body);
+        msg = parsed.error ?? body;
+      } catch {
+        msg = body;
+      }
+      throw new Error(`API returned ${res.status}: ${msg}`);
     }
 
-    // Merge scraped image capability
-    const imageCap = imageCapabilities.get(modelId);
-    if (imageCap !== undefined) {
-      result.supportsImage = imageCap;
-    }
+    const data = (await res.json()) as Record<string, unknown>;
+    const contextSize =
+      typeof data.context_length === "number" ? data.context_length : null;
+    const presets = Array.isArray(data.x_sampling_presets)
+      ? data.x_sampling_presets
+      : [];
+    const supportsImage = data.supports_image === true;
+    const reasoning = data.reasoning === true;
 
     console.log(
-      `  ✓ ${modelId} — contextSize=${result.contextSize}, presets=${result.samplingPresets.length}, prices=${result.prices.length}, supportsImage=${result.supportsImage}, reasoning=${result.reasoning}, source=${result.source ?? "n/a"}`,
+      `  ✓ ${modelId} — contextSize=${contextSize}, presets=${presets.length}, supportsImage=${supportsImage}, reasoning=${reasoning}`,
     );
-    await upsertModelMeta(modelId, result);
-    console.log(`  ✓ Upserted ${modelId}`);
     return {
       modelId,
       status: "success",
-      contextSize: result.contextSize,
-      presetCount: result.samplingPresets.length,
+      contextSize,
+      presetCount: presets.length,
     };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -482,10 +500,14 @@ async function researchSingleModel(
   }
 }
 
+// Server-side exports are used directly by research-models-runner.ts:
+//   runPiResearch, upsertModelMeta, parseAndValidatePiOutput
+// Types are re-exported from ./types.ts — no need to re-export here.
+
 async function researchAllModels(
+  proxyUrl: string,
   modelIds: string[],
-  scrapedPrices: Map<string, ModelPriceInput[]>,
-  imageCapabilities: Map<string, boolean>,
+  sequential: boolean,
 ): Promise<ResearchOutcome[]> {
   const total = modelIds.length;
 
@@ -493,12 +515,11 @@ async function researchAllModels(
     console.log(`Running in sequential mode (${total} models)\n`);
     const outcomes: ResearchOutcome[] = [];
     for (let i = 0; i < modelIds.length; i++) {
-      const outcome = await researchSingleModel(
+      const outcome = await researchSingleModelViaApi(
+        proxyUrl,
         modelIds[i]!,
         i + 1,
         total,
-        scrapedPrices,
-        imageCapabilities,
       );
       outcomes.push(outcome);
     }
@@ -507,24 +528,19 @@ async function researchAllModels(
 
   console.log(`Running in parallel mode (${total} models)\n`);
 
-  // Fire all at once, but collect results with index for logging
   const outcomes = await Promise.all(
     modelIds.map((modelId, i) =>
-      researchSingleModel(
-        modelId,
-        i + 1,
-        total,
-        scrapedPrices,
-        imageCapabilities,
-      ),
+      researchSingleModelViaApi(proxyUrl, modelId, i + 1, total),
     ),
   );
   return outcomes;
 }
 
-// ─── Main ───────────────────────────────────────────────────────────────────
+// ─── Main (CLI: uses REST API, no DB access) ──────────────────────────────
 
 async function main() {
+  const args = process.argv.slice(2);
+  const sequential = args.includes("--sequential");
   const proxyUrl = process.env.PROXY_URL ?? "http://localhost:4000";
 
   // Health check
@@ -551,42 +567,8 @@ async function main() {
     process.exit(1);
   }
 
-  // Scrape docs pages for pricing and image capabilities
-  console.log("Scraping Sail docs for pricing ...");
-  let scrapedPrices: Map<string, ModelPriceInput[]>;
-  try {
-    scrapedPrices = await scrapePricing();
-    console.log(
-      `  ✓ Pricing scraped for ${scrapedPrices.size} models from docs\n`,
-    );
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.warn(`  ⚠ Pricing scrape failed: ${msg}`);
-    console.warn(
-      "  Continuing without scraped pricing — research may provide it.\n",
-    );
-    scrapedPrices = new Map();
-  }
-
-  console.log("Scraping Sail docs for image capabilities ...");
-  let imageCapabilities: Map<string, boolean>;
-  try {
-    imageCapabilities = await scrapeImageCapabilities();
-    console.log(
-      `  ✓ Image capabilities scraped: ${[...imageCapabilities.entries()].filter(([, v]) => v).length} models support images\n`,
-    );
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.warn(`  ⚠ Image capability scrape failed: ${msg}\n`);
-    imageCapabilities = new Map();
-  }
-
-  // Research
-  const outcomes = await researchAllModels(
-    modelIds,
-    scrapedPrices,
-    imageCapabilities,
-  );
+  // Research — all via REST API, server handles scraping + pi SDK + DB
+  const outcomes = await researchAllModels(proxyUrl, modelIds, sequential);
 
   // Summary
   const succeeded = outcomes.filter((o) => o.status === "success");
@@ -604,8 +586,6 @@ async function main() {
     }
   }
   console.log("========================================");
-
-  await prisma.$disconnect();
 }
 
 // Only run main() when invoked as a script (bun run src/research-models.ts).

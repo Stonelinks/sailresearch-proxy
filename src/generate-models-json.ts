@@ -134,82 +134,151 @@ async function fetchModelList(baseUrl: string): Promise<string[]> {
 }
 
 /**
- * Load researched model metadata from the database. Returns a Map from
- * modelId to the enriched data needed for models.json generation.
+ * Fetch enriched model metadata from the proxy's /v1/models REST endpoint
+ * and convert each entry to the ModelData shape needed for models.json
+ * generation. No DB access required — all data comes from the API.
  */
-async function loadResearchedMeta(): Promise<Map<string, ModelData>> {
-  const rows = await prisma.modelMeta.findMany({
-    include: { samplingPresets: true, prices: true },
-  });
+async function fetchModelMetaFromApi(
+  baseUrl: string,
+): Promise<Map<string, ModelData>> {
+  const url = baseUrl.replace(/\/v1\/?$/, "");
+  const res = await fetch(`${url}/v1/models`);
+  if (!res.ok) {
+    throw new Error(
+      `Proxy returned ${res.status} ${res.statusText} for /v1/models`,
+    );
+  }
+  const body = (await res.json()) as {
+    data: Array<Record<string, unknown>>;
+  };
 
   const map = new Map<string, ModelData>();
+  for (const entry of body.data ?? []) {
+    const data = restShapeToModelData(entry);
+    map.set(data.modelId, data);
+  }
+  return map;
+}
 
-  for (const row of rows) {
-    const presets: PresetWire[] = row.samplingPresets.map((p) => {
-      try {
-        const parsed = JSON.parse(p.params);
-        return {
-          name: p.name,
-          description: p.description,
-          params:
-            typeof parsed === "object" &&
-            parsed !== null &&
-            !Array.isArray(parsed)
-              ? (parsed as Record<string, number | string | boolean>)
-              : {},
-        };
-      } catch {
-        return { name: p.name, description: p.description, params: {} };
-      }
-    });
+/**
+ * Convert a single model entry from the /v1/models response (OpenRouter
+ * snake_case shape) into the ModelData shape used by models.json generation.
+ */
+export function restShapeToModelData(
+  entry: Record<string, unknown>,
+): ModelData {
+  const modelId = typeof entry.id === "string" ? entry.id : "unknown";
+  const contextSize =
+    typeof entry.context_length === "number" ? entry.context_length : null;
+  const description =
+    typeof entry.description === "string" ? entry.description : null;
+  const supportsImage = entry.supports_image === true;
+  const reasoning = entry.reasoning === true;
 
-    const pricesByWindow = new Map<CompletionWindow, PriceWire>();
-    for (const p of row.prices) {
-      if (
-        p.completionWindow === "asap" ||
-        p.completionWindow === "priority" ||
-        p.completionWindow === "standard" ||
-        p.completionWindow === "flex"
-      ) {
-        pricesByWindow.set(p.completionWindow, {
-          completionWindow: p.completionWindow,
-          inputPerMTok: p.inputPerMTok,
-          cachedInputPerMTok: p.cachedInputPerMTok,
-          outputPerMTok: p.outputPerMTok,
-          currency: p.currency,
-        });
-      }
-    }
-
-    let thinkingLevelMap: Record<string, string | null> | null = null;
-    if (row.thinkingLevelMap) {
-      try {
-        const parsed = JSON.parse(row.thinkingLevelMap);
-        if (
-          typeof parsed === "object" &&
-          parsed !== null &&
-          !Array.isArray(parsed)
-        ) {
-          thinkingLevelMap = parsed as Record<string, string | null>;
-        }
-      } catch {
-        // ignore parse failure
-      }
-    }
-
-    map.set(row.modelId, {
-      modelId: row.modelId,
-      contextSize: row.contextSize,
-      description: row.description,
-      supportsImage: row.supportsImage,
-      reasoning: row.reasoning,
-      thinkingLevelMap,
-      samplingPresets: presets,
-      pricesByWindow,
-    });
+  // thinkingLevelMap
+  let thinkingLevelMap: Record<string, string | null> | null = null;
+  if (
+    typeof entry.thinking_level_map === "object" &&
+    entry.thinking_level_map !== null &&
+    !Array.isArray(entry.thinking_level_map)
+  ) {
+    thinkingLevelMap = entry.thinking_level_map as Record<
+      string,
+      string | null
+    >;
   }
 
-  return map;
+  // samplingPresets
+  let samplingPresets: PresetWire[] = [];
+  if (Array.isArray(entry.x_sampling_presets)) {
+    samplingPresets = entry.x_sampling_presets
+      .filter(
+        (p: unknown): p is Record<string, unknown> =>
+          typeof p === "object" && p !== null,
+      )
+      .map((p) => ({
+        name: typeof p.name === "string" ? p.name : "default",
+        description: typeof p.description === "string" ? p.description : "",
+        params:
+          typeof p.params === "object" &&
+          p.params !== null &&
+          !Array.isArray(p.params)
+            ? (p.params as Record<string, number | string | boolean>)
+            : {},
+      }));
+  }
+  // Fallback: if no x_sampling_presets but default_parameters exists, create one
+  if (samplingPresets.length === 0 && entry.default_parameters) {
+    const params =
+      typeof entry.default_parameters === "object" &&
+      entry.default_parameters !== null &&
+      !Array.isArray(entry.default_parameters)
+        ? (entry.default_parameters as Record<
+            string,
+            number | string | boolean
+          >)
+        : {};
+    samplingPresets = [
+      { name: "default", description: "Default settings", params },
+    ];
+  }
+
+  // pricesByWindow
+  const pricesByWindow = new Map<CompletionWindow, PriceWire>();
+  if (Array.isArray(entry.x_pricing_by_completion_window)) {
+    for (const p of entry.x_pricing_by_completion_window) {
+      if (typeof p !== "object" || p === null) continue;
+      const price = p as Record<string, unknown>;
+      const window = price.completion_window ?? price.completionWindow;
+      if (
+        typeof window !== "string" ||
+        (window !== "asap" &&
+          window !== "priority" &&
+          window !== "standard" &&
+          window !== "flex")
+      ) {
+        continue;
+      }
+      const inputPerMTok =
+        typeof price.input_per_mtok === "number"
+          ? price.input_per_mtok
+          : typeof price.inputPerMTok === "number"
+            ? price.inputPerMTok
+            : 0;
+      const cachedInputPerMTok =
+        typeof price.cached_input_per_mtok === "number"
+          ? price.cached_input_per_mtok
+          : typeof price.cachedInputPerMTok === "number"
+            ? price.cachedInputPerMTok
+            : null;
+      const outputPerMTok =
+        typeof price.output_per_mtok === "number"
+          ? price.output_per_mtok
+          : typeof price.outputPerMTok === "number"
+            ? price.outputPerMTok
+            : 0;
+      const currency =
+        typeof price.currency === "string" ? price.currency : "USD";
+      pricesByWindow.set(window as CompletionWindow, {
+        completionWindow: window as CompletionWindow,
+        inputPerMTok,
+        cachedInputPerMTok,
+        outputPerMTok,
+        currency,
+      });
+    }
+  }
+
+  return {
+    modelId,
+    contextSize,
+    description,
+    supportsImage,
+    reasoning,
+    thinkingLevelMap,
+    samplingPresets,
+    pricesByWindow,
+  };
 }
 
 // ─── Build pi model entries ─────────────────────────────────────────────────
@@ -542,88 +611,16 @@ async function main() {
     process.exit(1);
   }
 
-  // Load researched metadata from DB
-  console.log("Loading researched metadata from DB ...");
-  const metaMap = await loadResearchedMeta();
-  const researchedCount = modelIds.filter((id) => metaMap.has(id)).length;
-  console.log(
-    `  ✓ Found metadata for ${researchedCount} of ${modelIds.length} models\n`,
-  );
-
-  // Warn about unresearched models
-  const unresearched = modelIds.filter((id) => !metaMap.has(id));
-  if (unresearched.length > 0) {
-    console.warn(
-      `  ⚠ ${unresearched.length} models have no research data; using defaults:`,
-    );
-    for (const id of unresearched) {
-      console.warn(`    - ${id}`);
-    }
-    console.log("");
-
-    // Create default ModelData entries for unresearched models
-    for (const id of unresearched) {
-      metaMap.set(id, {
-        modelId: id,
-        contextSize: null,
-        description: null,
-        supportsImage: false,
-        reasoning: false,
-        thinkingLevelMap: null,
-        samplingPresets: [],
-        pricesByWindow: new Map(),
-      });
-    }
-  }
-
-  // Scrape docs for pricing and image capabilities
-  console.log("Scraping Sail docs for pricing ...");
-  let scrapedPrices: Map<string, ModelPriceInput[]>;
+  // Load enriched model metadata from the proxy's REST API
+  console.log("Loading model metadata from API ...");
+  let metaMap: Map<string, ModelData>;
   try {
-    scrapedPrices = await scrapePricing();
-    console.log(
-      `  ✓ Pricing scraped for ${scrapedPrices.size} models from docs\n`,
-    );
+    metaMap = await fetchModelMetaFromApi(opts.baseUrl);
+    console.log(`  ✓ Loaded metadata for ${metaMap.size} models\n`);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.warn(`  ⚠ Pricing scrape failed: ${msg}\n`);
-    scrapedPrices = new Map();
-  }
-
-  console.log("Scraping Sail docs for image capabilities ...");
-  let imageCapabilities: Map<string, boolean>;
-  try {
-    imageCapabilities = await scrapeImageCapabilities();
-    console.log(
-      `  ✓ Image capabilities scraped: ${[...imageCapabilities.entries()].filter(([, v]) => v).length} models support images\n`,
-    );
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.warn(`  ⚠ Image capability scrape failed: ${msg}\n`);
-    imageCapabilities = new Map();
-  }
-
-  // Merge scraped data into model data
-  for (const [modelId, data] of [...metaMap.entries()]) {
-    // Merge pricing
-    const scraped = scrapedPrices.get(modelId);
-    if (scraped && scraped.length > 0) {
-      for (const price of scraped) {
-        data.pricesByWindow.set(price.completionWindow, {
-          completionWindow: price.completionWindow,
-          inputPerMTok: price.inputPerMTok,
-          cachedInputPerMTok: price.cachedInputPerMTok,
-          outputPerMTok: price.outputPerMTok,
-          currency: "USD",
-        });
-      }
-    }
-
-    // Merge image capability
-    const imageCap = imageCapabilities.get(modelId);
-    if (imageCap !== undefined) {
-      data.supportsImage = imageCap;
-    }
+    console.error(`ERROR: ${msg}`);
+    process.exit(1);
   }
 
   // Build providers
@@ -733,7 +730,7 @@ async function main() {
     }
   }
 
-  await prisma.$disconnect();
+  // No DB disconnect needed — all data came from the API
 }
 
 // Only run when invoked directly
