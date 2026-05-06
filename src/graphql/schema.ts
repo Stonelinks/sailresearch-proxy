@@ -94,7 +94,7 @@ builder.objectType("Job", {
       resolve: (j) => j.completedAt,
     }),
     durationMs: t.exposeInt("durationMs", { nullable: true }),
-    pollCount: t.exposeInt("pollCount"),
+    pollCount: t.int({ resolve: (j) => Number(j.pollCount) }),
     hasError: t.exposeBoolean("hasError"),
   }),
 });
@@ -114,7 +114,7 @@ builder.objectType("JobDetail", {
       resolve: (j) => j.completedAt,
     }),
     durationMs: t.exposeInt("durationMs", { nullable: true }),
-    pollCount: t.exposeInt("pollCount"),
+    pollCount: t.int({ resolve: (j) => Number(j.pollCount) }),
     hasError: t.exposeBoolean("hasError"),
     requestBody: t.exposeString("requestBody", { nullable: true }),
     responseBody: t.exposeString("responseBody", { nullable: true }),

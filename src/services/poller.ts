@@ -236,7 +236,7 @@ export class Poller {
         this.resolveWaiters(job.sailResponseId, data);
         const pending = formatDuration(now() - job.createdAt.getTime());
         log.info(
-          `[poller] completed ${job.sailResponseId} model=${job.model} window=${job.completionWindow} pending=${pending} polls=${job.pollCount + 1} waiters=${waiterCount}`,
+          `[poller] completed ${job.sailResponseId} model=${job.model} window=${job.completionWindow} pending=${pending} polls=${Number(job.pollCount) + 1} waiters=${waiterCount}`,
         );
       } else if (sailStatus === "failed" || sailStatus === "cancelled") {
         const errorBody = JSON.stringify(data);
@@ -249,7 +249,7 @@ export class Poller {
         this.rejectWaiters(job.sailResponseId, data);
         const pending = formatDuration(now() - job.createdAt.getTime());
         log.info(
-          `[poller] ${sailStatus} ${job.sailResponseId} model=${job.model} window=${job.completionWindow} pending=${pending} polls=${job.pollCount + 1} reason=${data?.error?.message ?? "<none>"}`,
+          `[poller] ${sailStatus} ${job.sailResponseId} model=${job.model} window=${job.completionWindow} pending=${pending} polls=${Number(job.pollCount) + 1} reason=${data?.error?.message ?? "<none>"}`,
         );
       } else {
         // Still pending or running
@@ -279,7 +279,7 @@ export class Poller {
   }
 
   private async scheduleRetry(job: any, newStatus?: string) {
-    const newPollCount = job.pollCount + 1;
+    const newPollCount = Number(job.pollCount) + 1;
     const backoff = getBackoffMs(newPollCount);
     log.debug(
       `[poller] retry id=${job.sailResponseId} newPollCount=${newPollCount} backoffMs=${backoff} newStatus=${newStatus ?? job.status}`,

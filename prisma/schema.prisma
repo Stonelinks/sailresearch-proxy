@@ -71,7 +71,7 @@ model PendingJob {
   updatedAt        DateTime  @updatedAt
   sailBodyHash     String?
   completedAt      DateTime?
-  pollCount        Int       @default(0)
+  pollCount        BigInt    @default(0)
   nextPollAt       DateTime  @default(now())
 
   @@index([status, nextPollAt])

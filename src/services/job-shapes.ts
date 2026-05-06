@@ -35,7 +35,7 @@ export interface JobSummaryRow {
   apiType: string;
   createdAt: Date;
   completedAt: Date | null;
-  pollCount: number;
+  pollCount: bigint;
   errorBody: string | null;
 }
 
@@ -77,7 +77,7 @@ export function jobToSummary(job: JobSummaryRow): JobSummary {
     durationMs: job.completedAt
       ? job.completedAt.getTime() - job.createdAt.getTime()
       : null,
-    pollCount: job.pollCount,
+    pollCount: Number(job.pollCount),
     hasError: job.errorBody !== null,
   };
 }

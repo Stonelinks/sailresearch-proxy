@@ -11,7 +11,7 @@ const baseRow = (): JobSummaryRow => ({
   apiType: "chat-completions",
   createdAt: new Date("2025-01-01T00:00:00Z"),
   completedAt: null,
-  pollCount: 3,
+  pollCount: 3n,
   errorBody: null,
 });
 
