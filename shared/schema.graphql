@@ -57,10 +57,12 @@ type Model {
   object: String!
   ownedBy: String!
   prices: [ModelPrice!]
+  reasoning: Boolean!
   researchedAt: DateTime
   samplingPresets: [SamplingPreset!]
   source: String
   supportsImage: Boolean!
+  thinkingLevelMap: JSON
 }
 
 type ModelPrice {

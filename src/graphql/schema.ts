@@ -54,6 +54,13 @@ builder.objectType("Model", {
     description: t.exposeString("description", { nullable: true }),
     source: t.exposeString("source", { nullable: true }),
     supportsImage: t.exposeBoolean("supportsImage"),
+    reasoning: t.exposeBoolean("reasoning"),
+    thinkingLevelMap: t.field({
+      type: "JSON",
+      nullable: true,
+      resolve: (m) =>
+        m.thinkingLevelMap as Record<string, string | number | boolean> | null,
+    }),
     researchedAt: t.field({
       type: "DateTime",
       nullable: true,

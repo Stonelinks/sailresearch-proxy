@@ -170,7 +170,7 @@ describe("Query.jobs", () => {
     });
 
     expect(res.errors).toBeUndefined();
-    expect(res.data?.job?.status).toBe("running");
+    expect((res.data as any)?.job?.status).toBe("running");
   });
 
   test("marks hasError true when errorBody is not null", async () => {
