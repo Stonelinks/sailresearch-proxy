@@ -22,6 +22,8 @@
         description
         source
         supportsImage
+        reasoning
+        thinkingLevelMap
         researchedAt
         samplingPresets {
           name
@@ -47,6 +49,8 @@
         description
         source
         supportsImage
+        reasoning
+        thinkingLevelMap
         researchedAt
         samplingPresets {
           name
@@ -129,6 +133,7 @@
               <th class="text-left px-4 py-2.5 font-semibold text-slate-600 whitespace-nowrap">Owner</th>
               <th class="text-left px-4 py-2.5 font-semibold text-slate-600 whitespace-nowrap">Context</th>
               <th class="text-center px-4 py-2.5 font-semibold text-slate-600 whitespace-nowrap">Image</th>
+              <th class="text-center px-4 py-2.5 font-semibold text-slate-600 whitespace-nowrap">Reasoning</th>
               <th class="text-left px-4 py-2.5 font-semibold text-slate-600 whitespace-nowrap">Price</th>
               <th class="text-left px-4 py-2.5 font-semibold text-slate-600 whitespace-nowrap">Description</th>
               <th class="text-left px-4 py-2.5 font-semibold text-slate-600 whitespace-nowrap"></th>
@@ -137,7 +142,7 @@
           <tbody>
             {#if filtered.length === 0}
               <tr>
-                <td colspan="7" class="text-center py-10 text-slate-400">No models found.</td>
+                <td colspan="8" class="text-center py-10 text-slate-400">No models found.</td>
               </tr>
             {:else}
               {#each filtered as model (model.id)}
@@ -162,6 +167,13 @@
                   <td class="px-4 py-2.5 text-center">
                     {#if model.supportsImage}
                       <span class="inline-block text-xs text-blue-600 bg-blue-50 border border-blue-200 rounded px-1.5 py-0.5">📷</span>
+                    {:else}
+                      <span class="text-slate-300 text-xs">—</span>
+                    {/if}
+                  </td>
+                  <td class="px-4 py-2.5 text-center">
+                    {#if model.reasoning}
+                      <span class="inline-block text-xs text-purple-600 bg-purple-50 border border-purple-200 rounded px-1.5 py-0.5">🧠</span>
                     {:else}
                       <span class="text-slate-300 text-xs">—</span>
                     {/if}
