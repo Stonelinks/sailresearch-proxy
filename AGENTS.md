@@ -50,6 +50,8 @@ Use real Prisma migrations, not `db push`, whenever you change `prisma/schema.pr
 
 ### Workflow
 
+This project has an initial Prisma migration already (`20260506060620_init`). To change the schema:
+
 1. Edit `prisma/schema.prisma`.
 2. Generate and apply a migration locally:
 
@@ -60,6 +62,16 @@ Use real Prisma migrations, not `db push`, whenever you change `prisma/schema.pr
    This creates a new directory under `prisma/migrations/` containing the SQL, applies it to your local SQLite DB, and regenerates the Prisma client. **Commit the generated migration directory along with the schema change.**
 
 3. For destructive changes (dropping a column, narrowing a type), write a custom migration that preserves data when possible — e.g. backfill a new column before dropping the old one across two migrations.
+
+If `migrate dev` fails with a drift error (e.g. because `db push` was used previously), do **not** use `db push` or `--accept-data-loss`. Instead:
+
+1. Back up the data: `cp data/proxy.db data/proxy.db.bak`
+2. Dump just the data: `sqlite3 data/proxy.db "$(sqlite3 data/proxy.db .dump)" | grep '^INSERT' > /tmp/proxy_inserts.sql` — or more reliably: `sqlite3 data/proxy.db .dump | grep '^INSERT' > /tmp/proxy_inserts.sql`
+3. Delete the DB: `rm data/proxy.db`
+4. Apply migrations fresh: `bunx prisma migrate deploy`
+5. Restore data: `sqlite3 data/proxy.db < /tmp/proxy_inserts.sql`
+6. Verify counts match the backup.
+7. Clean up: `rm data/proxy.db.bak /tmp/proxy_inserts.sql`
 
 ### Deployment
 
