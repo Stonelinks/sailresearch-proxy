@@ -18,6 +18,8 @@ model ModelMeta {
   description     String?
   source          String?
   supportsImage   Boolean         @default(false)
+  reasoning       Boolean         @default(false)
+  thinkingLevelMap String?
   researchedAt    DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
   samplingPresets SamplingPreset[]

@@ -48,4 +48,6 @@ export interface ModelResearchResult {
   description: string | null;
   source: string | null;
   supportsImage: boolean;
+  reasoning: boolean;
+  thinkingLevelMap: Record<string, string | null> | null;
 }
