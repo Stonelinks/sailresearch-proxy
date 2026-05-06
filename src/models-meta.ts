@@ -39,6 +39,8 @@ export interface ModelWire {
   description: string | null;
   source: string | null;
   supportsImage: boolean;
+  reasoning: boolean;
+  thinkingLevelMap: Record<string, string | null> | null;
   researchedAt: string | null;
 }
 
@@ -57,6 +59,8 @@ export interface MetaRow {
   description: string | null;
   source: string | null;
   supportsImage: boolean;
+  reasoning: boolean;
+  thinkingLevelMap: string | null;
   researchedAt: Date;
   samplingPresets: Array<{ name: string; description: string; params: string }>;
   prices: Array<{
@@ -97,6 +101,26 @@ function isCanonicalWindow(w: string): w is CompletionWindow {
   return w === "asap" || w === "priority" || w === "standard" || w === "flex";
 }
 
+// Parse thinkingLevelMap JSON string, returning null on failure.
+function parseThinkingLevelMap(
+  raw: string | null,
+): Record<string, string | null> | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      !Array.isArray(parsed)
+    ) {
+      return parsed as Record<string, string | null>;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 function rowToPriceWire(p: MetaRow["prices"][number]): PriceWire | null {
   if (!isCanonicalWindow(p.completionWindow)) return null;
   return {
@@ -130,6 +154,10 @@ export function mergeModelMeta(
     description: meta?.description ?? null,
     source: meta?.source ?? null,
     supportsImage: meta?.supportsImage ?? false,
+    reasoning: meta?.reasoning ?? false,
+    thinkingLevelMap: meta
+      ? parseThinkingLevelMap(meta.thinkingLevelMap)
+      : null,
     researchedAt: meta?.researchedAt?.toISOString() ?? null,
   };
 }
@@ -199,6 +227,12 @@ export function toRestShape(
   }
   if (m.supportsImage) {
     out.supports_image = true;
+  }
+  if (m.reasoning) {
+    out.reasoning = true;
+  }
+  if (m.thinkingLevelMap) {
+    out.thinking_level_map = m.thinkingLevelMap;
   }
   if (m.description != null) out.description = m.description;
   const presets = m.samplingPresets ?? [];
