@@ -118,6 +118,36 @@ function validatePriceEntry(raw: unknown, index: number): ModelPriceInput {
   };
 }
 
+const VALID_THINKING_LEVELS = [
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+] as const;
+
+type ThinkingLevel = (typeof VALID_THINKING_LEVELS)[number];
+
+function validateThinkingLevelMap(
+  raw: unknown,
+): Record<string, string | null> | null {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw !== "object" || Array.isArray(raw)) return null;
+
+  const map: Record<string, string | null> = {};
+  for (const [key, val] of Object.entries(raw as Record<string, unknown>)) {
+    if (!VALID_THINKING_LEVELS.includes(key as ThinkingLevel)) continue;
+    if (val === null) {
+      map[key] = null;
+    } else if (typeof val === "string") {
+      map[key] = val;
+    }
+    // skip non-string non-null values
+  }
+  return Object.keys(map).length > 0 ? map : null;
+}
+
 /**
  * Parse and validate raw JSON string from the pi subprocess into a typed
  * ModelResearchResult. Throws with a descriptive message on validation failure.
@@ -210,6 +240,22 @@ export function parseAndValidatePiOutput(raw: string): ModelResearchResult {
   const source: string | null =
     typeof obj.source === "string" ? obj.source : null;
 
+  // reasoning
+  if (
+    obj.reasoning !== undefined &&
+    obj.reasoning !== null &&
+    typeof obj.reasoning !== "boolean"
+  ) {
+    throw new Error(
+      `"reasoning" must be a boolean or null, got ${typeof obj.reasoning}`,
+    );
+  }
+  const reasoning: boolean =
+    typeof obj.reasoning === "boolean" ? obj.reasoning : false;
+
+  // thinkingLevelMap
+  const thinkingLevelMap = validateThinkingLevelMap(obj.thinkingLevelMap);
+
   return {
     contextSize,
     samplingPresets,
@@ -218,6 +264,8 @@ export function parseAndValidatePiOutput(raw: string): ModelResearchResult {
     source,
     supportsImage:
       typeof obj.supportsImage === "boolean" ? obj.supportsImage : false,
+    reasoning,
+    thinkingLevelMap,
   };
 }
 
@@ -245,11 +293,18 @@ const PI_PROMPT_TEMPLATE = (modelId: string) =>
 - samplingPresets: array of recommended sampling parameter presets, each with {name, description, params}. params can include temperature, top_p, top_k, max_tokens, etc. Use an empty array if none found.
 - description: a one-sentence description of the model
 - source: the HuggingFace model card URL or other authoritative source
+- reasoning: boolean — true if the model supports extended thinking / chain-of-thought reasoning, false otherwise
+- thinkingLevelMap: if reasoning is true, an object mapping pi thinking levels to provider values. Keys: "off", "minimal", "low", "medium", "high", "xhigh". Values: a string to send to the provider, or null if the level is unsupported. If reasoning is false, omit this field or set to null.
 
 Do NOT include pricing — that is scraped separately from the Sail docs.
 
-Return ONLY the JSON object, no markdown fences, no commentary. Example:
-{"contextSize": 262144, "samplingPresets": [{"name": "default", "description": "General purpose", "params": {"temperature": 0.7, "top_p": 0.95}}], "description": "A large language model by ...", "source": "https://huggingface.co/org/model"}`;
+Return ONLY the JSON object, no markdown fences, no commentary. Examples:
+
+Non-reasoning model:
+{"contextSize": 131072, "samplingPresets": [{"name": "default", "description": "General purpose", "params": {"temperature": 0.7, "top_p": 0.95}}], "description": "A large language model by ...", "source": "https://huggingface.co/org/model", "reasoning": false}
+
+Reasoning model:
+{"contextSize": 262144, "samplingPresets": [{"name": "default", "description": "General purpose", "params": {"temperature": 0.7, "top_p": 0.95}}], "description": "A reasoning model by ...", "source": "https://huggingface.co/org/model", "reasoning": true, "thinkingLevelMap": {"off": null, "minimal": null, "low": "low", "medium": "medium", "high": "high", "xhigh": "xhigh"}}`;
 
 /**
  * Extract a JSON object from raw pi output.
@@ -336,6 +391,10 @@ export async function upsertModelMeta(
         description: result.description,
         source: result.source,
         supportsImage: result.supportsImage,
+        reasoning: result.reasoning,
+        thinkingLevelMap: result.thinkingLevelMap
+          ? JSON.stringify(result.thinkingLevelMap)
+          : null,
         researchedAt: new Date(),
       },
       create: {
@@ -344,6 +403,10 @@ export async function upsertModelMeta(
         description: result.description,
         source: result.source,
         supportsImage: result.supportsImage,
+        reasoning: result.reasoning,
+        thinkingLevelMap: result.thinkingLevelMap
+          ? JSON.stringify(result.thinkingLevelMap)
+          : null,
       },
     });
 
@@ -414,7 +477,7 @@ async function researchSingleModel(
     }
 
     console.log(
-      `  ✓ ${modelId} — contextSize=${result.contextSize}, presets=${result.samplingPresets.length}, prices=${result.prices.length}, supportsImage=${result.supportsImage}, source=${result.source ?? "n/a"}`,
+      `  ✓ ${modelId} — contextSize=${result.contextSize}, presets=${result.samplingPresets.length}, prices=${result.prices.length}, supportsImage=${result.supportsImage}, reasoning=${result.reasoning}, source=${result.source ?? "n/a"}`,
     );
     await upsertModelMeta(modelId, result);
     console.log(`  ✓ Upserted ${modelId}`);

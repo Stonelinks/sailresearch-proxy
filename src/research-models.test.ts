@@ -194,4 +194,81 @@ describe("parseAndValidatePiOutput", () => {
     );
     expect(result.supportsImage).toBe(false);
   });
+
+  test("parses reasoning true", () => {
+    const result = parseAndValidatePiOutput(
+      JSON.stringify({ reasoning: true }),
+    );
+    expect(result.reasoning).toBe(true);
+  });
+
+  test("parses reasoning false", () => {
+    const result = parseAndValidatePiOutput(
+      JSON.stringify({ reasoning: false }),
+    );
+    expect(result.reasoning).toBe(false);
+  });
+
+  test("defaults reasoning to false when absent", () => {
+    const result = parseAndValidatePiOutput(
+      JSON.stringify({ contextSize: 8192 }),
+    );
+    expect(result.reasoning).toBe(false);
+  });
+
+  test("rejects reasoning with wrong type", () => {
+    expect(() =>
+      parseAndValidatePiOutput(JSON.stringify({ reasoning: "yes" })),
+    ).toThrow('"reasoning" must be a boolean or null');
+  });
+
+  test("parses thinkingLevelMap with valid entries", () => {
+    const result = parseAndValidatePiOutput(
+      JSON.stringify({
+        reasoning: true,
+        thinkingLevelMap: {
+          off: null,
+          low: "low",
+          medium: "medium",
+          high: "high",
+          xhigh: "xhigh",
+        },
+      }),
+    );
+    expect(result.reasoning).toBe(true);
+    expect(result.thinkingLevelMap).toEqual({
+      off: null,
+      low: "low",
+      medium: "medium",
+      high: "high",
+      xhigh: "xhigh",
+    });
+  });
+
+  test("ignores invalid thinkingLevelMap keys", () => {
+    const result = parseAndValidatePiOutput(
+      JSON.stringify({
+        reasoning: true,
+        thinkingLevelMap: {
+          low: "low",
+          bogus: "ignored",
+        },
+      }),
+    );
+    expect(result.thinkingLevelMap).toEqual({ low: "low" });
+  });
+
+  test("returns null thinkingLevelMap when absent", () => {
+    const result = parseAndValidatePiOutput(
+      JSON.stringify({ reasoning: false }),
+    );
+    expect(result.thinkingLevelMap).toBeNull();
+  });
+
+  test("returns null thinkingLevelMap for non-object input", () => {
+    const result = parseAndValidatePiOutput(
+      JSON.stringify({ thinkingLevelMap: "oops" }),
+    );
+    expect(result.thinkingLevelMap).toBeNull();
+  });
 });

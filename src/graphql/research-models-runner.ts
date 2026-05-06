@@ -45,6 +45,6 @@ export async function researchAndUpsertOne(modelId: string): Promise<void> {
 
   await upsertModelMeta(modelId, result);
   log.info(
-    `[refetchModel] upserted ${modelId} contextSize=${result.contextSize} presets=${result.samplingPresets.length} supportsImage=${result.supportsImage}`,
+    `[refetchModel] upserted ${modelId} contextSize=${result.contextSize} presets=${result.samplingPresets.length} supportsImage=${result.supportsImage} reasoning=${result.reasoning}`,
   );
 }
