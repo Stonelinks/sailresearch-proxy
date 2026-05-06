@@ -14,7 +14,9 @@
  * https://pi.dev/docs/latest/models
  */
 import { prisma } from "./db.ts";
-import { type CompletionWindow } from "./types.ts";
+import { COMPLETION_WINDOWS } from "./completion-window.ts";
+import { WINDOW_PROVIDER_NAMES } from "./constants.ts";
+import type { CompletionWindow } from "./types.ts";
 import { scrapeImageCapabilities, scrapePricing } from "./docs-scraper.ts";
 import type { ModelPriceInput } from "./types.ts";
 import type { PriceWire, PresetWire } from "./models-meta.ts";
@@ -282,20 +284,6 @@ export function restShapeToModelData(
 }
 
 // ─── Build pi model entries ─────────────────────────────────────────────────
-
-const COMPLETION_WINDOWS: CompletionWindow[] = [
-  "asap",
-  "priority",
-  "standard",
-  "flex",
-];
-
-const WINDOW_PROVIDER_NAMES: Record<CompletionWindow, string> = {
-  asap: "sail-asap",
-  priority: "sail-priority",
-  standard: "sail-standard",
-  flex: "sail-flex",
-};
 
 /**
  * Infer the thinkingFormat compat value based on the model's org/family.

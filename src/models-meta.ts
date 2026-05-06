@@ -9,6 +9,8 @@
  *    convention so OpenAI-compatible clients (LiteLLM, Aider, Continue, ...)
  *    can read context length, default sampling params, etc.
  */
+import { isValidCompletionWindow } from "./completion-window.ts";
+import { PER_MTOKEN } from "./constants.ts";
 import type { CompletionWindow } from "./types.ts";
 
 /** Wire shape for a sampling preset returned by GraphQL. params is parsed. */
@@ -98,7 +100,7 @@ function parseSamplingParams(p: {
 // values. Defensive — the DB has no enum constraint, so a bad row would
 // otherwise leak through to GraphQL/REST consumers as a typed CompletionWindow.
 function isCanonicalWindow(w: string): w is CompletionWindow {
-  return w === "asap" || w === "priority" || w === "standard" || w === "flex";
+  return isValidCompletionWindow(w);
 }
 
 // Parse thinkingLevelMap JSON string, returning null on failure.
@@ -122,7 +124,7 @@ function parseThinkingLevelMap(
 }
 
 function rowToPriceWire(p: MetaRow["prices"][number]): PriceWire | null {
-  if (!isCanonicalWindow(p.completionWindow)) return null;
+  if (!isValidCompletionWindow(p.completionWindow)) return null;
   return {
     completionWindow: p.completionWindow,
     inputPerMTok: p.inputPerMTok,
@@ -182,7 +184,7 @@ function priceToRest(p: PriceWire): Record<string, unknown> {
 // resolution for any plausible per-token price; the regex strips trailing
 // zeros (and a dangling dot) for cleanliness.
 function perTokenString(perMTok: number): string {
-  return (perMTok / 1_000_000).toFixed(12).replace(/\.?0+$/, "");
+  return (perMTok / PER_MTOKEN).toFixed(12).replace(/\.?0+$/, "");
 }
 
 function priceToOpenRouter(p: PriceWire): Record<string, string> {

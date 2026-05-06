@@ -308,47 +308,7 @@ Non-reasoning model:
 Reasoning model:
 {"contextSize": 262144, "samplingPresets": [{"name": "default", "description": "General purpose", "params": {"temperature": 0.7, "top_p": 0.95}}], "description": "A reasoning model by ...", "source": "https://huggingface.co/org/model", "reasoning": true, "thinkingLevelMap": {"off": null, "minimal": null, "low": "low", "medium": "medium", "high": "high", "xhigh": "xhigh"}}`;
 
-/**
- * Extract a JSON object from raw SDK output.
- * Handles both raw JSON and markdown-fenced JSON.
- */
-function extractJson(raw: string): string | null {
-  // Try raw JSON object (first { ... } block at line start)
-  const lines = raw.split("\n");
-  let start = -1;
-  let braceCount = 0;
-  const jsonLines: string[] = [];
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]!;
-    if (start === -1) {
-      if (line.trimStart().startsWith("{")) {
-        start = i;
-        braceCount += (line.match(/{/g) ?? []).length;
-        braceCount -= (line.match(/}/g) ?? []).length;
-        jsonLines.push(line);
-        if (braceCount === 0) break;
-      }
-    } else {
-      braceCount += (line.match(/{/g) ?? []).length;
-      braceCount -= (line.match(/}/g) ?? []).length;
-      jsonLines.push(line);
-      if (braceCount === 0) break;
-    }
-  }
-
-  if (jsonLines.length > 0) {
-    return jsonLines.join("\n");
-  }
-
-  // Try extracting from markdown code fences
-  const fenceMatch = raw.match(/```(?:json)?\s*\n([\s\S]*?)\n```/);
-  if (fenceMatch?.[1]) {
-    return fenceMatch[1].trim();
-  }
-
-  return null;
-}
+import { extractJson } from "../shared/extract-json.ts";
 
 export async function runPiResearch(
   modelId: string,

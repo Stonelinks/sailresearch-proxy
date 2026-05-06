@@ -11,6 +11,8 @@
  *   - `runPiChat(provider, modelId, prompt)` — one-shot call targeting a
  *     specific provider/model (used by smoke tests)
  */
+import { DEFAULT_PROVIDER } from "./constants.ts";
+import { config } from "./config.ts";
 import {
   AuthStorage,
   createAgentSession,
@@ -26,8 +28,7 @@ import { log } from "../shared/logger.ts";
 const SYSTEM_PROMPT =
   "You are a data extraction assistant. Return ONLY valid JSON. No markdown fences, no commentary.";
 
-const DEFAULT_PROVIDER = "sail-standard";
-const DEFAULT_MODEL_ID = "zai-org/GLM-5.1-FP8";
+const DEFAULT_MODEL_ID = config.defaults.model;
 
 let _authStorage: ReturnType<typeof AuthStorage.create> | undefined;
 let _modelRegistry: ReturnType<typeof ModelRegistry.create> | undefined;

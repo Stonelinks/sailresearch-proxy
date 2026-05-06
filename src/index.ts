@@ -1,4 +1,5 @@
 import { PrismaClient } from "@prisma/client";
+import { TERMINAL_STATUSES } from "./constants.ts";
 import { log } from "../shared/logger.ts";
 import { createApp } from "./app.ts";
 
@@ -19,7 +20,7 @@ const prisma = new PrismaClient();
 
 // Check for in-flight jobs from previous run
 const resumed = await prisma.pendingJob.count({
-  where: { status: { notIn: ["completed", "failed", "cancelled"] } },
+  where: { status: { notIn: [...TERMINAL_STATUSES] } },
 });
 if (resumed > 0) {
   log.info(`[startup] resuming ${resumed} in-flight job(s)`);

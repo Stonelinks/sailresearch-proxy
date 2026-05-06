@@ -6,14 +6,20 @@ import { pubsub } from "../graphql/pubsub.ts";
 import { RecurringTask } from "./recurring-task.ts";
 import { JOB_SUMMARY_SELECT, jobToSummary } from "./job-shapes.ts";
 import { now, formatDuration } from "../../shared/time.ts";
+import {
+  TERMINAL_STATUSES,
+  BACKOFF_THRESHOLDS,
+  BACKOFF_BOUNDARIES,
+} from "../constants.ts";
 import type { JobWaiter, CompletionWindow } from "../types.ts";
 import { mapSailStatus } from "../types.ts";
 
 export function getBackoffMs(pollCount: number): number {
-  if (pollCount < 3) return 2000;
-  if (pollCount < 6) return 5000;
-  if (pollCount < 21) return 10000;
-  return 30000;
+  if (pollCount < BACKOFF_BOUNDARIES.fastMax) return BACKOFF_THRESHOLDS.fast;
+  if (pollCount < BACKOFF_BOUNDARIES.mediumMax)
+    return BACKOFF_THRESHOLDS.medium;
+  if (pollCount < BACKOFF_BOUNDARIES.slowMax) return BACKOFF_THRESHOLDS.slow;
+  return BACKOFF_THRESHOLDS.floor;
 }
 
 export interface WaiterRegistration {
@@ -110,7 +116,7 @@ export class Poller {
     // Expire jobs that have exceeded their window-specific timeout
     const activeJobs = await this.prisma.pendingJob.findMany({
       where: {
-        status: { notIn: ["completed", "failed", "cancelled"] },
+        status: { notIn: [...TERMINAL_STATUSES] },
       },
       select: {
         id: true,
@@ -174,7 +180,7 @@ export class Poller {
     const slotsAvailable = config.polling.maxConcurrent - this.inFlight.size;
     const jobs = await this.prisma.pendingJob.findMany({
       where: {
-        status: { notIn: ["completed", "failed", "cancelled"] },
+        status: { notIn: [...TERMINAL_STATUSES] },
         nextPollAt: { lte: now },
       },
       take: slotsAvailable + this.inFlight.size,

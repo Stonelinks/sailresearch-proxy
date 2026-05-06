@@ -4,6 +4,7 @@ import { log } from "../../shared/logger.ts";
 import { now, formatDuration } from "../../shared/time.ts";
 import { openAIError, mapSailError } from "../errors.ts";
 import { computeSailBodyHash, findExistingJob } from "../dedup.ts";
+import { PERIODIC_RECHECK_MS } from "../constants.ts";
 import type { Poller, WaiterRegistration } from "./poller.ts";
 import type { CompletionWindow } from "../types.ts";
 import { mapSailStatus } from "../types.ts";
@@ -235,8 +236,6 @@ export async function waitForJob(
  * recheck catches that — registration is synchronous, so any settle that
  * happens *after* it goes through the registered waiter normally.
  */
-/** How often to re-poll the DB as a safety net for missed waiter notifications. */
-const PERIODIC_RECHECK_MS = 5000;
 
 async function latchOntoExistingJob(
   sailResponseId: string,

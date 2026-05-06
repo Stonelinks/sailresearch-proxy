@@ -3,6 +3,7 @@ import { log } from "../../shared/logger.ts";
 import { chatToResponsesAPI } from "../transforms/request.ts";
 import { responsesToChatCompletion } from "../transforms/response.ts";
 import { streamResponse } from "./stream.ts";
+import { SSE_HEADERS } from "../constants.ts";
 import { submitAndWait, formatOpenAIError } from "./batch-submit.ts";
 import type { Poller } from "./poller.ts";
 import type { CompletionWindow } from "../types.ts";
@@ -41,11 +42,7 @@ export async function handleBatching(
 
   if (wantsStream) {
     return new Response(streamResponse(completion), {
-      headers: {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
-        Connection: "keep-alive",
-      },
+      headers: SSE_HEADERS,
     });
   }
 

@@ -1,6 +1,7 @@
 import { sail } from "../sail-client.ts";
 import { config } from "../config.ts";
 import { log } from "../../shared/logger.ts";
+import { SSE_HEADERS } from "../constants.ts";
 import { mapSailError } from "../errors.ts";
 import { streamResponse } from "./stream.ts";
 import { stripForSailChatCompletions } from "../transforms/sail-fields.ts";
@@ -33,11 +34,7 @@ export async function handlePassthrough(
 
   if (wantsStream) {
     return new Response(streamResponse(data), {
-      headers: {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
-        Connection: "keep-alive",
-      },
+      headers: SSE_HEADERS,
     });
   }
 
