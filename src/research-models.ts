@@ -1,18 +1,11 @@
 /**
  * Research AI model metadata using the pi SDK and upsert into the database.
  *
- * This module has two modes:
- *  - **Library**: exports `parseAndValidatePiOutput`, `runPiResearch`, and
- *    `upsertModelMeta` for server-side use (e.g. GraphQL `refetchModel`
- *    mutation via `research-models-runner.ts`). These use the DB directly.
- *  - **CLI**: `main()` is a thin HTTP client that calls the proxy's REST API
- *    (`POST /api/models/:modelId/research`) for each model. No DB access
- *    needed — the server handles scraping, research, and upsert internally.
- *
- * Usage: bun run src/research-models.ts [--sequential]
- *
- * Default: runs research in parallel for all models.
- * --sequential: researches models one at a time.
+ * Library exports used by the server (e.g. GraphQL `refetchModel` mutation
+ * via `research-models-runner.ts`):
+ *   - `parseAndValidatePiOutput` — validate raw JSON from pi SDK
+ *   - `runPiResearch` — run pi SDK prompt for a single model
+ *   - `upsertModelMeta` — write research results to the database
  */
 import { isValidCompletionWindow } from "./completion-window.ts";
 import {
@@ -22,6 +15,7 @@ import {
   type SamplingPresetInput,
 } from "./types.ts";
 import { runPiPrompt } from "./pi-session.ts";
+import { extractJson } from "../shared/extract-json.ts";
 
 // ─── Validation ─────────────────────────────────────────────────────────────
 
@@ -271,23 +265,7 @@ export function parseAndValidatePiOutput(raw: string): ModelResearchResult {
   };
 }
 
-// ─── Fetch model list from proxy ────────────────────────────────────────────
-
-async function fetchModelList(proxyUrl: string): Promise<string[]> {
-  const res = await fetch(`${proxyUrl}/v1/models`);
-  if (!res.ok) {
-    throw new Error(
-      `Proxy returned ${res.status} ${res.statusText} for /v1/models`,
-    );
-  }
-  const body = (await res.json()) as { data: Array<{ id: string }> };
-  if (!Array.isArray(body.data) || body.data.length === 0) {
-    throw new Error("No models found in /v1/models response");
-  }
-  return body.data.map((m) => m.id);
-}
-
-// ─── Run research for a single model ─────────────────────────────────────────
+// ─── Run research for a single model ────────────────────────────────────────
 
 const PI_PROMPT_TEMPLATE = (modelId: string) =>
   `Research the AI model "${modelId}" and return ONLY a JSON object with these fields:
@@ -307,8 +285,6 @@ Non-reasoning model:
 
 Reasoning model:
 {"contextSize": 262144, "samplingPresets": [{"name": "default", "description": "General purpose", "params": {"temperature": 0.7, "top_p": 0.95}}], "description": "A reasoning model by ...", "source": "https://huggingface.co/org/model", "reasoning": true, "thinkingLevelMap": {"off": null, "minimal": null, "low": "low", "medium": "medium", "high": "high", "xhigh": "xhigh"}}`;
-
-import { extractJson } from "../shared/extract-json.ts";
 
 export async function runPiResearch(
   modelId: string,
@@ -331,9 +307,6 @@ export async function upsertModelMeta(
   modelId: string,
   result: ModelResearchResult,
 ): Promise<void> {
-  // Lazy import so the CLI path (which never calls this function) doesn't
-  // require a DB connection. Server-side callers (research-models-runner.ts)
-  // get prisma just fine.
   const { prisma } = await import("./db.ts");
   await prisma.$transaction(async (tx) => {
     // Upsert ModelMeta
@@ -392,165 +365,4 @@ export async function upsertModelMeta(
       });
     }
   });
-}
-
-// ─── Orchestration ──────────────────────────────────────────────────────────
-
-interface ResearchOutcome {
-  modelId: string;
-  status: "success" | "failed";
-  error?: string;
-  contextSize?: number | null;
-  presetCount?: number;
-}
-
-/**
- * Research a single model by calling the proxy's REST API.
- * The server handles scraping, pi SDK research, and DB upsert internally.
- */
-async function researchSingleModelViaApi(
-  proxyUrl: string,
-  modelId: string,
-  index: number,
-  total: number,
-): Promise<ResearchOutcome> {
-  const prefix = `[${index}/${total}]`;
-  console.log(`${prefix} Researching: ${modelId}`);
-
-  try {
-    const encodedId = encodeURIComponent(modelId);
-    const res = await fetch(`${proxyUrl}/api/models/${encodedId}/research`, {
-      method: "POST",
-    });
-
-    if (!res.ok) {
-      const body = await res.text();
-      let msg: string;
-      try {
-        const parsed = JSON.parse(body);
-        msg = parsed.error ?? body;
-      } catch {
-        msg = body;
-      }
-      throw new Error(`API returned ${res.status}: ${msg}`);
-    }
-
-    const data = (await res.json()) as Record<string, unknown>;
-    const contextSize =
-      typeof data.context_length === "number" ? data.context_length : null;
-    const presets = Array.isArray(data.x_sampling_presets)
-      ? data.x_sampling_presets
-      : [];
-    const supportsImage = data.supports_image === true;
-    const reasoning = data.reasoning === true;
-
-    console.log(
-      `  ✓ ${modelId} — contextSize=${contextSize}, presets=${presets.length}, supportsImage=${supportsImage}, reasoning=${reasoning}`,
-    );
-    return {
-      modelId,
-      status: "success",
-      contextSize,
-      presetCount: presets.length,
-    };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error(`  ✗ ${modelId}: ${msg}`);
-    return { modelId, status: "failed", error: msg };
-  }
-}
-
-// Server-side exports are used directly by research-models-runner.ts:
-//   runPiResearch, upsertModelMeta, parseAndValidatePiOutput
-// Types are re-exported from ./types.ts — no need to re-export here.
-
-async function researchAllModels(
-  proxyUrl: string,
-  modelIds: string[],
-  sequential: boolean,
-): Promise<ResearchOutcome[]> {
-  const total = modelIds.length;
-
-  if (sequential) {
-    console.log(`Running in sequential mode (${total} models)\n`);
-    const outcomes: ResearchOutcome[] = [];
-    for (let i = 0; i < modelIds.length; i++) {
-      const outcome = await researchSingleModelViaApi(
-        proxyUrl,
-        modelIds[i]!,
-        i + 1,
-        total,
-      );
-      outcomes.push(outcome);
-    }
-    return outcomes;
-  }
-
-  console.log(`Running in parallel mode (${total} models)\n`);
-
-  const outcomes = await Promise.all(
-    modelIds.map((modelId, i) =>
-      researchSingleModelViaApi(proxyUrl, modelId, i + 1, total),
-    ),
-  );
-  return outcomes;
-}
-
-// ─── Main (CLI: uses REST API, no DB access) ──────────────────────────────
-
-async function main() {
-  const args = process.argv.slice(2);
-  const sequential = args.includes("--sequential");
-  const proxyUrl = process.env.PROXY_URL ?? "http://localhost:4000";
-
-  // Health check
-  console.log(`Checking proxy at ${proxyUrl}/v1/models ...`);
-  try {
-    const res = await fetch(`${proxyUrl}/v1/models`);
-    if (!res.ok) throw new Error(`${res.status}`);
-    console.log("  ✓ Proxy is reachable\n");
-  } catch {
-    console.error(`ERROR: Proxy is not reachable at ${proxyUrl}/v1/models`);
-    console.error("Start the proxy first with: bin/dev  or  bin/run");
-    process.exit(1);
-  }
-
-  // Fetch model list
-  console.log("Fetching model list ...");
-  let modelIds: string[];
-  try {
-    modelIds = await fetchModelList(proxyUrl);
-    console.log(`  ✓ Found ${modelIds.length} models\n`);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error(`ERROR: ${msg}`);
-    process.exit(1);
-  }
-
-  // Research — all via REST API, server handles scraping + pi SDK + DB
-  const outcomes = await researchAllModels(proxyUrl, modelIds, sequential);
-
-  // Summary
-  const succeeded = outcomes.filter((o) => o.status === "success");
-  const failed = outcomes.filter((o) => o.status === "failed");
-
-  console.log("");
-  console.log("========================================");
-  console.log(
-    `Research complete: ${succeeded.length} succeeded, ${failed.length} failed out of ${outcomes.length} models`,
-  );
-  if (failed.length > 0) {
-    console.log("Failed models:");
-    for (const f of failed) {
-      console.log(`  - ${f.modelId}: ${f.error ?? "unknown error"}`);
-    }
-  }
-  console.log("========================================");
-}
-
-// Only run main() when invoked as a script (bun run src/research-models.ts).
-// When this file is imported as a module (e.g. by the GraphQL refetchModel
-// resolver), the exported helpers are used directly.
-if (import.meta.main) {
-  main();
 }
