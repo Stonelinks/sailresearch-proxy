@@ -20,8 +20,11 @@ mock.module("../sail-client.ts", () => ({
 }));
 
 const mockResearchAndUpsertOne = mock<(id: string) => Promise<void>>();
+const mockResearchAndUpsertMany =
+  mock<(ids: string[]) => Promise<Array<{ modelId: string; error: string }>>>();
 mock.module("./research-models-runner.ts", () => ({
   researchAndUpsertOne: mockResearchAndUpsertOne,
+  researchAndUpsertMany: mockResearchAndUpsertMany,
 }));
 
 const mockPendingJobFindMany = mock();
@@ -423,6 +426,126 @@ describe("Mutation.refetchModel", () => {
 
     expect(res.errors).toBeDefined();
     expect(res.errors?.[0]?.message).toMatch(/not found in Sail upstream/);
+  });
+});
+
+describe("Mutation.researchAllModels", () => {
+  beforeEach(() => {
+    mockListModels.mockReset();
+    mockModelMetaFindMany.mockReset();
+    mockResearchAndUpsertMany.mockReset();
+  });
+
+  test("researches all models in parallel and returns enriched list", async () => {
+    mockListModels.mockResolvedValueOnce({
+      status: 200,
+      data: {
+        data: [
+          { id: "m1", object: "model", created: 100, owned_by: "org-a" },
+          { id: "m2", object: "model", created: 101, owned_by: "org-b" },
+        ],
+      },
+    });
+    mockResearchAndUpsertMany.mockResolvedValueOnce([]); // no errors
+    mockModelMetaFindMany.mockResolvedValueOnce([
+      {
+        modelId: "m1",
+        contextSize: 8192,
+        samplingPresets: [],
+        description: "researched",
+        source: "https://example.com/m1",
+        researchedAt: new Date("2025-06-02T00:00:00Z"),
+      },
+      {
+        modelId: "m2",
+        contextSize: 4096,
+        samplingPresets: [],
+        description: "also researched",
+        source: null,
+        researchedAt: new Date("2025-06-02T00:01:00Z"),
+      },
+    ]);
+
+    const res = await run(`
+      mutation { researchAllModels { id contextSize description researchedAt } }
+    `);
+
+    expect(res.errors).toBeUndefined();
+    expect(mockResearchAndUpsertMany).toHaveBeenCalledTimes(1);
+    expect(mockResearchAndUpsertMany).toHaveBeenCalledWith(["m1", "m2"]);
+    const models = (res.data as any).researchAllModels;
+    expect(models).toHaveLength(2);
+    expect(models[0]).toEqual({
+      id: "m1",
+      contextSize: 8192,
+      description: "researched",
+      researchedAt: "2025-06-02T00:00:00.000Z",
+    });
+    expect(models[1]).toEqual({
+      id: "m2",
+      contextSize: 4096,
+      description: "also researched",
+      researchedAt: "2025-06-02T00:01:00.000Z",
+    });
+  });
+
+  test("returns all models even when some fail research", async () => {
+    mockListModels.mockResolvedValueOnce({
+      status: 200,
+      data: {
+        data: [
+          { id: "m1", object: "model", created: 100, owned_by: "org-a" },
+          { id: "m2", object: "model", created: 101, owned_by: "org-b" },
+          { id: "m3", object: "model", created: 102, owned_by: "org-c" },
+        ],
+      },
+    });
+    // Simulate partial failure: m2 failed
+    mockResearchAndUpsertMany.mockResolvedValueOnce([
+      { modelId: "m2", error: "pi SDK timeout" },
+    ]);
+    mockModelMetaFindMany.mockResolvedValueOnce([
+      {
+        modelId: "m1",
+        contextSize: 8192,
+        samplingPresets: [],
+        description: "ok",
+        source: null,
+        researchedAt: new Date("2025-06-02T00:00:00Z"),
+      },
+      {
+        modelId: "m3",
+        contextSize: 2048,
+        samplingPresets: [],
+        description: "ok too",
+        source: null,
+        researchedAt: new Date("2025-06-02T00:02:00Z"),
+      },
+    ]);
+
+    const res = await run(`
+      mutation { researchAllModels { id contextSize } }
+    `);
+
+    // Should still succeed — partial failure is not a GraphQL error
+    expect(res.errors).toBeUndefined();
+    const models = (res.data as any).researchAllModels;
+    expect(models).toHaveLength(3); // All models returned, m2 just not researched
+  });
+
+  test("returns GraphQL error when Sail upstream fails", async () => {
+    mockListModels.mockResolvedValueOnce({
+      status: 500,
+      data: { error: { message: "Internal error" } },
+    });
+
+    const res = await run(`
+      mutation { researchAllModels { id } }
+    `);
+
+    expect(res.errors).toBeDefined();
+    expect(res.errors?.[0]?.message).toMatch(/Sail upstream returned 500/);
+    expect(mockResearchAndUpsertMany).not.toHaveBeenCalled();
   });
 });
 
