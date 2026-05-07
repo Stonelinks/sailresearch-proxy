@@ -6,9 +6,13 @@ import {
   jobToDetail,
 } from "../services/job-shapes.ts";
 import { sail } from "../sail-client.ts";
-import { researchAndUpsertOne } from "./research-models-runner.ts";
+import {
+  researchAndUpsertOne,
+  researchAndUpsertMany,
+} from "./research-models-runner.ts";
 import { mergeModelMeta, type SailUpstreamModel } from "../models-meta.ts";
 import type { JobStatus } from "../types.ts";
+import { log } from "../../shared/logger.ts";
 
 const JOB_STATUS_VALUES = [
   "pending",
@@ -233,6 +237,37 @@ builder.mutationType({
           throw new Error(`Model ${id} not found in Sail upstream`);
         }
         return wire;
+      },
+    }),
+
+    researchAllModels: t.field({
+      type: ["Model"],
+      resolve: async (_root, _args, ctx) => {
+        // Fetch model list from Sail upstream
+        const sailRes = await sail.listModels();
+        if (sailRes.status !== 200) {
+          throw new Error(
+            `Sail upstream returned ${sailRes.status} for /v1/models`,
+          );
+        }
+        const list = (sailRes.data?.data ?? []) as SailUpstreamModel[];
+        const modelIds = list.map((m) => m.id);
+
+        // Research all models in parallel (scrapes docs once, shares results)
+        const errors = await researchAndUpsertMany(modelIds);
+
+        if (errors.length > 0) {
+          log.warn(
+            `[researchAllModels] ${errors.length}/${list.length} models failed: ${errors.map((e) => e.modelId).join(", ")}`,
+          );
+        }
+
+        // Return the full enriched model list
+        const metas = await ctx.prisma.modelMeta.findMany({
+          include: { samplingPresets: true, prices: true },
+        });
+        const byId = new Map(metas.map((m) => [m.modelId, m]));
+        return list.map((m) => mergeModelMeta(m, byId.get(m.id) ?? undefined));
       },
     }),
   }),

@@ -75,6 +75,7 @@ type ModelPrice {
 
 type Mutation {
   refetchModel(modelId: ID!): Model!
+  researchAllModels: [Model!]!
 }
 
 type Query {
