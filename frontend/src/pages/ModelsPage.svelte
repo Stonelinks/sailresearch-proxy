@@ -10,6 +10,7 @@
 
   let search = $state("");
   let refetchingId = $state<string | null>(null);
+  let researchingAll = $state(false);
 
   const Models = graphql(`
     query ModelsList {
@@ -68,6 +69,33 @@
     }
   `);
 
+  const ResearchAllModels = graphql(`
+    mutation ResearchAllModels {
+      researchAllModels {
+        id
+        contextSize
+        description
+        source
+        supportsImage
+        reasoning
+        thinkingLevelMap
+        researchedAt
+        samplingPresets {
+          name
+          description
+          params
+        }
+        prices {
+          completionWindow
+          inputPerMTok
+          cachedInputPerMTok
+          outputPerMTok
+          currency
+        }
+      }
+    }
+  `);
+
   let models = $derived($Models.data?.models ?? []);
   let loading = $derived($Models.fetching);
   let error = $derived($Models.errors?.[0]?.message ?? "");
@@ -96,6 +124,22 @@
     }
   }
 
+  async function researchAll() {
+    researchingAll = true;
+    try {
+      log.debug("Researching all models");
+      const result = await ResearchAllModels.mutate({});
+      if (result.errors?.length) {
+        log.error("Research all failed:", result.errors[0].message);
+        alert(`Research all failed: ${result.errors[0].message}`);
+      } else {
+        log.debug("Researched all models");
+      }
+    } finally {
+      researchingAll = false;
+    }
+  }
+
   onMount(() => {
     Models.fetch();
   });
@@ -113,6 +157,13 @@
         placeholder="Filter models…"
         class="text-sm px-2.5 py-1.5 rounded border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-1 focus:ring-slate-300"
       />
+      <button
+        onclick={researchAll}
+        disabled={researchingAll}
+        class="text-sm px-3 py-1.5 rounded border border-slate-200 text-slate-500 hover:text-slate-700 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors"
+      >
+        {researchingAll ? "Researching…" : "Research All"}
+      </button>
     </div>
   </div>
 
