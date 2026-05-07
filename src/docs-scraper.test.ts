@@ -1,31 +1,28 @@
 import { describe, test, expect, mock, beforeEach } from "bun:test";
-import { scrapeImageCapabilities, scrapePricing } from "./docs-scraper.ts";
+import { scrapeModelCapabilities, scrapePricing } from "./docs-scraper.ts";
 
 // We mock `runPiPrompt` from the pi-session module to return controlled responses.
 // The `fetch` global is also mocked to return markdown content.
 
-const MOCK_IMAGES_MD = `# Image Input
+const MOCK_MODELS_MD = `# Models
 
-Sail accepts image inputs on multimodal base models.
+> All models currently served by Sail
 
-## Supported models
-
-| Model                   | Multimodal |
-| ----------------------- | :--------: |
-| \`moonshotai/Kimi-K2.5\`  |      ✓     |
-| \`google/gemma-4-31B-it\` |      ✓     |
-
-Requesting a non-multimodal model with image blocks returns 400.
+| Model | Slug | Image | Reasoning |
+|-------|------|-------|-----------|
+| Kimi K2.5 | moonshotai/Kimi-K2.5 | ✓ | |
+| GLM-5.1 (FP8) | zai-org/GLM-5.1-FP8 | | ✓ |
+| DeepSeek V3.2 | deepseek-ai/DeepSeek-V3.2 | | |
 `;
 
-const MOCK_PRICING_MD = `# Models & Pricing
+const MOCK_PRICING_MD = `# Pricing
 
-All models currently served by Sail.
+> Per-token pricing for Sail inference
 
 | Model | Standard In | Standard Out | Flex In | Flex Out |
 |-------|------------|-------------|---------|---------|
 | moonshotai/Kimi-K2.5 | 0.20 | 1.20 | 0.16 | 0.80 |
-| zai-org/GLM-5.1-FP8 | 0.20 | 1.20 | 0.16 | 0.90 |
+| zai-org/GLM-5.1-FP8 | 0.50 | 2.50 | 0.40 | 1.80 |
 `;
 
 describe("docs-scraper", () => {
@@ -35,54 +32,86 @@ describe("docs-scraper", () => {
     globalThis.fetch = originalFetch;
   });
 
-  describe("scrapeImageCapabilities", () => {
-    test("returns map of modelId to boolean from images page", async () => {
-      // Mock fetch to return the images markdown
+  describe("scrapeModelCapabilities", () => {
+    test("returns map of modelId to supportsImage+reasoning from models page", async () => {
       globalThis.fetch = mock(() =>
-        Promise.resolve(new Response(MOCK_IMAGES_MD, { status: 200 })),
+        Promise.resolve(new Response(MOCK_MODELS_MD, { status: 200 })),
       ) as any;
 
-      // Mock sail.chatCompletions by importing the module after overriding
-      // Since we can't easily mock the sail module, we test with a real-ish
-      // integration test approach. For unit tests we validate the parsing logic.
-
-      // We'll test the extraction by calling with a mock LLM response
+      // The LLM returns structured JSON from the page content
       const llmResponse = JSON.stringify({
         models: [
-          { modelId: "moonshotai/Kimi-K2.5", supportsImage: true },
-          { modelId: "google/gemma-4-31B-it", supportsImage: true },
+          {
+            modelId: "moonshotai/Kimi-K2.5",
+            supportsImage: true,
+            reasoning: false,
+          },
+          {
+            modelId: "zai-org/GLM-5.1-FP8",
+            supportsImage: false,
+            reasoning: true,
+          },
+          {
+            modelId: "deepseek-ai/DeepSeek-V3.2",
+            supportsImage: false,
+            reasoning: false,
+          },
         ],
       });
 
-      // The extractJson function handles markdown fences
-      // Test that the scraper correctly validates and builds the map
+      // Test the validation + map building logic directly
       const parsed = JSON.parse(llmResponse);
-      const map = new Map<string, boolean>();
+      const map = new Map<
+        string,
+        { supportsImage: boolean; reasoning: boolean }
+      >();
       for (const entry of parsed.models) {
         if (typeof entry.modelId === "string" && entry.modelId.trim() !== "") {
-          map.set(entry.modelId, Boolean(entry.supportsImage));
+          map.set(entry.modelId, {
+            supportsImage: Boolean(entry.supportsImage),
+            reasoning: Boolean(entry.reasoning),
+          });
         }
       }
 
-      expect(map.size).toBe(2);
-      expect(map.get("moonshotai/Kimi-K2.5")).toBe(true);
-      expect(map.get("google/gemma-4-31B-it")).toBe(true);
-      expect(map.get("deepseek-ai/DeepSeek-V3.2")).toBeUndefined();
+      expect(map.size).toBe(3);
+      expect(map.get("moonshotai/Kimi-K2.5")).toEqual({
+        supportsImage: true,
+        reasoning: false,
+      });
+      expect(map.get("zai-org/GLM-5.1-FP8")).toEqual({
+        supportsImage: false,
+        reasoning: true,
+      });
+      expect(map.get("deepseek-ai/DeepSeek-V3.2")).toEqual({
+        supportsImage: false,
+        reasoning: false,
+      });
     });
 
     test("skips entries with missing modelId", () => {
       const data = {
         models: [
-          { modelId: "moonshotai/Kimi-K2.5", supportsImage: true },
-          { modelId: "", supportsImage: true }, // should be skipped
-          { supportsImage: true }, // should be skipped
+          {
+            modelId: "moonshotai/Kimi-K2.5",
+            supportsImage: true,
+            reasoning: false,
+          },
+          { modelId: "", supportsImage: true, reasoning: false }, // should be skipped
+          { supportsImage: true, reasoning: false }, // should be skipped
         ],
       };
 
-      const map = new Map<string, boolean>();
+      const map = new Map<
+        string,
+        { supportsImage: boolean; reasoning: boolean }
+      >();
       for (const entry of data.models) {
         if (typeof entry.modelId === "string" && entry.modelId.trim() !== "") {
-          map.set(entry.modelId, Boolean(entry.supportsImage));
+          map.set(entry.modelId, {
+            supportsImage: Boolean(entry.supportsImage),
+            reasoning: Boolean(entry.reasoning),
+          });
         }
       }
 

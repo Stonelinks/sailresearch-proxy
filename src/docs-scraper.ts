@@ -3,18 +3,20 @@
  * metadata using a one-shot LLM call through the embedded pi SDK.
  *
  * Two scrapers share the same pattern:
- *   1. fetch markdown page from docs.sailresearch.com
- *   2. send the raw markdown to the pi SDK with an extraction prompt
+ *   1. fetch markdown/MDX page from docs.sailresearch.com
+ *   2. send the raw content to the pi SDK with an extraction prompt
  *   3. validate the LLM JSON response
  *   4. return a typed Map<modelId, data>
  *
- * This replaces per-model research for pricing (which was slow and
- * expensive) and adds image capability metadata (which research couldn't provide).
+ * The pricing scraper fetches `/pricing.md` for per-window token costs.
+ * The capabilities scraper fetches `/models.md` for image support and
+ * reasoning flags — both from the same capabilities table.
  */
 import { log } from "../shared/logger.ts";
 import { type ModelPriceInput, type CompletionWindow } from "./types.ts";
 import { isValidCompletionWindow } from "./completion-window.ts";
 import { runPiPrompt } from "./pi-session.ts";
+import { extractJson } from "../shared/extract-json.ts";
 
 // ─── Shared LLM extraction ──────────────────────────────────────────────────
 
@@ -42,24 +44,11 @@ async function fetchAndParseDocsPage<T>(
   log.info(`[docs-scraper] fetched ${url} (${markdown.length} chars)`);
 
   // 2. Prepare content — truncate large pages to fit context window
-  // For the pricing page, the main pricing table ends around byte 34K, and
-  // the ASAP section starts around byte 35K. We concatenate the head (main
-  // table, enough to capture all models) and the tail (ASAP section) so the
-  // LLM sees both. The file is ~50K total.
   let content: string;
-  if (url.includes("supported-models") && markdown.length > 35_000) {
-    const asapIdx = markdown.indexOf("ASAP pricing");
-    const tail =
-      asapIdx >= 0
-        ? "\n\n--- ASAP SECTION ---\n" +
-          markdown.slice(Math.max(0, asapIdx - 200))
-        : "";
-    content = markdown.slice(0, 34_000) + tail;
+  if (markdown.length > 30_000) {
+    content = markdown.slice(0, 30_000) + "\n... [truncated]";
   } else {
-    content =
-      markdown.length > 30_000
-        ? markdown.slice(0, 30_000) + "\n... [truncated]"
-        : markdown;
+    content = markdown;
   }
 
   // 3. Send to pi SDK for extraction
@@ -87,70 +76,91 @@ async function fetchAndParseDocsPage<T>(
   return { data: parsed as T, raw: jsonStr };
 }
 
-import { extractJson } from "../shared/extract-json.ts";
+// ─── Model capabilities (image + reasoning) ─────────────────────────────────
 
-// ─── Image capabilities ─────────────────────────────────────────────────────
+const CAPABILITIES_PROMPT = `Extract the capabilities for ALL models from this documentation page.
 
-const IMAGE_PROMPT = `Extract the list of models that support image/multimodal input from this documentation page.
+The page contains a table with columns: Model, Slug, Image, LoRA, Reasoning. Each row has a model ID (slug) and boolean checkmarks for Image and Reasoning support.
 
 Return a JSON object with a single key "models" which is an array of objects, each with:
-- "modelId": the exact model ID string (e.g. "moonshotai/Kimi-K2.5")
-- "supportsImage": true
+- "modelId": the exact model ID / slug string (e.g. "moonshotai/Kimi-K2.5")
+- "supportsImage": true if the Image column shows a checkmark for this model, false otherwise
+- "reasoning": true if the Reasoning column shows a checkmark for this model, false otherwise
 
-Only include models explicitly listed as supporting multimodal/image input. Do not infer or guess.
+Include EVERY model in the table, even those with no checkmarks.
 
 Example output:
-{"models": [{"modelId": "org/model-name", "supportsImage": true}]}`;
+{"models": [{"modelId": "org/model-name", "supportsImage": true, "reasoning": false}]}`;
 
-export interface ImageCapabilityEntry {
+export interface ModelCapabilityEntry {
   modelId: string;
   supportsImage: boolean;
+  reasoning: boolean;
 }
 
-interface ImageCapabilitiesResult {
-  models: ImageCapabilityEntry[];
+interface ModelCapabilitiesResult {
+  models: ModelCapabilityEntry[];
 }
 
 /**
- * Scrape the Sail docs Image Input page and return a map of modelId →
- * whether the model supports image input.
+ * Scrape the Sail docs Models page and return a map of modelId →
+ * capabilities (supportsImage, reasoning). Both fields come from the
+ * capabilities table on the /models page.
  */
-export async function scrapeImageCapabilities(): Promise<Map<string, boolean>> {
-  const { data } = await fetchAndParseDocsPage<ImageCapabilitiesResult>(
-    "https://docs.sailresearch.com/images.md",
-    IMAGE_PROMPT,
+export async function scrapeModelCapabilities(): Promise<
+  Map<string, { supportsImage: boolean; reasoning: boolean }>
+> {
+  const { data } = await fetchAndParseDocsPage<ModelCapabilitiesResult>(
+    "https://docs.sailresearch.com/models.md",
+    CAPABILITIES_PROMPT,
   );
 
   if (!Array.isArray(data.models)) {
     throw new Error(
-      `Expected "models" array in image capabilities response, got: ${typeof data.models}`,
+      `Expected "models" array in capabilities response, got: ${typeof data.models}`,
     );
   }
 
-  const map = new Map<string, boolean>();
+  const map = new Map<string, { supportsImage: boolean; reasoning: boolean }>();
   for (const entry of data.models) {
     if (typeof entry.modelId !== "string" || entry.modelId.trim() === "") {
       log.warn(
-        `[docs-scraper] skipping invalid image capability entry: ${JSON.stringify(entry)}`,
+        `[docs-scraper] skipping invalid capability entry: ${JSON.stringify(entry)}`,
       );
       continue;
     }
-    map.set(entry.modelId, Boolean(entry.supportsImage));
+    map.set(entry.modelId, {
+      supportsImage: Boolean(entry.supportsImage),
+      reasoning: Boolean(entry.reasoning),
+    });
   }
 
   log.info(
-    `[docs-scraper] image capabilities: ${map.size} models found with image support`,
+    `[docs-scraper] capabilities: ${map.size} models extracted from models page`,
   );
   return map;
 }
 
-// ─── Pricing ────────────────────────────────────────────────────────────────
+// ─── Backwards-compatible alias for generate-models-json.ts ────────────
+
+/**
+ * @deprecated Use scrapeModelCapabilities() instead, which returns both
+ * supportsImage and reasoning from the models page.
+ */
+export async function scrapeImageCapabilities(): Promise<Map<string, boolean>> {
+  const caps = await scrapeModelCapabilities();
+  const map = new Map<string, boolean>();
+  for (const [modelId, cap] of caps) {
+    map.set(modelId, cap.supportsImage);
+  }
+  return map;
+}
 
 const PRICING_PROMPT = `Extract the pricing information for ALL models from this documentation page.
 
-The page contains pricing tables for different completion windows (Standard, Priority, Flex, ASAP). Each row has a model ID and prices in USD per 1M tokens.
+The page contains a pricing table with per-window prices (Standard, Priority, Flex, ASAP). Each model row shows Input, Cached, and Output prices in USD per 1M tokens for each completion window it supports. Some models only have prices for certain windows (e.g. flex-only models).
 
-CRITICAL: You must extract pricing for EVERY model in EVERY table. Some models appear in both the main table (Standard+Priority+Flex) AND the ASAP table. A model that has dash columns (—) in a window does NOT support that window — omit that price entry.
+CRITICAL: You must extract pricing for EVERY model for EVERY window they support. A model that does not show a price for a particular window does NOT support that window — omit that price entry.
 
 Return a JSON object with a single key "models" which is an array of objects, each with:
 - "modelId": the exact model ID string (e.g. "moonshotai/Kimi-K2.5")
@@ -160,7 +170,7 @@ Return a JSON object with a single key "models" which is an array of objects, ea
   - "cachedInputPerMTok": number (USD per 1M cached input tokens), or null if shown as dash or not available
   - "outputPerMTok": number (USD per 1M output tokens), or null if shown as dash
 
-Include ALL models from ALL tables on the page (Standard+Priority+Flex table AND the ASAP table).
+Include ALL models from ALL windows on the page.
 
 Example output:
 {"models": [{"modelId": "org/model-name", "prices": [{"completionWindow": "standard", "inputPerMTok": 0.20, "cachedInputPerMTok": 0.10, "outputPerMTok": 1.20}]}]}`;
@@ -180,12 +190,12 @@ interface PricingResult {
 }
 
 /**
- * Scrape the Sail docs Models & Pricing page and return a map of modelId →
+ * Scrape the Sail docs Pricing page and return a map of modelId →
  * validated price entries.
  */
 export async function scrapePricing(): Promise<Map<string, ModelPriceInput[]>> {
   const { data } = await fetchAndParseDocsPage<PricingResult>(
-    "https://docs.sailresearch.com/supported-models.md",
+    "https://docs.sailresearch.com/pricing.md",
     PRICING_PROMPT,
   );
 
