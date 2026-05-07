@@ -1,9 +1,10 @@
 /**
  * Embedded pi SDK session helpers.
  *
- * Replaces the `pi` CLI subprocess with in-process SDK calls. Uses the
- * user's `~/.pi/agent/models.json` and `auth.json` to resolve providers,
- * models, and API keys — the same config the CLI would use.
+ * Replaces the `pi` CLI subprocess with in-process SDK calls. Registers a
+ * provider that always points at the local proxy, regardless of what
+ * `~/.pi/agent/models.json` says — so research and scraping always go
+ * through the proxy.
  *
  * Two modes:
  *   - `runPiPrompt(prompt)` — one-shot call using the default model
@@ -30,6 +31,13 @@ const SYSTEM_PROMPT =
 
 const DEFAULT_MODEL_ID = config.defaults.model;
 
+/**
+ * Base URL for the local proxy's OpenAI-compatible endpoint.
+ * The embedded pi SDK will hit this instead of whatever is in
+ * ~/.pi/agent/models.json.
+ */
+const LOCAL_PROXY_BASE_URL = `http://127.0.0.1:${config.server.port}/v1`;
+
 let _authStorage: ReturnType<typeof AuthStorage.create> | undefined;
 let _modelRegistry: ReturnType<typeof ModelRegistry.create> | undefined;
 
@@ -43,6 +51,22 @@ function getAuthStorage() {
 function getModelRegistry() {
   if (!_modelRegistry) {
     _modelRegistry = ModelRegistry.create(getAuthStorage());
+
+    // Override the sail-standard provider to always point at the local proxy,
+    // regardless of what ~/.pi/agent/models.json says. This ensures that
+    // embedded pi calls (research, scraping) always route through the proxy.
+    _modelRegistry.registerProvider(DEFAULT_PROVIDER, {
+      baseUrl: LOCAL_PROXY_BASE_URL,
+      // No apiKey — the proxy doesn't require one for internal calls.
+      // The pi SDK will send a request with no Authorization header,
+      // and the proxy's parseRequest will accept it (proxyApiKey defaults
+      // to "" when PROXY_API_KEY is unset).
+      api: "openai-completions",
+    });
+
+    log.debug(
+      `[pi-session] registered ${DEFAULT_PROVIDER} → ${LOCAL_PROXY_BASE_URL}`,
+    );
   }
   return _modelRegistry;
 }
