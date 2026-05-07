@@ -7,7 +7,6 @@ import { handleModels } from "./routes/models.ts";
 import { handleMessages } from "./routes/messages.ts";
 import { handleResponses } from "./routes/responses.ts";
 import { wrapRouteLogging } from "./routes/parse-request.ts";
-import { handleModelResearch } from "./routes/model-research.ts";
 import { openAIError } from "./errors.ts";
 import { rewriteForWindowPrefix } from "./routes/dispatch.ts";
 import { createGraphQLYoga } from "./graphql/yoga.ts";
@@ -171,17 +170,6 @@ export function createApp(prisma: PrismaClient, port?: number): AppServer {
 
       // /v1/* and /v1/models — delegate to dispatch
       if (pathname.startsWith("/v1/")) return dispatch(req, pathname);
-
-      // API routes — management endpoints for research, etc.
-      const apiModelResearch = pathname.match(
-        /^\/api\/models\/([^/]+)\/research$/,
-      );
-      if (apiModelResearch && req.method === "POST") {
-        return handleModelResearch(
-          req,
-          decodeURIComponent(apiModelResearch[1]!),
-        );
-      }
 
       // Health
       if (pathname === "/health") return new Response("ok");
