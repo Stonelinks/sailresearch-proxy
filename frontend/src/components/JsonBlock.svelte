@@ -188,7 +188,9 @@
   .jb-pre {
     margin: 0;
     padding: 1rem;
-    overflow-x: auto;
+    overflow-x: hidden;
+    white-space: pre-wrap;
+    word-break: break-all;
     font-size: 0.75rem;
     line-height: 1.625;
     font-family: "JetBrains Mono", ui-monospace, monospace;
