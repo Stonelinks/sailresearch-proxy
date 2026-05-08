@@ -13,6 +13,11 @@ import {
 import { mergeModelMeta, type SailUpstreamModel } from "../models-meta.ts";
 import type { JobStatus } from "../types.ts";
 import { log } from "../../shared/logger.ts";
+import {
+  researchTracker,
+  type ModelResearchUpdatePayload,
+  type BatchProgressWire,
+} from "./research-tracker.ts";
 
 const JOB_STATUS_VALUES = [
   "pending",
@@ -25,6 +30,51 @@ const JOB_STATUS_VALUES = [
 
 const JobStatusEnum = builder.enumType("JobStatus", {
   values: JOB_STATUS_VALUES,
+});
+
+const ResearchUpdateStatusEnum = builder.enumType("ResearchUpdateStatus", {
+  values: ["started", "completed", "failed"] as const,
+});
+
+const BatchProgressRef = builder
+  .objectRef<BatchProgressWire>("BatchProgress")
+  .implement({
+    fields: (t) => ({
+      id: t.exposeString("id"),
+      total: t.exposeInt("total"),
+      completed: t.exposeInt("completed"),
+      errors: t.exposeInt("errors"),
+    }),
+  });
+
+builder.objectType("ModelResearchUpdate", {
+  fields: (t) => ({
+    modelId: t.exposeString("modelId"),
+    status: t.field({
+      type: ResearchUpdateStatusEnum,
+      resolve: (u) => u.status,
+    }),
+    error: t.exposeString("error", { nullable: true }),
+    batch: t.field({
+      type: BatchProgressRef,
+      nullable: true,
+      resolve: (u) => u.batch,
+    }),
+  }),
+});
+
+builder.objectType("ActiveResearch", {
+  fields: (t) => ({
+    modelIds: t.field({
+      type: ["String"],
+      resolve: (r) => r.modelIds,
+    }),
+    batch: t.field({
+      type: BatchProgressRef,
+      nullable: true,
+      resolve: (r) => r.batch,
+    }),
+  }),
 });
 
 builder.objectType("SamplingPreset", {
@@ -221,6 +271,14 @@ builder.queryType({
         return list.map((m) => mergeModelMeta(m, byId.get(m.id) ?? undefined));
       },
     }),
+
+    activeResearch: t.field({
+      type: "ActiveResearch",
+      resolve: () => ({
+        modelIds: researchTracker.getActiveModelIds(),
+        batch: researchTracker.getBatch(),
+      }),
+    }),
   }),
 });
 
@@ -286,6 +344,18 @@ builder.subscriptionType({
         }
       },
       resolve: (payload) => payload,
+    }),
+
+    modelResearchUpdated: t.field({
+      type: "ModelResearchUpdate",
+      subscribe: async function* (_root, _args, ctx) {
+        for await (const update of ctx.pubsub.subscribe(
+          "modelResearchUpdated",
+        )) {
+          yield update;
+        }
+      },
+      resolve: (payload: ModelResearchUpdatePayload) => payload,
     }),
   }),
 });

@@ -3,8 +3,24 @@ import type { PrismaClient } from "@prisma/client";
 import type { JobSummary, JobDetail } from "../services/job-shapes.ts";
 import type { ModelWire, PresetWire, PriceWire } from "../models-meta.ts";
 import type { pubsub } from "./pubsub.ts";
+import type {
+  ModelResearchUpdatePayload,
+  BatchProgressWire,
+} from "./research-tracker.ts";
 
-export type { ModelWire, PresetWire, PriceWire };
+type ActiveResearchWire = {
+  modelIds: string[];
+  batch: BatchProgressWire | null;
+};
+
+export type {
+  ModelWire,
+  PresetWire,
+  PriceWire,
+  ActiveResearchWire,
+  ModelResearchUpdatePayload,
+  BatchProgressWire,
+};
 
 export interface Context {
   prisma: PrismaClient;
@@ -20,6 +36,9 @@ export const builder = new SchemaBuilder<{
     Model: ModelWire;
     SamplingPreset: PresetWire;
     ModelPrice: PriceWire;
+    BatchProgress: BatchProgressWire;
+    ModelResearchUpdate: ModelResearchUpdatePayload;
+    ActiveResearch: ActiveResearchWire;
   };
   Scalars: {
     /** ISO 8601 date string. */
