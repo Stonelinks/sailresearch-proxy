@@ -51,12 +51,14 @@ describe("parseAndValidatePiOutput", () => {
   });
 
   test("rejects invalid JSON", () => {
-    expect(() => parseAndValidatePiOutput("not json")).toThrow("Invalid JSON");
+    expect(() => parseAndValidatePiOutput("not json")).toThrow(
+      "No JSON object found",
+    );
   });
 
   test("rejects non-object JSON", () => {
     expect(() => parseAndValidatePiOutput("[]")).toThrow(
-      "Expected a JSON object",
+      "No JSON object found",
     );
   });
 
@@ -282,6 +284,17 @@ describe("parseAndValidatePiOutput", () => {
       JSON.stringify({ thinkingLevelMap: "oops" }),
     );
     expect(result.thinkingLevelMap).toBeNull();
+  });
+
+  test("extracts JSON from LLM output with text before the object", () => {
+    const result = parseAndValidatePiOutput(
+      'Here is the data.{{"contextSize": 8192, "reasoning": false}}'.replace(
+        "{{",
+        "{",
+      ),
+    );
+    expect(result.contextSize).toBe(8192);
+    expect(result.reasoning).toBe(false);
   });
 });
 

@@ -151,9 +151,14 @@ function validateThinkingLevelMap(
  * ModelResearchResult. Throws with a descriptive message on validation failure.
  */
 export function parseAndValidatePiOutput(raw: string): ModelResearchResult {
+  const jsonStr = extractJson(raw);
+  if (!jsonStr) {
+    throw new Error(`No JSON object found in pi output: ${raw.slice(0, 200)}`);
+  }
+
   let parsed: unknown;
   try {
-    parsed = JSON.parse(raw);
+    parsed = JSON.parse(jsonStr);
   } catch (e) {
     throw new Error(`Invalid JSON: ${(e as Error).message}`);
   }
