@@ -7,10 +7,16 @@
  *   and shares results across all models, runs pi research in parallel with
  *   a concurrency limit. Used by `researchAllModels` mutation.
  */
-import { runPiResearch, upsertModelMeta } from "../research-models.ts";
+import {
+  runPiResearch,
+  upsertModelMeta,
+  smokeTestPresets,
+  type SmokeTestResult,
+} from "../research-models.ts";
 import { scrapeModelCapabilities, scrapePricing } from "../docs-scraper.ts";
 import { log } from "../../shared/logger.ts";
-import type { ModelPriceInput } from "../types.ts";
+import type { ModelPriceInput, SamplingPresetInput } from "../types.ts";
+import { researchTracker } from "./research-tracker.ts";
 
 // ─── Shared scraped data ─────────────────────────────────────────────────────
 
@@ -56,8 +62,16 @@ async function scrapeDocs(): Promise<ScrapedData> {
  * Used by the `refetchModel` mutation.
  */
 export async function researchAndUpsertOne(modelId: string): Promise<void> {
-  const scraped = await scrapeDocs();
-  await researchOneWithScrapedData(modelId, scraped);
+  researchTracker.startModel(modelId);
+  try {
+    const scraped = await scrapeDocs();
+    await researchOneWithScrapedData(modelId, scraped);
+    researchTracker.completeModel(modelId);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    researchTracker.failModel(modelId, msg);
+    throw err;
+  }
 }
 
 // ─── Batch research ─────────────────────────────────────────────────────────
@@ -72,12 +86,24 @@ export async function researchAndUpsertOne(modelId: string): Promise<void> {
 export async function researchAndUpsertMany(
   modelIds: string[],
 ): Promise<Array<{ modelId: string; error: string }>> {
+  researchTracker.startBatch(modelIds);
   const scraped = await scrapeDocs();
   const errors: Array<{ modelId: string; error: string }> = [];
 
   // Fire all research calls concurrently
   const results = await Promise.allSettled(
-    modelIds.map((modelId) => researchOneWithScrapedData(modelId, scraped)),
+    modelIds.map((modelId) => {
+      researchTracker.startModel(modelId);
+      return researchOneWithScrapedData(modelId, scraped)
+        .then(() => {
+          researchTracker.completeModel(modelId);
+        })
+        .catch((err) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          researchTracker.failModel(modelId, msg);
+          throw err;
+        });
+    }),
   );
 
   for (let i = 0; i < results.length; i++) {
@@ -93,6 +119,7 @@ export async function researchAndUpsertMany(
     }
   }
 
+  // Batch is auto-ended by completeModel/failModel when all are accounted for
   return errors;
 }
 
@@ -103,6 +130,10 @@ async function researchOneWithScrapedData(
   scraped: ScrapedData,
 ): Promise<void> {
   log.info(`[research-runner] researching ${modelId}`);
+
+  // Wipe old model data before re-researching — clean slate
+  const { prisma } = await import("../db.ts");
+  await prisma.modelMeta.deleteMany({ where: { modelId } });
 
   // Run pi research for contextSize, samplingPresets, description, source
   const result = await runPiResearch(modelId);
@@ -124,8 +155,77 @@ async function researchOneWithScrapedData(
     }
   }
 
+  // Smoke test presets through the proxy
+  const smokeResults = await runSmokeTestsWithFallback(
+    modelId,
+    result.samplingPresets,
+    result.thinkingLevelMap,
+  );
+
+  // Filter out presets that failed the base-param smoke test
+  const failedPresetNames = new Set<string>();
+  const failedThinkingLevels = new Set<string>();
+
+  for (const sr of smokeResults) {
+    if (sr.ok) continue;
+    if (sr.thinkingLevel !== null) {
+      failedThinkingLevels.add(sr.thinkingLevel);
+      log.warn(
+        `[research-runner] smoke test FAILED: ${modelId} preset="${sr.presetName}" thinkingLevel=${sr.thinkingLevel} — ${sr.error}`,
+      );
+    } else {
+      failedPresetNames.add(sr.presetName);
+      log.warn(
+        `[research-runner] smoke test FAILED: ${modelId} preset="${sr.presetName}" base params — ${sr.error}`,
+      );
+    }
+  }
+
+  if (failedPresetNames.size > 0) {
+    result.samplingPresets = result.samplingPresets.filter(
+      (p) => !failedPresetNames.has(p.name),
+    );
+    log.info(
+      `[research-runner] removed ${failedPresetNames.size} failed presets from ${modelId}: ${[...failedPresetNames].join(", ")}`,
+    );
+  }
+
+  // Remove thinking levels that failed (but the preset base params were ok)
+  if (result.thinkingLevelMap && failedThinkingLevels.size > 0) {
+    for (const level of failedThinkingLevels) {
+      if (level in result.thinkingLevelMap) {
+        result.thinkingLevelMap[level] = null;
+        log.info(
+          `[research-runner] disabled thinking level "${level}" for ${modelId}`,
+        );
+      }
+    }
+  }
+
   await upsertModelMeta(modelId, result);
   log.info(
     `[research-runner] upserted ${modelId} contextSize=${result.contextSize} presets=${result.samplingPresets.length} supportsImage=${result.supportsImage} reasoning=${result.reasoning}`,
   );
+}
+
+/**
+ * Run smoke tests for presets, but skip gracefully if the proxy is
+ * unreachable. Returns empty array (no failures) on connection error
+ * so research can proceed — smoke tests are a validation step, not
+ * a gatekeeper.
+ */
+async function runSmokeTestsWithFallback(
+  modelId: string,
+  presets: SamplingPresetInput[],
+  thinkingLevelMap: Record<string, string | null> | null,
+): Promise<SmokeTestResult[]> {
+  try {
+    return await smokeTestPresets(modelId, presets, thinkingLevelMap);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    log.warn(
+      `[research-runner] smoke tests skipped for ${modelId} (proxy unreachable?): ${msg}`,
+    );
+    return [];
+  }
 }
