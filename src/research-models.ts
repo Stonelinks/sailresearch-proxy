@@ -16,6 +16,8 @@ import {
 } from "./types.ts";
 import { runPiPrompt } from "./pi-session.ts";
 import { extractJson } from "../shared/extract-json.ts";
+import { log } from "../shared/logger.ts";
+import { config } from "./config.ts";
 
 // ─── Validation ─────────────────────────────────────────────────────────────
 
@@ -299,6 +301,149 @@ export async function runPiResearch(
   }
 
   return parseAndValidatePiOutput(jsonStr);
+}
+
+// ─── Smoke test presets ────────────────────────────────────────────────────
+
+export interface SmokeTestResult {
+  presetName: string;
+  thinkingLevel: string | null;
+  ok: boolean;
+  error?: string;
+}
+
+/**
+ * Smoke test a single preset + optional thinking level by sending a "hi"
+ * prompt through the proxy's /v1/chat/completions endpoint.
+ */
+export async function smokeTestPreset(
+  modelId: string,
+  params: Record<string, SamplingParamValue>,
+  thinkingLevel: string | null = null,
+): Promise<SmokeTestResult> {
+  const url = `http://127.0.0.1:${config.server.port}/v1/chat/completions`;
+
+  const body: Record<string, unknown> = {
+    model: modelId,
+    messages: [{ role: "user", content: "hi" }],
+    ...params,
+  };
+
+  if (thinkingLevel) {
+    body.reasoning_effort = thinkingLevel;
+  }
+
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      let errorDetail: string;
+      try {
+        const errBody = (await res.json()) as any;
+        errorDetail =
+          errBody?.error?.message ??
+          JSON.stringify(errBody)?.slice(0, 200) ??
+          res.statusText;
+      } catch {
+        errorDetail = `${res.status} ${res.statusText}`;
+      }
+      return {
+        presetName: "",
+        thinkingLevel,
+        ok: false,
+        error: errorDetail,
+      };
+    }
+
+    const data = (await res.json()) as any;
+    const content =
+      data?.choices?.[0]?.message?.content ?? data?.output?.[0]?.text ?? "";
+    const trimmed = typeof content === "string" ? content.trim() : "";
+
+    if (trimmed.length === 0) {
+      return {
+        presetName: "",
+        thinkingLevel,
+        ok: false,
+        error: "empty response content",
+      };
+    }
+
+    return {
+      presetName: "",
+      thinkingLevel,
+      ok: true,
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return {
+      presetName: "",
+      thinkingLevel,
+      ok: false,
+      error: msg,
+    };
+  }
+}
+
+/**
+ * Find the highest non-null thinking level value from a thinkingLevelMap.
+ * Returns null if no valid level found.
+ */
+function highestThinkingLevel(
+  thinkingLevelMap: Record<string, string | null>,
+): string | null {
+  // Check levels from highest to lowest
+  for (const level of ["xhigh", "high", "medium", "low", "minimal"] as const) {
+    const value = thinkingLevelMap[level];
+    if (value !== undefined && value !== null) {
+      return level;
+    }
+  }
+  return null;
+}
+
+/**
+ * Smoke test all presets for a model. For each preset, tests base params
+ * and (for reasoning models) one thinking level. Returns results for each
+ * combination, with presetName filled in.
+ *
+ * Runs sequentially to avoid overwhelming Sail.
+ */
+export async function smokeTestPresets(
+  modelId: string,
+  presets: SamplingPresetInput[],
+  thinkingLevelMap: Record<string, string | null> | null,
+): Promise<SmokeTestResult[]> {
+  const results: SmokeTestResult[] = [];
+
+  // Pick the highest available thinking level to test with
+  const testThinkingLevel = thinkingLevelMap
+    ? highestThinkingLevel(thinkingLevelMap)
+    : null;
+
+  for (const preset of presets) {
+    // Test base params (no thinking level)
+    const baseResult = await smokeTestPreset(modelId, preset.params, null);
+    baseResult.presetName = preset.name;
+    results.push(baseResult);
+
+    // For reasoning models, also test with a thinking level
+    if (testThinkingLevel) {
+      const thinkResult = await smokeTestPreset(
+        modelId,
+        preset.params,
+        testThinkingLevel,
+      );
+      thinkResult.presetName = preset.name;
+      results.push(thinkResult);
+    }
+  }
+
+  return results;
 }
 
 // ─── Upsert model metadata ─────────────────────────────────────────────────

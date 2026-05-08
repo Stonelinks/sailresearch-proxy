@@ -1,5 +1,17 @@
-import { describe, test, expect } from "bun:test";
-import { parseAndValidatePiOutput } from "./research-models.ts";
+import { describe, test, expect, mock, beforeAll, beforeEach } from "bun:test";
+import {
+  parseAndValidatePiOutput,
+  smokeTestPreset,
+  smokeTestPresets,
+} from "./research-models.ts";
+import type { SamplingPresetInput } from "./types.ts";
+
+// Set required env vars before any imports that use config
+beforeAll(() => {
+  if (!process.env.SAIL_API_KEY) {
+    process.env.SAIL_API_KEY = "test-key";
+  }
+});
 
 describe("parseAndValidatePiOutput", () => {
   test("parses valid complete output", () => {
@@ -270,5 +282,230 @@ describe("parseAndValidatePiOutput", () => {
       JSON.stringify({ thinkingLevelMap: "oops" }),
     );
     expect(result.thinkingLevelMap).toBeNull();
+  });
+});
+
+// ─── Smoke test preset tests ──────────────────────────────────────────────────
+
+describe("smokeTestPreset", () => {
+  const originalFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  test("returns ok:true on 200 response with content", async () => {
+    globalThis.fetch = mock(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: { content: "Hello!" },
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    ) as any;
+
+    const result = await smokeTestPreset("test-model", {
+      temperature: 0.7,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.thinkingLevel).toBeNull();
+  });
+
+  test("returns ok:false on non-2xx response", async () => {
+    globalThis.fetch = mock(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            error: { message: "Invalid temperature value" },
+          }),
+          { status: 400, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    ) as any;
+
+    const result = await smokeTestPreset("test-model", {
+      temperature: "creative",
+    });
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("Invalid temperature value");
+  });
+
+  test("returns ok:false on fetch error", async () => {
+    globalThis.fetch = mock(() =>
+      Promise.reject(new Error("Connection refused")),
+    ) as any;
+
+    const result = await smokeTestPreset("test-model", {});
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("Connection refused");
+  });
+
+  test("sends reasoning_effort when thinkingLevel is provided", async () => {
+    let capturedBody: any;
+    globalThis.fetch = mock((_url: any, opts: any) => {
+      capturedBody = JSON.parse(opts.body);
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: "Thinking..." } }],
+          }),
+          { status: 200 },
+        ),
+      );
+    }) as any;
+
+    const result = await smokeTestPreset(
+      "test-model",
+      { temperature: 0.5 },
+      "high",
+    );
+    expect(result.ok).toBe(true);
+    expect(capturedBody.reasoning_effort).toBe("high");
+    expect(capturedBody.model).toBe("test-model");
+    expect(capturedBody.temperature).toBe(0.5);
+  });
+
+  test("returns ok:false on empty response content", async () => {
+    globalThis.fetch = mock(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: "" } }],
+          }),
+          { status: 200 },
+        ),
+      ),
+    ) as any;
+
+    const result = await smokeTestPreset("test-model", {});
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("empty response content");
+  });
+});
+
+describe("smokeTestPresets", () => {
+  const originalFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const defaultPreset: SamplingPresetInput = {
+    name: "default",
+    description: "General purpose",
+    params: { temperature: 0.7, top_p: 0.95 },
+  };
+  const codingPreset: SamplingPresetInput = {
+    name: "coding",
+    description: "Coding tasks",
+    params: { temperature: 0.2, top_p: 0.9 },
+  };
+
+  test("filters out failing presets and keeps passing ones", async () => {
+    let callCount = 0;
+    globalThis.fetch = mock(() => {
+      callCount++;
+      // First preset passes, second fails
+      if (callCount === 1) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              choices: [{ message: { content: "Hi!" } }],
+            }),
+            { status: 200 },
+          ),
+        );
+      }
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            error: { message: "Bad params" },
+          }),
+          { status: 400 },
+        ),
+      );
+    }) as any;
+
+    const results = await smokeTestPresets(
+      "test-model",
+      [defaultPreset, codingPreset],
+      null,
+    );
+
+    expect(results).toHaveLength(2);
+    expect(results[0]!.presetName).toBe("default");
+    expect(results[0]!.ok).toBe(true);
+    expect(results[1]!.presetName).toBe("coding");
+    expect(results[1]!.ok).toBe(false);
+  });
+
+  test("removes thinking level from thinkingLevelMap when it fails but base params pass", async () => {
+    let callCount = 0;
+    globalThis.fetch = mock(() => {
+      callCount++;
+      // Base params (call 1) pass, thinking level (call 2) fails
+      if (callCount === 1) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              choices: [{ message: { content: "Hi!" } }],
+            }),
+            { status: 200 },
+          ),
+        );
+      }
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            error: { message: "Reasoning not supported" },
+          }),
+          { status: 400 },
+        ),
+      );
+    }) as any;
+
+    const results = await smokeTestPresets("test-model", [defaultPreset], {
+      off: null,
+      minimal: null,
+      low: "low",
+      medium: "medium",
+      high: "high",
+      xhigh: null,
+    });
+
+    // Should have 2 results: base params + thinking level
+    expect(results).toHaveLength(2);
+    expect(results[0]!.thinkingLevel).toBeNull();
+    expect(results[0]!.ok).toBe(true);
+    expect(results[1]!.thinkingLevel).toBe("high");
+    expect(results[1]!.ok).toBe(false);
+  });
+
+  test("returns empty results for all-failing presets", async () => {
+    globalThis.fetch = mock(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            error: { message: "Invalid model" },
+          }),
+          { status: 400 },
+        ),
+      ),
+    ) as any;
+
+    const results = await smokeTestPresets(
+      "bad-model",
+      [defaultPreset, codingPreset],
+      null,
+    );
+
+    expect(results).toHaveLength(2);
+    expect(results.every((r) => !r.ok)).toBe(true);
   });
 });
