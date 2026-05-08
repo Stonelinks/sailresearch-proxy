@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import { graphql } from "$houdini";
   import {
     shortOwner,
@@ -7,10 +7,53 @@
     formatPriceFrom,
   } from "../format";
   import { log } from "$shared/logger.ts";
+  import { onWsConnected } from "../lib/houdini-client";
 
   let search = $state("");
-  let refetchingId = $state<string | null>(null);
-  let researchingAll = $state(false);
+
+  // ── Research state (server-synced) ──────────────────────────────────────
+  let researchingIds = $state<Set<string>>(new Set());
+
+  type BatchProgress = {
+    id: string;
+    total: number;
+    completed: number;
+    errors: number;
+  } | null;
+
+  let batchProgress = $state<BatchProgress>(null);
+
+  const ActiveResearch = graphql(`
+    query ActiveResearch {
+      activeResearch {
+        modelIds
+        batch {
+          id
+          total
+          completed
+          errors
+        }
+      }
+    }
+  `);
+
+  const ModelResearchUpdated = graphql(`
+    subscription ModelResearchUpdates {
+      modelResearchUpdated {
+        modelId
+        status
+        error
+        batch {
+          id
+          total
+          completed
+          errors
+        }
+      }
+    }
+  `);
+
+  // ── Models query & mutations ────────────────────────────────────────────
 
   const Models = graphql(`
     query ModelsList {
@@ -108,8 +151,15 @@
       : models,
   );
 
+  // True when any research is happening (per-model or batch)
+  let anyResearching = $derived(researchingIds.size > 0);
+
+  let researchAllLabel = $derived(() => {
+    if (!batchProgress) return "Research All";
+    return `Researching ${batchProgress.completed + batchProgress.errors}/${batchProgress.total}…`;
+  });
+
   async function refetchOne(modelId: string) {
-    refetchingId = modelId;
     try {
       log.debug("Refetching model", modelId);
       const result = await RefetchModel.mutate({ modelId });
@@ -119,13 +169,12 @@
       } else {
         log.debug("Refetched", modelId);
       }
-    } finally {
-      refetchingId = null;
+    } catch (err) {
+      log.error("Refetch failed:", err);
     }
   }
 
   async function researchAll() {
-    researchingAll = true;
     try {
       log.debug("Researching all models");
       const result = await ResearchAllModels.mutate({});
@@ -135,13 +184,63 @@
       } else {
         log.debug("Researched all models");
       }
-    } finally {
-      researchingAll = false;
+    } catch (err) {
+      log.error("Research all failed:", err);
     }
   }
 
+  // ── Lifecycle ───────────────────────────────────────────────────────────
+
+  async function loadResearchState() {
+    await ActiveResearch.fetch();
+    const data = $ActiveResearch.data?.activeResearch;
+    if (data) {
+      researchingIds = new Set(data.modelIds);
+      batchProgress = data.batch ?? null;
+    }
+  }
+
+  // Apply subscription updates
+  $effect(() => {
+    const update = $ModelResearchUpdated.data?.modelResearchUpdated;
+    if (!update) return;
+
+    const ids = untrack(() => researchingIds);
+    const newIds = new Set(ids);
+
+    if (update.status === "started") {
+      newIds.add(update.modelId);
+    } else {
+      // "completed" or "failed" — remove from active set
+      newIds.delete(update.modelId);
+      // On completion, refetch models to get fresh data
+      Models.fetch();
+    }
+
+    researchingIds = newIds;
+    batchProgress = update.batch ?? null;
+  });
+
   onMount(() => {
     Models.fetch();
+    loadResearchState();
+    ModelResearchUpdated.listen();
+
+    let firstConnect = true;
+    const offWs = onWsConnected(() => {
+      if (firstConnect) {
+        firstConnect = false;
+        return;
+      }
+      log.debug("WS reconnected, resyncing research state");
+      loadResearchState();
+      Models.fetch();
+    });
+
+    return () => {
+      offWs();
+      ModelResearchUpdated.unlisten();
+    };
   });
 </script>
 
@@ -159,10 +258,10 @@
       />
       <button
         onclick={researchAll}
-        disabled={researchingAll}
+        disabled={anyResearching}
         class="text-sm px-3 py-1.5 rounded border border-slate-200 text-slate-500 hover:text-slate-700 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors"
       >
-        {researchingAll ? "Researching…" : "Research All"}
+        {researchAllLabel()}
       </button>
     </div>
   </div>
@@ -203,7 +302,9 @@
                 >
                   <td class="px-4 py-2.5 font-mono text-xs text-slate-800 group-hover:text-slate-900">
                     {model.id}
-                    {#if model.contextSize === null}
+                    {#if researchingIds.has(model.id)}
+                      <span class="ml-1.5 inline-block text-[10px] font-sans font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded px-1.5 py-0.5">Researching…</span>
+                    {:else if model.contextSize === null}
                       <span class="ml-1.5 inline-block text-[10px] font-sans font-medium text-amber-600 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">Not researched</span>
                     {/if}
                   </td>
@@ -246,10 +347,10 @@
                   <td class="px-4 py-2.5 text-right">
                     <button
                       onclick={(e: MouseEvent) => { e.stopPropagation(); refetchOne(model.id); }}
-                      disabled={refetchingId === model.id}
+                      disabled={researchingIds.has(model.id)}
                       class="text-xs px-2 py-1 rounded border border-slate-200 text-slate-500 hover:text-slate-700 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                     >
-                      {refetchingId === model.id ? "Refetching…" : "Refetch"}
+                      {researchingIds.has(model.id) ? "Researching…" : "Refetch"}
                     </button>
                   </td>
                 </tr>

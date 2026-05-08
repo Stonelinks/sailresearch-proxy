@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import { graphql } from "$houdini";
   import {
     shortOwner,
@@ -8,6 +8,7 @@
     formatPriceFrom,
   } from "../format";
   import { log } from "$shared/logger.ts";
+  import { onWsConnected } from "../lib/houdini-client";
 
   import JsonBlock from "../components/JsonBlock.svelte";
 
@@ -20,7 +21,41 @@
   };
 
   let { params }: { params: { id: string } } = $props();
-  let refetching = $state(false);
+
+  // ── Research state (server-synced) ──────────────────────────────────────
+  let researchingIds = $state<Set<string>>(new Set());
+
+  const ActiveResearch = graphql(`
+    query ActiveResearchDetail {
+      activeResearch {
+        modelIds
+        batch {
+          id
+          total
+          completed
+          errors
+        }
+      }
+    }
+  `);
+
+  const ModelResearchUpdated = graphql(`
+    subscription ModelResearchUpdatesDetail {
+      modelResearchUpdated {
+        modelId
+        status
+        error
+        batch {
+          id
+          total
+          completed
+          errors
+        }
+      }
+    }
+  `);
+
+  // ── Model query & mutation ──────────────────────────────────────────────
 
   const ModelQ = graphql(`
     query ModelDetail($id: ID!) {
@@ -79,6 +114,8 @@
   let loading = $derived($ModelQ.fetching);
   let error = $derived($ModelQ.errors?.[0]?.message ?? "");
 
+  let isResearching = $derived(researchingIds.has(params.id));
+
   type PriceRow = {
     completionWindow: string;
     inputPerMTok: number;
@@ -110,8 +147,15 @@
     await ModelQ.fetch({ variables: { id: params.id } });
   }
 
+  async function loadResearchState() {
+    await ActiveResearch.fetch();
+    const data = $ActiveResearchDetail.data?.activeResearch;
+    if (data) {
+      researchingIds = new Set(data.modelIds);
+    }
+  }
+
   async function refetch() {
-    refetching = true;
     try {
       log.debug("Refetching model", params.id);
       const result = await RefetchModel.mutate({ modelId: params.id });
@@ -121,13 +165,53 @@
       } else {
         log.debug("Refetched", params.id);
       }
-    } finally {
-      refetching = false;
+    } catch (err) {
+      log.error("Refetch failed:", err);
     }
   }
 
+  // Apply subscription updates
+  $effect(() => {
+    const update = $ModelResearchUpdated.data?.modelResearchUpdated;
+    if (!update) return;
+
+    const ids = untrack(() => researchingIds);
+    const newIds = new Set(ids);
+
+    if (update.status === "started") {
+      newIds.add(update.modelId);
+    } else {
+      // "completed" or "failed"
+      newIds.delete(update.modelId);
+      // If this model completed, refetch its data
+      if (update.modelId === untrack(() => params.id)) {
+        load();
+      }
+    }
+
+    researchingIds = newIds;
+  });
+
   onMount(() => {
     load();
+    loadResearchState();
+    ModelResearchUpdated.listen();
+
+    let firstConnect = true;
+    const offWs = onWsConnected(() => {
+      if (firstConnect) {
+        firstConnect = false;
+        return;
+      }
+      log.debug("WS reconnected, resyncing research state");
+      loadResearchState();
+      load();
+    });
+
+    return () => {
+      offWs();
+      ModelResearchUpdated.unlisten();
+    };
   });
 
   // Re-fetch when navigating to a different model
@@ -170,7 +254,9 @@
       <div>
         <div class="flex items-center gap-3 mb-1">
           <h1 class="text-xl font-semibold font-mono text-slate-900">{model.id}</h1>
-          {#if model.supportsImage}
+          {#if isResearching}
+            <span class="inline-block text-xs font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded px-2 py-0.5">Researching…</span>
+          {:else if model.supportsImage}
             <span class="inline-block text-xs font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded px-2 py-0.5">📷 Image</span>
           {/if}
         </div>
@@ -180,10 +266,10 @@
       </div>
       <button
         onclick={refetch}
-        disabled={refetching}
+        disabled={isResearching}
         class="text-sm px-3 py-1.5 rounded border border-slate-200 text-slate-500 hover:text-slate-700 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors"
       >
-        {refetching ? "Refetching…" : "↻ Refetch"}
+        {isResearching ? "Researching…" : "↻ Refetch"}
       </button>
     </div>
 
