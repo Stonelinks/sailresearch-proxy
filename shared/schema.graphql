@@ -1,7 +1,14 @@
-"""
-Indicates exactly one field must be supplied and this field must not be `null`.
-"""
-directive @oneOf on INPUT_OBJECT
+type ActiveResearch {
+  batch: BatchProgress
+  modelIds: [String!]!
+}
+
+type BatchProgress {
+  completed: Int!
+  errors: Int!
+  id: String!
+  total: Int!
+}
 
 scalar DateTime
 
@@ -78,16 +85,30 @@ type ModelPrice {
   outputPerMTok: Float!
 }
 
+type ModelResearchUpdate {
+  batch: BatchProgress
+  error: String
+  modelId: String!
+  status: ResearchUpdateStatus!
+}
+
 type Mutation {
   refetchModel(modelId: ID!): Model!
   researchAllModels: [Model!]!
 }
 
 type Query {
+  activeResearch: ActiveResearch!
   job(id: ID!): JobDetail
   jobs(limit: Int = 50, offset: Int = 0, status: JobStatus): JobsResult!
   model(id: ID!): Model
   models: [Model!]!
+}
+
+enum ResearchUpdateStatus {
+  completed
+  failed
+  started
 }
 
 type SamplingPreset {
@@ -98,4 +119,5 @@ type SamplingPreset {
 
 type Subscription {
   jobUpdated(id: ID): Job!
+  modelResearchUpdated: ModelResearchUpdate!
 }
