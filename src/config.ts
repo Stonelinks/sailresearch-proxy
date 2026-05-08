@@ -64,6 +64,7 @@ export const config = {
   },
   logging: {
     level: env("LOG_LEVEL", "info"),
+    dir: env("LOG_DIR", "data/logs"),
   },
   proxyApiKey: env("PROXY_API_KEY", ""),
 };

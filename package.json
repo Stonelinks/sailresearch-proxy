@@ -29,6 +29,7 @@
     "graphql": "^16.13.2",
     "graphql-ws": "^6.0.8",
     "graphql-yoga": "^5.21.0",
-    "prisma": "^6"
+    "prisma": "^6",
+    "winston": "^3.19.0"
   }
 }

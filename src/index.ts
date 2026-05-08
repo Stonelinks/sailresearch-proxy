@@ -1,7 +1,13 @@
 import { PrismaClient } from "@prisma/client";
 import { TERMINAL_STATUSES } from "./constants.ts";
-import { log } from "../shared/logger.ts";
+import { log, initFileLogging, closeFileLogging } from "../shared/logger.ts";
 import { createApp } from "./app.ts";
+import { config } from "./config.ts";
+import fs from "node:fs";
+
+// Initialize file logging before anything else
+fs.mkdirSync(config.logging.dir, { recursive: true });
+initFileLogging(config.logging.dir);
 
 // Run migrations / ensure DB schema
 const migrateResult = Bun.spawnSync(
@@ -30,6 +36,7 @@ const app = createApp(prisma);
 
 // Graceful shutdown
 async function shutdown() {
+  closeFileLogging();
   await app.stop();
   process.exit(0);
 }

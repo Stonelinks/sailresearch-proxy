@@ -9,6 +9,7 @@ PROJECT_ROOT=$(pwd)
 export PROJECT_ROOT
 
 export DATABASE_URL="file:$PROJECT_ROOT/data/proxy.db"
+export LOG_DIR="$PROJECT_ROOT/data/logs"
 
 chmod +x $PROJECT_ROOT/bin/* 2>/dev/null
 PATH=$PROJECT_ROOT/bin:$PATH

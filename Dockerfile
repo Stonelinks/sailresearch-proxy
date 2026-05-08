@@ -30,6 +30,7 @@ COPY --from=build /app/entrypoint.sh ./
 RUN chmod +x entrypoint.sh
 
 ENV DATABASE_URL=file:/app/data/proxy.db
+ENV LOG_DIR=/app/data/logs
 VOLUME /app/data
 EXPOSE 4000
 

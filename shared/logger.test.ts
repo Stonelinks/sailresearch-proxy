@@ -1,5 +1,14 @@
-import { describe, test, expect, spyOn, afterEach } from "bun:test";
-import { log, setLogLevel, getLogLevel } from "./logger.ts";
+import { describe, test, expect, spyOn, afterEach, beforeEach } from "bun:test";
+import {
+  log,
+  setLogLevel,
+  getLogLevel,
+  initFileLogging,
+  closeFileLogging,
+} from "./logger.ts";
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
 
 describe("logger", () => {
   const original = getLogLevel();
@@ -169,5 +178,86 @@ import('${import.meta.dir}/logger.ts').then(m => {
     expect(getLogLevel()).toBe("error");
     setLogLevel("debug");
     expect(getLogLevel()).toBe("debug");
+  });
+});
+
+describe("file logging", () => {
+  const original = getLogLevel();
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "logger-test-"));
+    setLogLevel("debug");
+  });
+
+  afterEach(() => {
+    closeFileLogging();
+    setLogLevel(original);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test("initFileLogging writes to a file", async () => {
+    initFileLogging(tmpDir);
+    log.info("hello from test");
+    log.error("oh no");
+    // Winston buffers — give it a moment to flush
+    await new Promise((r) => setTimeout(r, 200));
+    closeFileLogging();
+
+    const logPath = path.join(tmpDir, "proxy.log");
+    expect(fs.existsSync(logPath)).toBe(true);
+    const contents = fs.readFileSync(logPath, "utf-8");
+    expect(contents).toContain("hello from test");
+    expect(contents).toContain("oh no");
+    expect(contents).toContain("[INFO]");
+    expect(contents).toContain("[ERROR]");
+    // Human-readable timestamp format
+    expect(contents).toMatch(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}/);
+  });
+
+  test("initFileLogging does not affect console output", () => {
+    initFileLogging(tmpDir);
+    const out = spyOn(console, "log").mockImplementation(() => {});
+    const err = spyOn(console, "error").mockImplementation(() => {});
+
+    log.info("console still works");
+    log.warn("warn too");
+
+    expect(out).toHaveBeenCalledTimes(1);
+    expect(err).toHaveBeenCalledTimes(1);
+
+    out.mockRestore();
+    err.mockRestore();
+  });
+
+  test("closeFileLogging stops writing to file", async () => {
+    initFileLogging(tmpDir);
+    log.info("before close");
+    await new Promise((r) => setTimeout(r, 200));
+    closeFileLogging();
+
+    log.info("after close");
+    await new Promise((r) => setTimeout(r, 200));
+
+    const contents = fs.readFileSync(path.join(tmpDir, "proxy.log"), "utf-8");
+    expect(contents).toContain("before close");
+    expect(contents).not.toContain("after close");
+  });
+
+  test("respects log level filtering", async () => {
+    setLogLevel("warn");
+    initFileLogging(tmpDir);
+    log.debug("should be suppressed");
+    log.info("also suppressed");
+    log.warn("this appears");
+    log.error("this too");
+    await new Promise((r) => setTimeout(r, 200));
+    closeFileLogging();
+
+    const contents = fs.readFileSync(path.join(tmpDir, "proxy.log"), "utf-8");
+    expect(contents).not.toContain("should be suppressed");
+    expect(contents).not.toContain("also suppressed");
+    expect(contents).toContain("this appears");
+    expect(contents).toContain("this too");
   });
 });

@@ -87,6 +87,29 @@ Production startup should run `bunx prisma migrate deploy` (apply committed migr
 - Don't pass `--accept-data-loss` to silence a `db push` warning. That's the signal to write a migration instead.
 - Don't hand-edit `prisma/migrations/` after the migration has been committed/applied.
 
+## Logging
+
+All logs go to both the console and a file. The file logger is initialized at startup in `src/index.ts`.
+
+- **Log file:** `$LOG_DIR/proxy.log` (default `data/logs/proxy.log`)
+- **Format (file):** `2026-05-07 21:39:58.218 [INFO] message` — human-readable with timestamps
+- **Format (console):** plain text, no timestamps (unchanged from before)
+- **Rotation:** files rotate at 100 MB (`proxy.log` → `proxy.log.1` → …), oldest deleted after 30 files (~3 GB cap)
+- **Config:** `LOG_DIR` env var (set in `env.sh` and `Dockerfile`), `LOG_LEVEL` controls verbosity
+
+### Debugging with logs
+
+When debugging a live copy on a custom port, tail the log file:
+
+```bash
+LOG_DIR=data/logs PORT=4100 bin/run   # in one terminal
+tail -f data/logs/proxy.log             # in another
+```
+
+The file captures everything the console does (at the current `LOG_LEVEL`), plus timestamps. Set `LOG_LEVEL=debug` to see request/response details from the Sail client.
+
+When running tests, logs go only to the console (file logging is not initialized in the test harness). Check `shared/logger.ts` for the `initFileLogging` / `closeFileLogging` API if you need file logging in a test.
+
 ## Frontend
 
 The frontend is a Svelte SPA in `frontend/` built with Vite + Tailwind. `svelte-spa-router` handles routing.
