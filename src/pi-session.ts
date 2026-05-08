@@ -2,9 +2,9 @@
  * Embedded pi SDK session helpers.
  *
  * Replaces the `pi` CLI subprocess with in-process SDK calls. Registers a
- * provider that always points at the local proxy, regardless of what
- * `~/.pi/agent/models.json` says — so research and scraping always go
- * through the proxy.
+ * provider with its own model definition pointing at the local proxy —
+ * so research and scraping always route through the proxy, and no
+ * ~/.pi/agent/models.json entry is required.
  *
  * Two modes:
  *   - `runPiPrompt(prompt)` — one-shot call using the default model
@@ -33,8 +33,7 @@ const DEFAULT_MODEL_ID = config.defaults.model;
 
 /**
  * Base URL for the local proxy's OpenAI-compatible endpoint.
- * The embedded pi SDK will hit this instead of whatever is in
- * ~/.pi/agent/models.json.
+ * The embedded pi SDK uses this as the provider's baseUrl.
  */
 const LOCAL_PROXY_BASE_URL = `http://127.0.0.1:${config.server.port}/v1`;
 
@@ -52,20 +51,38 @@ function getModelRegistry() {
   if (!_modelRegistry) {
     _modelRegistry = ModelRegistry.create(getAuthStorage());
 
-    // Override the sail-standard provider to always point at the local proxy,
-    // regardless of what ~/.pi/agent/models.json says. This ensures that
-    // embedded pi calls (research, scraping) always route through the proxy.
+    // Register the sail-standard provider with the default model pointing at
+    // the local proxy. This works even when ~/.pi/agent/models.json has no
+    // sail-standard entry (e.g. on a fresh deploy) because we include the
+    // model definition directly in the provider config.
+    //
+    // The pi SDK requires apiKey or oauth when models are provided. When the
+    // proxy requires an API key (PROXY_API_KEY is set), we pass it through so
+    // internal SDK calls authenticate correctly. When no key is configured
+    // (the default), we pass a dummy value to satisfy the SDK's validation —
+    // the proxy skips auth when proxyApiKey is empty, so the dummy is ignored.
+    const apiKey = config.proxyApiKey || "sail-proxy-internal";
     _modelRegistry.registerProvider(DEFAULT_PROVIDER, {
       baseUrl: LOCAL_PROXY_BASE_URL,
-      // No apiKey — the proxy doesn't require one for internal calls.
-      // The pi SDK will send a request with no Authorization header,
-      // and the proxy's parseRequest will accept it (proxyApiKey defaults
-      // to "" when PROXY_API_KEY is unset).
+      apiKey,
       api: "openai-completions",
+      models: [
+        {
+          id: DEFAULT_MODEL_ID,
+          name: DEFAULT_MODEL_ID,
+          api: "openai-completions",
+          baseUrl: LOCAL_PROXY_BASE_URL,
+          reasoning: false,
+          input: ["text"],
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+          contextWindow: 131072,
+          maxTokens: 16384,
+        },
+      ],
     });
 
     log.debug(
-      `[pi-session] registered ${DEFAULT_PROVIDER} → ${LOCAL_PROXY_BASE_URL}`,
+      `[pi-session] registered ${DEFAULT_PROVIDER} → ${LOCAL_PROXY_BASE_URL} with model ${DEFAULT_MODEL_ID}`,
     );
   }
   return _modelRegistry;
@@ -105,7 +122,7 @@ export async function runPiPrompt(prompt: string): Promise<string> {
   if (!model) {
     throw new Error(
       `Model ${DEFAULT_PROVIDER}/${DEFAULT_MODEL_ID} not found in pi model registry. ` +
-        `Ensure ~/.pi/agent/models.json has a "${DEFAULT_PROVIDER}" provider with this model.`,
+        `This should not happen — it is registered at startup. Check pi-session.ts.`,
     );
   }
 
@@ -147,7 +164,7 @@ export async function runPiPrompt(prompt: string): Promise<string> {
  * Send a one-shot prompt to a specific provider/model and return the raw text
  * response. Used by smoke tests that need to hit a particular provider+model.
  *
- * @param provider  Provider name from models.json (e.g. "sail-standard", "sail-flex")
+ * @param provider  Provider name (e.g. "sail-standard", "sail-flex")
  * @param modelId   Model ID within that provider (e.g. "zai-org/GLM-5.1-FP8")
  * @param prompt    The prompt text
  */
@@ -163,7 +180,7 @@ export async function runPiChat(
   if (!model) {
     throw new Error(
       `Model ${provider}/${modelId} not found in pi model registry. ` +
-        `Ensure ~/.pi/agent/models.json has a "${provider}" provider with this model.`,
+        `Ensure the pi model registry has a "${provider}" provider with model "${modelId}".`,
     );
   }
 
