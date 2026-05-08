@@ -9,6 +9,7 @@ import type { JobSummary } from "../services/job-shapes.ts";
 
 export type Events = {
   jobUpdated: JobSummary;
+  modelResearchUpdated: import("./research-tracker.ts").ModelResearchUpdatePayload;
 };
 
 class PubSub {
