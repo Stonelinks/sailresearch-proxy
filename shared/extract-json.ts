@@ -1,6 +1,9 @@
 /**
  * Extract a JSON object from raw LLM output.
- * Handles both raw JSON and markdown-fenced JSON.
+ * Handles:
+ *   - Raw JSON objects
+ *   - Markdown-fenced JSON (```json ... ```)
+ *   - Text before JSON on the same line or preceding lines
  *
  * Shared by research-models.ts and docs-scraper.ts.
  */
@@ -11,33 +14,27 @@ export function extractJson(raw: string): string | null {
     return fenceMatch[1].trim();
   }
 
-  // Try raw JSON object (first { ... } block)
-  const lines = raw.split("\n");
-  let start = -1;
-  let braceCount = 0;
-  const jsonLines: string[] = [];
+  // Find the first '{' character in the string (even if preceded by text
+  // on the same line), then track brace depth to find the matching '}'.
+  const firstBrace = raw.indexOf("{");
+  if (firstBrace === -1) return null;
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]!;
-    if (start === -1) {
-      if (line.trimStart().startsWith("{")) {
-        start = i;
-        braceCount += (line.match(/{/g) ?? []).length;
-        braceCount -= (line.match(/}/g) ?? []).length;
-        jsonLines.push(line);
-        if (braceCount === 0) break;
+  let braceCount = 0;
+  let end = -1;
+
+  for (let i = firstBrace; i < raw.length; i++) {
+    if (raw[i] === "{") {
+      braceCount++;
+    } else if (raw[i] === "}") {
+      braceCount--;
+      if (braceCount === 0) {
+        end = i;
+        break;
       }
-    } else {
-      braceCount += (line.match(/{/g) ?? []).length;
-      braceCount -= (line.match(/}/g) ?? []).length;
-      jsonLines.push(line);
-      if (braceCount === 0) break;
     }
   }
 
-  if (jsonLines.length > 0) {
-    return jsonLines.join("\n");
-  }
+  if (end === -1) return null;
 
-  return null;
+  return raw.slice(firstBrace, end + 1);
 }
