@@ -351,6 +351,15 @@ describe.skipIf(!hasApiKey)("integration: proxy + Sail API", () => {
       const res = await fetch(`${baseUrl}/v1/nonexistent`);
       expect(res.status).toBe(404);
     });
+
+    test("GET /api/version returns version and commit", async () => {
+      const res = await fetch(`${baseUrl}/api/version`);
+      expect(res.status).toBe(200);
+      const body: any = await res.json();
+      expect(typeof body.version).toBe("string");
+      expect(body.version.length).toBeGreaterThan(0);
+      expect(typeof body.commit).toBe("string");
+    });
   });
 
   // ── asap input-format compatibility ─────────────────────────────────────
