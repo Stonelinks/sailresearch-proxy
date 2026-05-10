@@ -6,6 +6,7 @@ import { handleChatCompletions } from "./routes/chat-completions.ts";
 import { handleModels } from "./routes/models.ts";
 import { handleMessages } from "./routes/messages.ts";
 import { handleResponses } from "./routes/responses.ts";
+import { handleVersion } from "./routes/version.ts";
 import { wrapRouteLogging } from "./routes/parse-request.ts";
 import { openAIError } from "./errors.ts";
 import { rewriteForWindowPrefix } from "./routes/dispatch.ts";
@@ -170,6 +171,10 @@ export function createApp(prisma: PrismaClient, port?: number): AppServer {
 
       // /v1/* and /v1/models — delegate to dispatch
       if (pathname.startsWith("/v1/")) return dispatch(req, pathname);
+
+      // API
+      if (pathname === "/api/version" && req.method === "GET")
+        return handleVersion(req);
 
       // Health
       if (pathname === "/health") return new Response("ok");
