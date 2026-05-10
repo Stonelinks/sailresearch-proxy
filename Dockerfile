@@ -1,5 +1,6 @@
 # -- build stage --
 FROM oven/bun:1 AS build
+ARG GIT_COMMIT=unknown
 WORKDIR /app
 
 COPY package.json bun.lock ./
@@ -10,6 +11,9 @@ RUN bunx prisma generate
 
 COPY . .
 
+# Bake the git commit hash into a file the app can read at runtime
+RUN echo "export const GIT_COMMIT = \"${GIT_COMMIT}\";" > /app/src/build-info.ts
+
 # Install frontend dependencies and build
 WORKDIR /app/frontend
 RUN bun install --frozen-lockfile
@@ -17,6 +21,7 @@ RUN bun run build
 
 # -- runtime stage --
 FROM oven/bun:1
+ARG GIT_COMMIT=unknown
 WORKDIR /app
 
 COPY --from=build /app/node_modules ./node_modules
@@ -31,6 +36,7 @@ RUN chmod +x entrypoint.sh
 
 ENV DATABASE_URL=file:/app/data/proxy.db
 ENV LOG_DIR=/app/data/logs
+ENV GIT_COMMIT=${GIT_COMMIT}
 VOLUME /app/data
 EXPOSE 4000
 
