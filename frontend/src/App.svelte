@@ -4,6 +4,7 @@
   import JobDetailPage from "./pages/JobDetailPage.svelte";
   import ModelsPage from "./pages/ModelsPage.svelte";
   import ModelDetailPage from "./pages/ModelDetailPage.svelte";
+  import Footer from "./components/Footer.svelte";
 
   const routes = {
     "/": JobsPage,
@@ -32,4 +33,6 @@
   <main class="max-w-6xl mx-auto px-4 py-6">
     <Router {routes} />
   </main>
+
+  <Footer />
 </div>
