@@ -160,6 +160,9 @@ export function parseAndValidatePiOutput(raw: string): ModelResearchResult {
   try {
     parsed = JSON.parse(jsonStr);
   } catch (e) {
+    log.warn(
+      `[research-models] extractJson returned invalid JSON (${(e as Error).message}): ${jsonStr.slice(0, 300)}`,
+    );
     throw new Error(`Invalid JSON: ${(e as Error).message}`);
   }
 
