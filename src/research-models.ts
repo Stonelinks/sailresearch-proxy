@@ -303,9 +303,13 @@ export async function runPiResearch(
 
   const stdout = await runPiPrompt(prompt);
 
+  log.debug(`[pi-research] raw output for ${modelId}: ${stdout.slice(0, 300)}`);
+
   const jsonStr = extractJson(stdout);
   if (!jsonStr) {
-    throw new Error("No JSON object found in pi SDK response");
+    throw new Error(
+      `No JSON object found in pi SDK response for ${modelId}. Raw output (first 200 chars): ${stdout.slice(0, 200)}`,
+    );
   }
 
   return parseAndValidatePiOutput(jsonStr);
@@ -323,13 +327,17 @@ export interface SmokeTestResult {
 /**
  * Smoke test a single preset + optional thinking level by sending a "hi"
  * prompt through the proxy's /v1/chat/completions endpoint.
+ *
+ * @param baseUrl  Full URL for the chat completions endpoint.
+ *                Defaults to `http://127.0.0.1:{port}/v1/chat/completions`.
  */
 export async function smokeTestPreset(
   modelId: string,
   params: Record<string, SamplingParamValue>,
   thinkingLevel: string | null = null,
+  baseUrl: string = `http://127.0.0.1:${config.server.port}/v1/chat/completions`,
 ): Promise<SmokeTestResult> {
-  const url = `http://127.0.0.1:${config.server.port}/v1/chat/completions`;
+  const url = baseUrl;
 
   const body: Record<string, unknown> = {
     model: modelId,
@@ -420,11 +428,15 @@ function highestThinkingLevel(
  * combination, with presetName filled in.
  *
  * Runs sequentially to avoid overwhelming Sail.
+ *
+ * @param baseUrl  Full URL for the chat completions endpoint.
+ *                Defaults to `http://127.0.0.1:{port}/v1/chat/completions`.
  */
 export async function smokeTestPresets(
   modelId: string,
   presets: SamplingPresetInput[],
   thinkingLevelMap: Record<string, string | null> | null,
+  baseUrl: string = `http://127.0.0.1:${config.server.port}/v1/chat/completions`,
 ): Promise<SmokeTestResult[]> {
   const results: SmokeTestResult[] = [];
 
@@ -435,7 +447,7 @@ export async function smokeTestPresets(
 
   for (const preset of presets) {
     // Test base params (no thinking level)
-    const baseResult = await smokeTestPreset(modelId, preset.params, null);
+    const baseResult = await smokeTestPreset(modelId, preset.params, null, baseUrl);
     baseResult.presetName = preset.name;
     results.push(baseResult);
 
@@ -445,6 +457,7 @@ export async function smokeTestPresets(
         modelId,
         preset.params,
         testThinkingLevel,
+        baseUrl,
       );
       thinkResult.presetName = preset.name;
       results.push(thinkResult);
