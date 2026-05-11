@@ -19,8 +19,8 @@
 </script>
 
 {#if version || commit}
-  <footer class="border-t border-slate-200 bg-white py-3 mt-auto">
-    <p class="text-center text-xs text-slate-400 font-mono">
+  <footer class="border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 py-3 mt-auto transition-colors">
+    <p class="text-center text-xs text-slate-400 dark:text-slate-500 font-mono">
       {#if version}v{version}{/if}
       {#if commit}({commit}){/if}
     </p>

@@ -135,7 +135,7 @@
         <svg class="jb-copy-icon" viewBox="0 0 20 20" fill="currentColor">
           <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
         </svg>
-        <span class="jb-copy-label text-emerald-500">Copied</span>
+        <span class="jb-copy-label text-emerald-500 dark:text-emerald-400">Copied</span>
       {:else}
         <svg class="jb-copy-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5">
           <rect x="6" y="6" width="10" height="10" rx="1.5" />
@@ -184,6 +184,22 @@
     border: 1px solid var(--jb-error-border, #fecaca);
   }
 
+  /* ---------- Dark mode overrides ---------- */
+  :global(.dark) .jb-root {
+    --jb-bg: #0f172a;
+    --jb-border: #1e293b;
+    --jb-text: #cbd5e1;
+    --jb-copy-text: #64748b;
+    --jb-copy-bg: rgba(15, 23, 42, 0.85);
+    --jb-copy-border: #334155;
+    --jb-expand-bg: #1e293b;
+  }
+  :global(.dark) .jb-error {
+    --jb-error-bg: #1c0f0f;
+    --jb-error-border: #7f1d1d;
+    --jb-error-text: #fca5a5;
+  }
+
   /* ---------- Pre/code ---------- */
   .jb-pre {
     margin: 0;
@@ -216,6 +232,23 @@
   }
   :global(.jb-punct) {
     color: #94a3b8; /* slate-400 */
+  }
+
+  /* ---------- Dark syntax tokens ---------- */
+  :global(.dark) :global(.jb-key) {
+    color: #7dd3fc; /* sky-300 */
+  }
+  :global(.dark) :global(.jb-string) {
+    color: #86efac; /* green-300 */
+  }
+  :global(.dark) :global(.jb-number) {
+    color: #fdba74; /* orange-300 */
+  }
+  :global(.dark) :global(.jb-literal) {
+    color: #c4b5fd; /* violet-300 */
+  }
+  :global(.dark) :global(.jb-punct) {
+    color: #475569; /* slate-600 */
   }
 
   .jb-error :global(.jb-key),
@@ -263,6 +296,11 @@
     background: white;
     border-color: #cbd5e1;
   }
+  :global(.dark) .jb-copy:hover {
+    color: #e2e8f0;
+    background: #1e293b;
+    border-color: #475569;
+  }
   .jb-copy:focus-visible {
     outline: 2px solid #7dd3fc;
     outline-offset: 1px;
@@ -294,6 +332,13 @@
     background: #e2e8f0;
     color: #334155;
   }
+  :global(.dark) .jb-expand {
+    color: #94a3b8;
+  }
+  :global(.dark) .jb-expand:hover {
+    background: #334155;
+    color: #e2e8f0;
+  }
 
   /* ---------- Scrollbar (webkit) ---------- */
   .jb-pre::-webkit-scrollbar {
@@ -308,5 +353,11 @@
   }
   .jb-pre::-webkit-scrollbar-thumb:hover {
     background: #94a3b8;
+  }
+  :global(.dark) .jb-pre::-webkit-scrollbar-thumb {
+    background: #334155;
+  }
+  :global(.dark) .jb-pre::-webkit-scrollbar-thumb:hover {
+    background: #475569;
   }
 </style>

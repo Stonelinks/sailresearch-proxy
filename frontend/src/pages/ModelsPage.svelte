@@ -248,18 +248,18 @@
   <div class="flex items-center justify-between gap-3 flex-wrap">
     <h2 class="text-lg font-semibold">Available Models</h2>
     <div class="flex items-center gap-2">
-      <label for="model-search" class="text-sm text-slate-500">Search:</label>
+      <label for="model-search" class="text-sm text-slate-500 dark:text-slate-400">Search:</label>
       <input
         id="model-search"
         type="text"
         bind:value={search}
         placeholder="Filter models…"
-        class="text-sm px-2.5 py-1.5 rounded border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-1 focus:ring-slate-300"
+        class="text-sm px-2.5 py-1.5 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-slate-300 dark:focus:ring-slate-600 transition-colors"
       />
       <button
         onclick={researchAll}
         disabled={anyResearching}
-        class="text-sm px-3 py-1.5 rounded border border-slate-200 text-slate-500 hover:text-slate-700 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors"
+        class="text-sm px-3 py-1.5 rounded border border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors"
       >
         {researchAllLabel()}
       </button>
@@ -267,88 +267,88 @@
   </div>
 
   {#if loading && models.length === 0}
-    <div class="text-center py-16 text-slate-400">Loading…</div>
+    <div class="text-center py-16 text-slate-400 dark:text-slate-500">Loading…</div>
   {:else if error}
-    <div class="text-center py-16 text-slate-400">
+    <div class="text-center py-16 text-slate-400 dark:text-slate-500">
       <p class="text-lg mb-2">Failed to load models</p>
       <p class="text-sm">{error}</p>
     </div>
   {:else}
-    <div class="bg-white border border-slate-200 rounded-lg overflow-hidden">
+    <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg overflow-hidden transition-colors">
       <div class="overflow-x-auto">
         <table class="w-full text-sm">
           <thead>
-            <tr class="bg-slate-50 border-b border-slate-200">
-              <th class="text-left px-4 py-2.5 font-semibold text-slate-600 whitespace-nowrap">Model ID</th>
-              <th class="text-left px-4 py-2.5 font-semibold text-slate-600 whitespace-nowrap">Owner</th>
-              <th class="text-left px-4 py-2.5 font-semibold text-slate-600 whitespace-nowrap">Context</th>
-              <th class="text-center px-4 py-2.5 font-semibold text-slate-600 whitespace-nowrap">Image</th>
-              <th class="text-center px-4 py-2.5 font-semibold text-slate-600 whitespace-nowrap">Reasoning</th>
-              <th class="text-left px-4 py-2.5 font-semibold text-slate-600 whitespace-nowrap">Price</th>
-              <th class="text-left px-4 py-2.5 font-semibold text-slate-600 whitespace-nowrap">Description</th>
-              <th class="text-left px-4 py-2.5 font-semibold text-slate-600 whitespace-nowrap"></th>
+            <tr class="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-700">
+              <th class="text-left px-4 py-2.5 font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap">Model ID</th>
+              <th class="text-left px-4 py-2.5 font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap">Owner</th>
+              <th class="text-left px-4 py-2.5 font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap">Context</th>
+              <th class="text-center px-4 py-2.5 font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap">Image</th>
+              <th class="text-center px-4 py-2.5 font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap">Reasoning</th>
+              <th class="text-left px-4 py-2.5 font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap">Price</th>
+              <th class="text-left px-4 py-2.5 font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap">Description</th>
+              <th class="text-left px-4 py-2.5 font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap"></th>
             </tr>
           </thead>
           <tbody>
             {#if filtered.length === 0}
               <tr>
-                <td colspan="8" class="text-center py-10 text-slate-400">No models found.</td>
+                <td colspan="8" class="text-center py-10 text-slate-400 dark:text-slate-500">No models found.</td>
               </tr>
             {:else}
               {#each filtered as model (model.id)}
                 <tr
-                  class="border-b border-slate-100 hover:bg-slate-50 transition-colors cursor-pointer group"
+                  class="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors cursor-pointer group"
                   onclick={() => { window.location.hash = `/models/${encodeURIComponent(model.id)}`; }}
                 >
-                  <td class="px-4 py-2.5 font-mono text-xs text-slate-800 group-hover:text-slate-900">
+                  <td class="px-4 py-2.5 font-mono text-xs text-slate-800 dark:text-slate-200 group-hover:text-slate-900 dark:group-hover:text-slate-100">
                     {model.id}
                     {#if researchingIds.has(model.id)}
-                      <span class="ml-1.5 inline-block text-[10px] font-sans font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded px-1.5 py-0.5">Researching…</span>
+                      <span class="ml-1.5 inline-block text-[10px] font-sans font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded px-1.5 py-0.5">Researching…</span>
                     {:else if model.contextSize === null}
-                      <span class="ml-1.5 inline-block text-[10px] font-sans font-medium text-amber-600 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">Not researched</span>
+                      <span class="ml-1.5 inline-block text-[10px] font-sans font-medium text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 rounded px-1.5 py-0.5">Not researched</span>
                     {/if}
                   </td>
-                  <td class="px-4 py-2.5 text-sm text-slate-600">{shortOwner(model.ownedBy)}</td>
-                  <td class="px-4 py-2.5 text-sm text-slate-500 whitespace-nowrap">
+                  <td class="px-4 py-2.5 text-sm text-slate-600 dark:text-slate-400">{shortOwner(model.ownedBy)}</td>
+                  <td class="px-4 py-2.5 text-sm text-slate-500 dark:text-slate-400 whitespace-nowrap">
                     {#if model.contextSize !== null}
                       <span class="font-mono text-xs">{formatContextSize(model.contextSize)}</span>
                     {:else}
-                      <span class="text-slate-300">—</span>
+                      <span class="text-slate-300 dark:text-slate-600">—</span>
                     {/if}
                   </td>
                   <td class="px-4 py-2.5 text-center">
                     {#if model.supportsImage}
-                      <span class="inline-block text-xs text-blue-600 bg-blue-50 border border-blue-200 rounded px-1.5 py-0.5">📷</span>
+                      <span class="inline-block text-xs text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded px-1.5 py-0.5">📷</span>
                     {:else}
-                      <span class="text-slate-300 text-xs">—</span>
+                      <span class="text-slate-300 dark:text-slate-600 text-xs">—</span>
                     {/if}
                   </td>
                   <td class="px-4 py-2.5 text-center">
                     {#if model.reasoning}
-                      <span class="inline-block text-xs text-purple-600 bg-purple-50 border border-purple-200 rounded px-1.5 py-0.5">🧠</span>
+                      <span class="inline-block text-xs text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/30 border border-purple-200 dark:border-purple-800 rounded px-1.5 py-0.5">🧠</span>
                     {:else}
-                      <span class="text-slate-300 text-xs">—</span>
+                      <span class="text-slate-300 dark:text-slate-600 text-xs">—</span>
                     {/if}
                   </td>
-                  <td class="px-4 py-2.5 text-sm text-slate-500 whitespace-nowrap">
+                  <td class="px-4 py-2.5 text-sm text-slate-500 dark:text-slate-400 whitespace-nowrap">
                     {#if model.prices && model.prices.length > 0}
                       <span class="font-mono text-xs">{formatPriceFrom(model.prices)}</span>
                     {:else}
-                      <span class="text-slate-300">—</span>
+                      <span class="text-slate-300 dark:text-slate-600">—</span>
                     {/if}
                   </td>
-                  <td class="px-4 py-2.5 text-sm text-slate-500 max-w-xs truncate">
+                  <td class="px-4 py-2.5 text-sm text-slate-500 dark:text-slate-400 max-w-xs truncate">
                     {#if model.description}
                       <span title={model.description}>{model.description}</span>
                     {:else}
-                      <span class="text-slate-300">—</span>
+                      <span class="text-slate-300 dark:text-slate-600">—</span>
                     {/if}
                   </td>
                   <td class="px-4 py-2.5 text-right">
                     <button
                       onclick={(e: MouseEvent) => { e.stopPropagation(); refetchOne(model.id); }}
                       disabled={researchingIds.has(model.id)}
-                      class="text-xs px-2 py-1 rounded border border-slate-200 text-slate-500 hover:text-slate-700 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                      class="text-xs px-2 py-1 rounded border border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors"
                     >
                       {researchingIds.has(model.id) ? "Researching…" : "Refetch"}
                     </button>
@@ -361,6 +361,6 @@
       </div>
     </div>
 
-    <p class="text-xs text-slate-400 text-center">{filtered.length} model{filtered.length !== 1 ? 's' : ''}</p>
+    <p class="text-xs text-slate-400 dark:text-slate-500 text-center">{filtered.length} model{filtered.length !== 1 ? 's' : ''}</p>
   {/if}
 </div>

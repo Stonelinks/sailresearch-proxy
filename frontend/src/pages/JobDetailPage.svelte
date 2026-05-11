@@ -96,18 +96,18 @@
 </script>
 
 {#if error}
-  <div class="text-center py-16 text-slate-400">
+  <div class="text-center py-16 text-slate-400 dark:text-slate-500">
     <p class="text-lg mb-2">Failed to load job</p>
     <p class="text-sm">{error}</p>
   </div>
 {:else if !job}
-  <div class="text-center py-16 text-slate-400">Loading…</div>
+  <div class="text-center py-16 text-slate-400 dark:text-slate-500">Loading…</div>
 {:else}
   <div class="space-y-6">
     <!-- Back link -->
     <a
       href="/#/"
-      class="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 transition-colors no-underline"
+      class="inline-flex items-center gap-1.5 text-sm text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors no-underline"
     >
       <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
@@ -122,60 +122,60 @@
           <h1 class="text-xl font-semibold">{shortModel(job.model)}</h1>
           <StatusBadge status={job.status} />
         </div>
-        <p class="font-mono text-xs text-slate-400">{job.id}</p>
+        <p class="font-mono text-xs text-slate-400 dark:text-slate-500">{job.id}</p>
       </div>
-      <div class="text-right text-sm text-slate-500">
+      <div class="text-right text-sm text-slate-500 dark:text-slate-400">
         <p>Sail Response: <span class="font-mono text-xs">{job.sailResponseId.slice(0, 16)}…</span></p>
       </div>
     </div>
 
     <!-- Details grid -->
     <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
-      <div class="bg-white border border-slate-200 rounded-lg px-4 py-3">
-        <p class="text-xs text-slate-400 mb-0.5">Window</p>
+      <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-4 py-3 transition-colors">
+        <p class="text-xs text-slate-400 dark:text-slate-500 mb-0.5">Window</p>
         <p class="font-mono text-sm">{job.completionWindow}</p>
       </div>
-      <div class="bg-white border border-slate-200 rounded-lg px-4 py-3">
-        <p class="text-xs text-slate-400 mb-0.5">API Type</p>
+      <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-4 py-3 transition-colors">
+        <p class="text-xs text-slate-400 dark:text-slate-500 mb-0.5">API Type</p>
         <p class="font-mono text-sm">{job.apiType}</p>
       </div>
-      <div class="bg-white border border-slate-200 rounded-lg px-4 py-3">
-        <p class="text-xs text-slate-400 mb-0.5">Created</p>
+      <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-4 py-3 transition-colors">
+        <p class="text-xs text-slate-400 dark:text-slate-500 mb-0.5">Created</p>
         <p class="text-sm"><RelativeTime iso={job.createdAt} /></p>
       </div>
-      <div class="bg-white border border-slate-200 rounded-lg px-4 py-3">
-        <p class="text-xs text-slate-400 mb-0.5">Duration</p>
+      <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-4 py-3 transition-colors">
+        <p class="text-xs text-slate-400 dark:text-slate-500 mb-0.5">Duration</p>
         <p class="text-sm"><Duration ms={job.durationMs} status={job.status} /></p>
       </div>
-      <div class="bg-white border border-slate-200 rounded-lg px-4 py-3">
-        <p class="text-xs text-slate-400 mb-0.5">Poll Count</p>
+      <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-4 py-3 transition-colors">
+        <p class="text-xs text-slate-400 dark:text-slate-500 mb-0.5">Poll Count</p>
         <p class="font-mono text-sm">{job.pollCount}</p>
       </div>
-      <div class="bg-white border border-slate-200 rounded-lg px-4 py-3">
-        <p class="text-xs text-slate-400 mb-0.5">Model</p>
+      <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-4 py-3 transition-colors">
+        <p class="text-xs text-slate-400 dark:text-slate-500 mb-0.5">Model</p>
         <p class="text-sm truncate" title={job.model}>{job.model}</p>
       </div>
-      <div class="bg-white border border-slate-200 rounded-lg px-4 py-3">
-        <p class="text-xs text-slate-400 mb-0.5">Created At</p>
+      <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-4 py-3 transition-colors">
+        <p class="text-xs text-slate-400 dark:text-slate-500 mb-0.5">Created At</p>
         <p class="font-mono text-xs">{new Date(job.createdAt).toLocaleString()}</p>
       </div>
-      <div class="bg-white border border-slate-200 rounded-lg px-4 py-3">
-        <p class="text-xs text-slate-400 mb-0.5">Completed At</p>
+      <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-4 py-3 transition-colors">
+        <p class="text-xs text-slate-400 dark:text-slate-500 mb-0.5">Completed At</p>
         <p class="font-mono text-xs">{job.completedAt ? new Date(job.completedAt).toLocaleString() : "—"}</p>
       </div>
     </div>
 
     <!-- Body tabs -->
-    <div class="bg-white border border-slate-200 rounded-lg overflow-hidden">
-      <div class="flex border-b border-slate-200 bg-slate-50">
+    <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden transition-colors">
+      <div class="flex border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
         <button
-          class="px-4 py-2.5 text-sm font-medium transition-colors cursor-pointer {activeTab === 'request' ? 'text-slate-900 border-b-2 border-slate-900 bg-white' : 'text-slate-400 hover:text-slate-600'}"
+          class="px-4 py-2.5 text-sm font-medium transition-colors cursor-pointer {activeTab === 'request' ? 'text-slate-900 dark:text-slate-100 border-b-2 border-slate-900 dark:border-slate-100 bg-white dark:bg-slate-900' : 'text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300'}"
           onclick={() => pickTab('request')}
         >
           Request
         </button>
         <button
-          class="px-4 py-2.5 text-sm font-medium transition-colors cursor-pointer {activeTab === 'response' ? 'text-slate-900 border-b-2 border-slate-900 bg-white' : 'text-slate-400 hover:text-slate-600'}"
+          class="px-4 py-2.5 text-sm font-medium transition-colors cursor-pointer {activeTab === 'response' ? 'text-slate-900 dark:text-slate-100 border-b-2 border-slate-900 dark:border-slate-100 bg-white dark:bg-slate-900' : 'text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300'}"
           onclick={() => pickTab('response')}
         >
           Response
@@ -184,7 +184,7 @@
           {/if}
         </button>
         <button
-          class="px-4 py-2.5 text-sm font-medium transition-colors cursor-pointer {activeTab === 'error' ? 'text-slate-900 border-b-2 border-slate-900 bg-white' : 'text-slate-400 hover:text-slate-600'}"
+          class="px-4 py-2.5 text-sm font-medium transition-colors cursor-pointer {activeTab === 'error' ? 'text-slate-900 dark:text-slate-100 border-b-2 border-slate-900 dark:border-slate-100 bg-white dark:bg-slate-900' : 'text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300'}"
           onclick={() => pickTab('error')}
         >
           Error
@@ -202,7 +202,7 @@
         {:else if activeTab === "error" && job.errorBody}
           <JsonBlock json={job.errorBody} error={true} />
         {:else}
-          <p class="p-4 text-sm text-slate-400">No data available.</p>
+          <p class="p-4 text-sm text-slate-400 dark:text-slate-500">No data available.</p>
         {/if}
       </div>
     </div>
