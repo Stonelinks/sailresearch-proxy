@@ -148,6 +148,19 @@ export async function runPiPrompt(prompt: string): Promise<string> {
       event.assistantMessageEvent.type === "text_delta"
     ) {
       text += event.assistantMessageEvent.delta;
+    } else if (event.type === "message_end") {
+      // Fallback: if no text_delta events were captured (e.g. non-streaming
+      // response or single-chunk delivery), extract text from the final message.
+      if (text.length === 0) {
+        const msg = event.message;
+        if (msg && msg.role === "assistant") {
+          for (const part of msg.content ?? []) {
+            if (part && (part as any).type === "text") {
+              text += (part as any).text ?? "";
+            }
+          }
+        }
+      }
     }
   });
 
@@ -208,6 +221,17 @@ export async function runPiChat(
       event.assistantMessageEvent.type === "text_delta"
     ) {
       text += event.assistantMessageEvent.delta;
+    } else if (event.type === "message_end") {
+      if (text.length === 0) {
+        const msg = event.message;
+        if (msg && msg.role === "assistant") {
+          for (const part of msg.content ?? []) {
+            if (part && (part as any).type === "text") {
+              text += (part as any).text ?? "";
+            }
+          }
+        }
+      }
     }
   });
 
