@@ -447,7 +447,12 @@ export async function smokeTestPresets(
 
   for (const preset of presets) {
     // Test base params (no thinking level)
-    const baseResult = await smokeTestPreset(modelId, preset.params, null, baseUrl);
+    const baseResult = await smokeTestPreset(
+      modelId,
+      preset.params,
+      null,
+      baseUrl,
+    );
     baseResult.presetName = preset.name;
     results.push(baseResult);
 
