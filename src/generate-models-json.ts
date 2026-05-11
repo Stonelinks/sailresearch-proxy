@@ -1,26 +1,23 @@
 /**
- * Generate a complete `models.json` for the pi coding agent from researched
- * model metadata in the database and scraped Sail docs data.
+ * Generate a complete `models.json` for the pi coding agent from the
+ * proxy's REST API — no DB or scraper dependencies.
  *
  * Usage: bun run src/generate-models-json.ts [options]
  *
  * Options:
  *   --base-url <url>    Proxy base URL (default: http://localhost:4000/v1)
  *   --output <path>     Output file path (default: stdout)
- *   --smoke-test        Run a smoke test for each model entry (default: off)
- *   --sequential        Process models one at a time instead of parallel
+ *   --smoke-test        Run a smoke test for each preset + thinking level
+ *                        via /v1/chat/completions (default: off)
  *
  * Output format follows pi's models.json spec:
  * https://pi.dev/docs/latest/models
  */
-import { prisma } from "./db.ts";
 import { COMPLETION_WINDOWS } from "./completion-window.ts";
 import { WINDOW_PROVIDER_NAMES } from "./constants.ts";
-import type { CompletionWindow } from "./types.ts";
-import { scrapeImageCapabilities, scrapePricing } from "./docs-scraper.ts";
-import type { ModelPriceInput } from "./types.ts";
+import type { CompletionWindow, SamplingPresetInput } from "./types.ts";
 import type { PriceWire, PresetWire } from "./models-meta.ts";
-import { runPiChat } from "./pi-session.ts";
+import { smokeTestPresets } from "./research-models.ts";
 
 // ─── CLI arg parsing ────────────────────────────────────────────────────────
 
@@ -28,7 +25,6 @@ interface CliOptions {
   baseUrl: string;
   output: string | null; // null = stdout
   smokeTest: boolean;
-  sequential: boolean;
 }
 
 function parseArgs(args: string[]): CliOptions {
@@ -36,7 +32,6 @@ function parseArgs(args: string[]): CliOptions {
     baseUrl: "http://localhost:4000/v1",
     output: null,
     smokeTest: false,
-    sequential: false,
   };
 
   for (let i = 0; i < args.length; i++) {
@@ -47,22 +42,26 @@ function parseArgs(args: string[]): CliOptions {
       opts.output = args[++i]!;
     } else if (arg === "--smoke-test") {
       opts.smokeTest = true;
-    } else if (arg === "--sequential") {
-      opts.sequential = true;
     } else if (arg === "--help" || arg === "-h") {
       console.log(`Usage: bun run src/generate-models-json.ts [options]
 
 Options:
   --base-url <url>    Proxy base URL (default: http://localhost:4000/v1)
   --output <path>     Output file path (default: stdout)
-  --smoke-test        Run a smoke test for each model entry
-  --sequential        Process models one at a time
+  --smoke-test        Run a smoke test for each preset + thinking level
   -h, --help          Show this help
 
-Generates a models.json for the pi coding agent. Each completion window
-(asap, priority, standard, flex) becomes a separate provider section.
-Models with multiple sampling presets are broken out by name using the
-convention: "model-id::preset-name" for non-default presets.
+Generates a models.json for the pi coding agent. All model metadata is
+fetched from the proxy's /v1/models endpoint — no DB or scraper needed.
+
+Each completion window (asap, priority, standard, flex) becomes a separate
+provider section. Models with multiple sampling presets are broken out by
+name using the convention: "model-id::preset-name" for non-default presets.
+
+With --smoke-test, each preset (and one thinking level for reasoning models)
+is tested by sending a "hi" prompt through /v1/chat/completions. Failed
+presets and thinking levels are filtered from the output, matching the
+behavior of model research.
 
 No apiKey is included — add your own to the output.`);
       process.exit(0);
@@ -118,22 +117,6 @@ export interface ModelData {
 }
 
 // ─── Data loading ───────────────────────────────────────────────────────────
-
-async function fetchModelList(baseUrl: string): Promise<string[]> {
-  // Strip trailing /v1 if present so we can consistently append /v1/models
-  const url = baseUrl.replace(/\/v1\/?$/, "");
-  const res = await fetch(`${url}/v1/models`);
-  if (!res.ok) {
-    throw new Error(
-      `Proxy returned ${res.status} ${res.statusText} for /v1/models`,
-    );
-  }
-  const body = (await res.json()) as { data: Array<{ id: string }> };
-  if (!Array.isArray(body.data) || body.data.length === 0) {
-    throw new Error("No models found in /v1/models response");
-  }
-  return body.data.map((m) => m.id);
-}
 
 /**
  * Fetch enriched model metadata from the proxy's /v1/models REST endpoint
@@ -456,83 +439,18 @@ export function buildProvider(
 
 // ─── Smoke test ─────────────────────────────────────────────────────────────
 
-interface SmokeTestResult {
-  providerName: string;
+/** Smoke test result row for display */
+interface SmokeRow {
   modelId: string;
-  preset: string;
-  status: "pass" | "fail" | "timeout";
+  presetName: string;
+  thinkingLevel: string | null;
+  ok: boolean;
   error?: string;
-  tokenCount?: number;
-  durationMs?: number;
 }
 
-/**
- * Run a smoke test by invoking the pi SDK with the given provider/model
- * and a simple "hi" prompt. Checks that tokens come back.
- */
-async function smokeTestEntry(
-  providerName: string,
-  modelId: string,
-  preset: string,
-): Promise<SmokeTestResult> {
-  const start = Date.now();
-
-  try {
-    const output = await runPiChat(providerName, modelId, "hi");
-    const durationMs = Date.now() - start;
-
-    // Check that we got some output
-    const trimmed = output.trim();
-    if (trimmed.length === 0) {
-      return {
-        providerName,
-        modelId,
-        preset,
-        status: "fail",
-        error: "empty output",
-        durationMs,
-      };
-    }
-
-    // Rough token count estimate (words / 0.75 ≈ tokens)
-    const tokenCount = Math.round(trimmed.split(/\s+/).length / 0.75);
-
-    return {
-      providerName,
-      modelId,
-      preset,
-      status: "pass",
-      tokenCount,
-      durationMs,
-    };
-  } catch (err) {
-    const durationMs = Date.now() - start;
-    const msg = err instanceof Error ? err.message : String(err);
-    if (msg.includes("timeout") || msg.includes("Timeout")) {
-      return {
-        providerName,
-        modelId,
-        preset,
-        status: "timeout",
-        error: msg,
-        durationMs,
-      };
-    }
-    return {
-      providerName,
-      modelId,
-      preset,
-      status: "fail",
-      error: msg,
-      durationMs,
-    };
-  }
-}
-
-function printSmokeTestSummary(results: SmokeTestResult[]): void {
-  const passed = results.filter((r) => r.status === "pass");
-  const failed = results.filter((r) => r.status === "fail");
-  const timedOut = results.filter((r) => r.status === "timeout");
+function printSmokeTestSummary(results: SmokeRow[]): void {
+  const passed = results.filter((r) => r.ok);
+  const failed = results.filter((r) => !r.ok);
 
   console.log("");
   console.log("========================================");
@@ -541,20 +459,18 @@ function printSmokeTestSummary(results: SmokeTestResult[]): void {
 
   // Print table header
   console.log(
-    `${"Provider".padEnd(16)} ${"Model".padEnd(40)} ${"Preset".padEnd(14)} ${"Status".padEnd(8)} ${"Tokens".padEnd(8)} ${"Time".padEnd(8)}`,
+    `${"Model".padEnd(42)} ${"Preset".padEnd(14)} ${"Thinking".padEnd(10)} ${"Status".padEnd(8)}`,
   );
-  console.log("-".repeat(96));
+  console.log("-".repeat(78));
 
   for (const r of results) {
     const model =
-      r.modelId.length > 38 ? r.modelId.slice(0, 36) + ".." : r.modelId;
-    const tokens = r.tokenCount !== undefined ? String(r.tokenCount) : "—";
-    const time = r.durationMs !== undefined ? `${r.durationMs}ms` : "—";
-    const statusIcon =
-      r.status === "pass" ? "✓" : r.status === "timeout" ? "⏱" : "✗";
+      r.modelId.length > 40 ? r.modelId.slice(0, 38) + ".." : r.modelId;
+    const thinking = r.thinkingLevel ?? "—";
+    const statusIcon = r.ok ? "✓" : "✗";
 
     console.log(
-      `${r.providerName.padEnd(16)} ${model.padEnd(40)} ${r.preset.padEnd(14)} ${statusIcon} ${r.status.padEnd(6)} ${tokens.padEnd(8)} ${time.padEnd(8)}`,
+      `${model.padEnd(42)} ${r.presetName.padEnd(14)} ${thinking.padEnd(10)} ${statusIcon} ${r.ok ? "pass" : "fail"}`,
     );
 
     if (r.error) {
@@ -562,11 +478,116 @@ function printSmokeTestSummary(results: SmokeTestResult[]): void {
     }
   }
 
-  console.log("-".repeat(96));
+  console.log("-".repeat(78));
   console.log(
-    `Total: ${results.length} | ✓ ${passed.length} passed | ✗ ${failed.length} failed | ⏱ ${timedOut.length} timed out`,
+    `Total: ${results.length} | ✓ ${passed.length} passed | ✗ ${failed.length} failed`,
   );
   console.log("========================================");
+}
+
+/**
+ * Compute the chat completions URL from the user-supplied base URL.
+ * Input:  http://host:4000/v1  (or http://host:4000)
+ * Output: http://host:4000/v1/chat/completions
+ */
+function chatCompletionsUrl(baseUrl: string): string {
+  const stripped = baseUrl.replace(/\/v1\/?$/, "").replace(/\/+$/, "");
+  return `${stripped}/v1/chat/completions`;
+}
+
+/**
+ * Run smoke tests for all models, filtering out failed presets and thinking
+ * levels from the metaMap in-place. Returns the display rows for the summary.
+ */
+async function runSmokeTests(
+  metaMap: Map<string, ModelData>,
+  completionsUrl: string,
+): Promise<SmokeRow[]> {
+  const rows: SmokeRow[] = [];
+  const modelIds = [...metaMap.keys()];
+
+  for (let i = 0; i < modelIds.length; i++) {
+    const modelId = modelIds[i]!;
+    const data = metaMap.get(modelId)!;
+
+    // Convert PresetWire[] to SamplingPresetInput[] for smokeTestPresets
+    const presets: SamplingPresetInput[] = data.samplingPresets.map((p) => ({
+      name: p.name,
+      description: p.description,
+      params: p.params,
+    }));
+
+    if (presets.length === 0) {
+      console.log(
+        `[${i + 1}/${modelIds.length}] ${modelId} — no presets, skipping`,
+      );
+      continue;
+    }
+
+    console.log(
+      `[${i + 1}/${modelIds.length}] Testing ${modelId} (${presets.length} preset${presets.length > 1 ? "s" : ""}) ...`,
+    );
+
+    const results = await smokeTestPresets(
+      modelId,
+      presets,
+      data.thinkingLevelMap,
+      completionsUrl,
+    );
+
+    // Collect results for display
+    for (const r of results) {
+      rows.push({
+        modelId,
+        presetName: r.presetName,
+        thinkingLevel: r.thinkingLevel,
+        ok: r.ok,
+        error: r.error,
+      });
+    }
+
+    // Filter out presets that failed the base-param smoke test
+    const failedPresetNames = new Set<string>();
+    const failedThinkingLevels = new Set<string>();
+
+    for (const sr of results) {
+      if (sr.ok) continue;
+      if (sr.thinkingLevel !== null) {
+        failedThinkingLevels.add(sr.thinkingLevel);
+        console.warn(
+          `  ✗ preset="${sr.presetName}" thinkingLevel=${sr.thinkingLevel} — ${sr.error}`,
+        );
+      } else {
+        failedPresetNames.add(sr.presetName);
+        console.warn(`  ✗ preset="${sr.presetName}" base params — ${sr.error}`);
+      }
+    }
+
+    // Remove failed presets from the model data
+    if (failedPresetNames.size > 0) {
+      data.samplingPresets = data.samplingPresets.filter(
+        (p) => !failedPresetNames.has(p.name),
+      );
+      console.log(
+        `  Removed ${failedPresetNames.size} failed preset(s): ${[...failedPresetNames].join(", ")}`,
+      );
+    }
+
+    // Disable failed thinking levels
+    if (data.thinkingLevelMap && failedThinkingLevels.size > 0) {
+      for (const level of failedThinkingLevels) {
+        if (level in data.thinkingLevelMap) {
+          data.thinkingLevelMap[level] = null;
+          console.log(`  Disabled thinking level "${level}"`);
+        }
+      }
+    }
+
+    const passCount = results.filter((r) => r.ok).length;
+    console.log(`  ✓ ${passCount}/${results.length} passed`);
+  }
+
+  return rows;
 }
 
 // ─── Main ───────────────────────────────────────────────────────────────────
@@ -587,18 +608,6 @@ async function main() {
     process.exit(1);
   }
 
-  // Fetch model list from proxy
-  console.log("Fetching model list ...");
-  let modelIds: string[];
-  try {
-    modelIds = await fetchModelList(opts.baseUrl);
-    console.log(`  ✓ Found ${modelIds.length} models\n`);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error(`ERROR: ${msg}`);
-    process.exit(1);
-  }
-
   // Load enriched model metadata from the proxy's REST API
   console.log("Loading model metadata from API ...");
   let metaMap: Map<string, ModelData>;
@@ -609,6 +618,23 @@ async function main() {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`ERROR: ${msg}`);
     process.exit(1);
+  }
+
+  // Smoke test — run before building the output so failed presets/levels
+  // are filtered out of the generated models.json
+  if (opts.smokeTest) {
+    console.log("Running smoke tests ...\n");
+    const completionsUrl = chatCompletionsUrl(opts.baseUrl);
+    const smokeRows = await runSmokeTests(metaMap, completionsUrl);
+    printSmokeTestSummary(smokeRows);
+
+    const hasFailures = smokeRows.some((r) => !r.ok);
+    if (hasFailures) {
+      console.log(
+        "\nSome smoke tests failed — the corresponding presets/thinking levels",
+      );
+      console.log("have been removed from the generated output.\n");
+    }
   }
 
   // Build providers
@@ -652,73 +678,6 @@ async function main() {
   } else {
     console.log(jsonStr);
   }
-
-  // Smoke test
-  if (opts.smokeTest) {
-    console.log("Running smoke tests ...\n");
-    const results: SmokeTestResult[] = [];
-    const allEntries: Array<{
-      providerName: string;
-      modelId: string;
-      preset: string;
-    }> = [];
-
-    for (const [providerName, provider] of Object.entries(output.providers)) {
-      for (const model of provider.models) {
-        // Extract preset name from ID if using :: convention
-        const preset = model.id.includes("::")
-          ? model.id.split("::").pop()!
-          : "default";
-        allEntries.push({
-          providerName,
-          modelId: model.id,
-          preset,
-        });
-      }
-    }
-
-    if (opts.sequential) {
-      for (let i = 0; i < allEntries.length; i++) {
-        const entry = allEntries[i]!;
-        console.log(
-          `[${i + 1}/${allEntries.length}] Testing ${entry.providerName}/${entry.modelId} ...`,
-        );
-        const result = await smokeTestEntry(
-          entry.providerName,
-          entry.modelId,
-          entry.preset,
-        );
-        results.push(result);
-      }
-    } else {
-      // Parallel — but cap concurrency to avoid overwhelming pi
-      const batchSize = 5;
-      for (let i = 0; i < allEntries.length; i += batchSize) {
-        const batch = allEntries.slice(i, i + batchSize);
-        const batchResults = await Promise.all(
-          batch.map((entry) =>
-            smokeTestEntry(entry.providerName, entry.modelId, entry.preset),
-          ),
-        );
-        results.push(...batchResults);
-        console.log(
-          `  Tested ${Math.min(i + batchSize, allEntries.length)}/${allEntries.length} entries`,
-        );
-      }
-    }
-
-    printSmokeTestSummary(results);
-
-    // Exit with non-zero if any failed
-    const hasFailures = results.some(
-      (r) => r.status === "fail" || r.status === "timeout",
-    );
-    if (hasFailures) {
-      process.exit(1);
-    }
-  }
-
-  // No DB disconnect needed — all data came from the API
 }
 
 // Only run when invoked directly
