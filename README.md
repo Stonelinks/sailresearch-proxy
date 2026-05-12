@@ -89,7 +89,7 @@ Control the latency/cost tradeoff via `metadata.completion_window` in the reques
 | `asap` | Passthrough | Forwards to Sail synchronously on latency-optimized hardware. Premium pricing. | N/A (sync) |
 | `priority` | Batching | Scheduled, ~1–2 min target. For agent loops where latency compounds. | 5 min |
 | `standard` | Batching | Scheduled, ~5 min target. **Default.** | 15 min |
-| `flex` | Batching | Best-effort, off-peak. Cheapest, no SLO. | 60 min |
+| `flex` | Batching | Best-effort, off-peak. Cheapest, no SLO. | 2 hours |
 
 ```python
 # Fast (passthrough)
@@ -107,7 +107,9 @@ client.chat.completions.create(
 )
 ```
 
-Streaming is supported for chat completions in all modes. Since Sail does not support server-sent events natively, the proxy receives the complete response and emits simulated SSE chunks.
+Streaming is supported for chat completions in all modes. Since Sail does not support server-sent events natively, the proxy receives the complete response and emits simulated SSE chunks. For batched windows (`priority`/`standard`/`flex`), SSE heartbeats (`: heartbeat` comment lines) are sent every 15 seconds while waiting for the job to complete — this keeps the connection alive through reverse proxies and load balancers.
+
+**For long-running jobs, always use `stream: true`.** Non-streaming batched requests block the HTTP connection with no data until the result is ready, which may exceed timeout limits of reverse proxies (see [Reverse Proxy Configuration](#reverse-proxy-configuration)).
 
 You can also use [window-prefixed routes](#window-prefixed-routes) to pin a client to a specific window via the base URL.
 
@@ -217,6 +219,8 @@ The proxy supports Sail's native Responses API at `POST /v1/responses`. This is 
 - **`asap` window:** Forwards directly to Sail's `/v1/responses`.
 - **Batched windows:** Submits with `background: true`, creates a `pendingJob` with `apiType: "responses"`, polls until complete, returns the Responses API result as-is. No format transformation needed.
 
+**Streaming:** When `stream: true` is set on a batched request, the proxy returns an SSE stream with heartbeats during the wait, then emits Responses API streaming events (`response.created`, `response.output_item.added`, `response.output_text.delta`, `response.completed`) when the result is ready. This is recommended for long-running jobs.
+
 ## Image Input
 
 Send images to multimodal models via the OpenAI `image_url` content part or the Anthropic `image` content block. Images are accepted as HTTP(S) URLs or base64 data URIs.
@@ -317,6 +321,60 @@ response = client.messages.create(
 ```
 
 **How it works:** In passthrough mode (`asap`), image content parts are forwarded to Sail's native API as-is. In batching mode (`priority`/`standard`/`flex`), the proxy transforms OpenAI `image_url` and Anthropic `image` blocks into Sail's `input_image` format for the Responses API.
+
+## Reverse Proxy Configuration
+
+When deploying behind a reverse proxy (nginx, Caddy, etc.), you **must** configure timeouts that exceed your longest expected job duration. The proxy sends SSE heartbeats every 15 seconds on streaming batched requests, which keeps the connection alive — but the reverse proxy still needs to allow connections that last long enough.
+
+### nginx
+
+The default `proxy_read_timeout` is only 60 seconds, which will kill any batched request. Use this configuration:
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:4000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+
+    # Timeouts must exceed the longest expected job duration.
+    # Flex jobs can take up to 2 hours.
+    proxy_read_timeout 7200s;    # 2 hours — matches flex window timeout
+    proxy_send_timeout 60s;
+    proxy_connect_timeout 60s;
+
+    # Disable buffering so SSE heartbeats reach the client immediately
+    proxy_buffering off;
+    proxy_cache off;
+
+    # For SSE streaming responses
+    proxy_set_header Connection '';
+    chunked_transfer_encoding off;
+}
+```
+
+### Caddy
+
+Caddy has a generous default stream timeout, but you may need to increase it for very long jobs:
+
+```
+reverse_proxy localhost:4000 {
+    transport http {
+        read_timeout 7200s
+        write_timeout 60s
+    }
+    flush_interval -1
+}
+```
+
+### Key points
+
+- **Always use `stream: true`** for batched requests when behind a reverse proxy. The SSE heartbeats keep the connection alive.
+- Non-streaming batched requests have **no keep-alive data** — they will time out at the reverse proxy's `proxy_read_timeout` (typically 60s) unless configured otherwise.
+- Set `proxy_buffering off` (nginx) or `flush_interval -1` (Caddy) so heartbeats and SSE chunks reach the client immediately, not buffered.
+- The `proxy_read_timeout` should match or exceed the window timeout: 5 min (priority), 15 min (standard), or 2 hours (flex).
 
 ## Dashboard
 
@@ -442,7 +500,8 @@ The script builds the image, tags it with the version and `latest`, pushes both 
 | `DEFAULT_COMPLETION_WINDOW` | `standard` | Default window when not specified by client |
 | `TIMEOUT_PRIORITY_MS` | `300000` | Max wait for `priority` jobs (5 min) |
 | `TIMEOUT_STANDARD_MS` | `900000` | Max wait for `standard` jobs (15 min) |
-| `TIMEOUT_FLEX_MS` | `3600000` | Max wait for `flex` jobs (60 min) |
+| `TIMEOUT_FLEX_MS` | `7200000` | Max wait for `flex` jobs (2 hours) |
+| `HEARTBEAT_INTERVAL_MS` | `15000` | SSE heartbeat interval for batched streaming requests |
 | `POLL_INTERVAL_MS` | `1000` | Poller tick interval |
 | `MAX_CONCURRENT_POLLS` | `10` | Max concurrent poll requests to Sail |
 | `STREAM_CHUNK_SIZE` | `20` | Approximate characters per simulated SSE chunk |
@@ -466,7 +525,7 @@ Set `SAIL_SLOW_INTEGRATION=1` (or run `bun test:slow`) to also test batched wind
 The proxy supports three API surfaces, all with both passthrough and batching modes:
 
 - **Passthrough** (`asap`): Forwards directly to the corresponding Sail endpoint (`/v1/chat/completions`, `/v1/messages`, or `/v1/responses`). Synchronous round-trip. Image content parts are forwarded as-is.
-- **Batching** (`priority` / `standard` / `flex`): Submits to Sail's `/v1/responses` API with `background: true`, persists the job handle to SQLite via Prisma, and polls with exponential backoff until the result is ready. The HTTP connection is held open until completion or timeout. Each window has its own timeout (5 min / 15 min / 60 min by default), so the proxy returns a 504 quickly for latency-sensitive windows while giving flex jobs ample time.
+- **Batching** (`priority` / `standard` / `flex`): Submits to Sail's `/v1/responses` API with `background: true`, persists the job handle to SQLite via Prisma, and polls with exponential backoff until the result is ready. When `stream: true` is set, the proxy opens an SSE stream immediately, sends comment heartbeats every 15 seconds while the job is in progress, then emits the API-specific streaming events once the result is available. Non-streaming requests block the HTTP connection until completion or timeout. Each window has its own timeout (5 min / 15 min / 2 hours by default), so the proxy returns a 504 quickly for latency-sensitive windows while giving flex jobs ample time.
 
 For chat completions and messages, the proxy transforms the request to Sail's Responses API format and transforms the result back. For the Responses API, no transformation is needed — the body is submitted as-is.
 
