@@ -1,16 +1,15 @@
 /**
  * Scrape Sail Research documentation pages and extract structured model
- * metadata using a one-shot LLM call through the embedded pi SDK.
+ * metadata.
  *
- * Two scrapers share the same pattern:
- *   1. fetch markdown/MDX page from docs.sailresearch.com
- *   2. send the raw content to the pi SDK with an extraction prompt
- *   3. validate the LLM JSON response
- *   4. return a typed Map<modelId, data>
+ * The capabilities scraper deterministically parses the JSX table from
+ * `/models.md` — no LLM required. It extracts `supportsImage` and
+ * `reasoning` booleans from the `is-true`/`is-false` CSS classes and
+ * `data-cap` attributes in each table row.
  *
- * The pricing scraper fetches `/pricing.md` for per-window token costs.
- * The capabilities scraper fetches `/models.md` for image support and
- * reasoning flags — both from the same capabilities table.
+ * The pricing scraper fetches `/pricing.md` for per-window token costs
+ * and uses a one-shot LLM call to extract structured data from the
+ * more complex pricing tables.
  */
 import { log } from "../shared/logger.ts";
 import { type ModelPriceInput, type CompletionWindow } from "./types.ts";
@@ -76,83 +75,80 @@ async function fetchAndParseDocsPage<T>(
   return { data: parsed as T, raw: jsonStr };
 }
 
-// ─── Model capabilities (image + reasoning) ─────────────────────────────────
+// ─── Deterministic capabilities parser ──────────────────────────────────────
 
-const CAPABILITIES_PROMPT = `Extract the capabilities for ALL models from this documentation page.
+/**
+ * Deterministically parse the capabilities table from the Sail docs
+ * `/models.md` page. The page contains JSX-rendered HTML with rows like:
+ *
+ *   <tr className="cap-row">
+ *     …
+ *     <td className="cap-cell cap-cell-bool is-true" data-cap="Image">…</td>
+ *     <td className="cap-cell cap-cell-bool is-false" data-cap="Reasoning" />
+ *     …
+ *     <a className="cap-slug-link" … title="org/model-id" …>
+ *   </tr>
+ *
+ * We extract the slug from `title="…"` and boolean values from
+ * `is-true`/`is-false` class + `data-cap="…"` attribute pairs.
+ */
+export function parseCapabilitiesFromJsx(
+  markdown: string,
+): Map<string, { supportsImage: boolean; reasoning: boolean }> {
+  const map = new Map<string, { supportsImage: boolean; reasoning: boolean }>();
 
-The page contains a table with columns: Model, Slug, Image, LoRA, Reasoning. Each row has a model ID (slug) and boolean checkmarks for Image and Reasoning support.
+  // Split on each table row. Handles both "cap-row" and "cap-row cap-row-last".
+  const rows = markdown.split(/<tr className="cap-row[^"]*">/);
 
-Return a JSON object with a single key "models" which is an array of objects, each with:
-- "modelId": the exact model ID / slug string (e.g. "moonshotai/Kimi-K2.5")
-- "supportsImage": true if the Image column shows a checkmark for this model, false otherwise
-- "reasoning": true if the Reasoning column shows a checkmark for this model, false otherwise
+  for (const row of rows.slice(1)) {
+    // Extract slug from title="org/model-id"
+    const slugMatch = row.match(/title="([^"]+)"/);
+    if (!slugMatch) continue;
+    const modelId = slugMatch[1]!;
+    if (modelId.trim() === "") continue;
 
-Include EVERY model in the table, even those with no checkmarks.
+    // Extract all capability cells: is-true/is-false + data-cap="…"
+    const capCells = row.matchAll(/is-(true|false).*?data-cap="([^"]+)"/g);
 
-Example output:
-{"models": [{"modelId": "org/model-name", "supportsImage": true, "reasoning": false}]}`;
+    let supportsImage = false;
+    let reasoning = false;
 
-export interface ModelCapabilityEntry {
-  modelId: string;
-  supportsImage: boolean;
-  reasoning: boolean;
-}
+    for (const match of capCells) {
+      const value = match[1] === "true";
+      const cap = match[2]!;
+      if (cap === "Image") supportsImage = value;
+      else if (cap === "Reasoning") reasoning = value;
+    }
 
-interface ModelCapabilitiesResult {
-  models: ModelCapabilityEntry[];
+    map.set(modelId, { supportsImage, reasoning });
+  }
+
+  return map;
 }
 
 /**
  * Scrape the Sail docs Models page and return a map of modelId →
  * capabilities (supportsImage, reasoning). Both fields come from the
- * capabilities table on the /models page.
+ * capabilities table on the /models page, parsed deterministically
+ * from the JSX markup — no LLM required.
  */
 export async function scrapeModelCapabilities(): Promise<
   Map<string, { supportsImage: boolean; reasoning: boolean }>
 > {
-  const { data } = await fetchAndParseDocsPage<ModelCapabilitiesResult>(
-    "https://docs.sailresearch.com/models.md",
-    CAPABILITIES_PROMPT,
-  );
-
-  if (!Array.isArray(data.models)) {
-    throw new Error(
-      `Expected "models" array in capabilities response, got: ${typeof data.models}`,
-    );
+  const url = "https://docs.sailresearch.com/models.md";
+  log.info(`[docs-scraper] fetching ${url}`);
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`Failed to fetch ${url}: ${res.status} ${res.statusText}`);
   }
+  const markdown = await res.text();
+  log.info(`[docs-scraper] fetched ${url} (${markdown.length} chars)`);
 
-  const map = new Map<string, { supportsImage: boolean; reasoning: boolean }>();
-  for (const entry of data.models) {
-    if (typeof entry.modelId !== "string" || entry.modelId.trim() === "") {
-      log.warn(
-        `[docs-scraper] skipping invalid capability entry: ${JSON.stringify(entry)}`,
-      );
-      continue;
-    }
-    map.set(entry.modelId, {
-      supportsImage: Boolean(entry.supportsImage),
-      reasoning: Boolean(entry.reasoning),
-    });
-  }
+  const map = parseCapabilitiesFromJsx(markdown);
 
   log.info(
     `[docs-scraper] capabilities: ${map.size} models extracted from models page`,
   );
-  return map;
-}
-
-// ─── Backwards-compatible alias for generate-models-json.ts ────────────
-
-/**
- * @deprecated Use scrapeModelCapabilities() instead, which returns both
- * supportsImage and reasoning from the models page.
- */
-export async function scrapeImageCapabilities(): Promise<Map<string, boolean>> {
-  const caps = await scrapeModelCapabilities();
-  const map = new Map<string, boolean>();
-  for (const [modelId, cap] of caps) {
-    map.set(modelId, cap.supportsImage);
-  }
   return map;
 }
 
