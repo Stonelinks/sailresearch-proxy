@@ -9,6 +9,8 @@ import {
   submitAndWait,
   formatAnthropicError,
 } from "../services/batch-submit.ts";
+import { streamBatchedMessages } from "../services/messages-stream.ts";
+import { SSE_HEADERS } from "../constants.ts";
 import type { Poller } from "../services/poller.ts";
 import type { CompletionWindow } from "../types.ts";
 import type { PrismaClient } from "@prisma/client";
@@ -24,6 +26,11 @@ import type { PrismaClient } from "@prisma/client";
  * poll until complete, and transform the result back to Anthropic Messages
  * format. This ensures jobs appear on the dashboard and benefit from the
  * poller's timeout/expiry handling.
+ *
+ * When stream:true is set on a batched window, the proxy returns an SSE
+ * stream immediately, sending comment heartbeats while the job is in
+ * progress, then emitting Anthropic Messages API streaming events once
+ * the result is available.
  */
 export async function handleMessages(
   req: Request,
@@ -51,8 +58,10 @@ export async function handleMessages(
     );
   }
 
+  const wantsStream = body.stream === true;
+
   log.debug(
-    `[messages] model=${body.model} window=${completionWindow} msgs=${body.messages.length}`,
+    `[messages] model=${body.model} window=${completionWindow} stream=${wantsStream} msgs=${body.messages.length}`,
   );
 
   // For asap window: passthrough to Sail's native /v1/messages
@@ -72,7 +81,13 @@ export async function handleMessages(
   const { prisma } = await import("../db.ts");
   const dbClient = db ?? prisma;
 
-  return handleMessagesBatching(body, completionWindow, poller, dbClient);
+  return handleMessagesBatching(
+    body,
+    completionWindow,
+    poller,
+    dbClient,
+    wantsStream,
+  );
 }
 
 /**
@@ -121,12 +136,16 @@ async function handleMessagesPassthrough(
  * Batching: transform the Anthropic Messages request into Sail's Responses API
  * format, submit with dedup-aware batch-submit, then transform the result
  * back to Anthropic Messages format.
+ *
+ * When wantsStream is true, return an SSE stream with heartbeats during the
+ * wait and Anthropic streaming events on completion.
  */
 async function handleMessagesBatching(
   body: any,
   completionWindow: CompletionWindow,
   poller: Poller,
   db: PrismaClient,
+  wantsStream: boolean,
 ): Promise<Response> {
   // Strip unsupported fields before the transform sees them, otherwise the
   // resulting Responses request would carry Anthropic-only fields Sail
@@ -139,7 +158,7 @@ async function handleMessagesBatching(
     `[batch-messages] transformed request keys=${Object.keys(sailBody).join(",")}`,
   );
 
-  const result = await submitAndWait({
+  const resultPromise = submitAndWait({
     sailBody,
     completionWindow,
     apiType: "messages",
@@ -150,6 +169,13 @@ async function handleMessagesBatching(
     logPrefix: "batch-messages",
   });
 
+  if (wantsStream) {
+    return new Response(streamBatchedMessages(resultPromise), {
+      headers: SSE_HEADERS,
+    });
+  }
+
+  const result = await resultPromise;
   if (!result.ok) {
     return formatAnthropicError(result.error);
   }

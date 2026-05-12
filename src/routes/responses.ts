@@ -3,6 +3,8 @@ import { log } from "../../shared/logger.ts";
 import { openAIError } from "../errors.ts";
 import { handlePassthroughResponses } from "../services/passthrough.ts";
 import { submitAndWait, formatOpenAIError } from "../services/batch-submit.ts";
+import { streamBatchedResponses } from "../services/responses-stream.ts";
+import { SSE_HEADERS } from "../constants.ts";
 import { parseRequest } from "./parse-request.ts";
 import type { Poller } from "../services/poller.ts";
 import type { CompletionWindow } from "../types.ts";
@@ -14,6 +16,11 @@ import type { PrismaClient } from "@prisma/client";
  * For asap window: forward directly to Sail's /v1/responses (passthrough).
  * For batched windows: submit with background:true, create pendingJob,
  * poll until complete, return the Responses API result as-is.
+ *
+ * When stream:true is set on a batched window, the proxy returns an SSE
+ * stream immediately, sending comment heartbeats while the job is in
+ * progress, then emitting Responses API streaming events once the result
+ * is available.
  */
 export async function handleResponses(
   req: Request,
@@ -37,8 +44,10 @@ export async function handleResponses(
     );
   }
 
+  const wantsStream = body.stream === true;
+
   log.debug(
-    `[responses] model=${body.model} window=${completionWindow} input=${typeof body.input === "string" ? "string" : `array[${body.input.length}]`}`,
+    `[responses] model=${body.model} window=${completionWindow} stream=${wantsStream} input=${typeof body.input === "string" ? "string" : `array[${body.input.length}]`}`,
   );
 
   // Import db lazily to allow test mocking
@@ -49,7 +58,13 @@ export async function handleResponses(
     return handlePassthroughResponses(body, completionWindow);
   }
 
-  return handleBatchingResponses(body, completionWindow, poller, dbClient);
+  return handleBatchingResponses(
+    body,
+    completionWindow,
+    poller,
+    dbClient,
+    wantsStream,
+  );
 }
 
 /**
@@ -57,12 +72,16 @@ export async function handleResponses(
  * Unlike chat-completions and messages, the Responses API body is already
  * in the right format — we just need to set background:true, persist the
  * job, poll, and return the result as-is.
+ *
+ * When wantsStream is true, return an SSE stream with heartbeats during
+ * the wait and Responses API streaming events on completion.
  */
 async function handleBatchingResponses(
   body: any,
   completionWindow: CompletionWindow,
   poller: Poller,
   db: PrismaClient,
+  wantsStream: boolean,
 ): Promise<Response> {
   // Build the Sail request body
   const sailBody: any = {
@@ -74,10 +93,10 @@ async function handleBatchingResponses(
       completion_window: completionWindow,
     },
   };
-  // Strip fields that don't belong in the Responses API request
+  // Strip stream — it's a proxy-side concern, not for Sail
   delete sailBody.stream;
 
-  const result = await submitAndWait({
+  const resultPromise = submitAndWait({
     sailBody,
     completionWindow,
     apiType: "responses",
@@ -88,6 +107,13 @@ async function handleBatchingResponses(
     logPrefix: "batch-responses",
   });
 
+  if (wantsStream) {
+    return new Response(streamBatchedResponses(resultPromise), {
+      headers: SSE_HEADERS,
+    });
+  }
+
+  const result = await resultPromise;
   if (!result.ok) {
     return formatOpenAIError(result.error);
   }
