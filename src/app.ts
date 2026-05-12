@@ -136,6 +136,11 @@ export function createApp(prisma: PrismaClient, port?: number): AppServer {
   const server = Bun.serve({
     port: port ?? config.server.port,
     hostname: config.server.host,
+    // Bun's max idle timeout is 255 seconds. This is fine because SSE
+    // heartbeats are sent every 15 seconds on batched streaming requests,
+    // so the connection is never truly idle. For non-streaming batched
+    // requests, the connection may time out after 255s of silence; clients
+    // should use `stream: true` for long-running jobs.
     idleTimeout: 255,
 
     websocket: wsHandler,
