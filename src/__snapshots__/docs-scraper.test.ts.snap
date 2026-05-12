@@ -1,0 +1,36 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`parseCapabilitiesFromJsx snapshot: full realistic page produces stable output: full-page-capabilities 1`] = `
+[
+  {
+    "modelId": "moonshotai/Kimi-K2.5",
+    "reasoning": false,
+    "supportsImage": true,
+  },
+  {
+    "modelId": "zai-org/GLM-5.1-FP8",
+    "reasoning": true,
+    "supportsImage": false,
+  },
+  {
+    "modelId": "deepseek-ai/DeepSeek-V3.2",
+    "reasoning": false,
+    "supportsImage": false,
+  },
+  {
+    "modelId": "openai/gpt-oss-120b",
+    "reasoning": false,
+    "supportsImage": false,
+  },
+  {
+    "modelId": "MiniMaxAI/MiniMax-M2.7",
+    "reasoning": false,
+    "supportsImage": false,
+  },
+  {
+    "modelId": "google/gemma-4-31B-it",
+    "reasoning": true,
+    "supportsImage": true,
+  },
+]
+`;
