@@ -146,13 +146,12 @@ async function researchOneWithScrapedData(
 
   const caps = scraped.capabilities.get(modelId);
   if (caps !== undefined) {
+    // Docs are authoritative for both supportsImage and reasoning.
+    // If docs say reasoning=false, that overrides pi research (which
+    // may incorrectly flag non-reasoning models). Models not found
+    // on the docs page fall back to pi research results.
     result.supportsImage = caps.supportsImage;
-    // Only override reasoning from docs if true — docs are authoritative
-    // for the boolean, but pi research may have already discovered
-    // thinkingLevelMap details.
-    if (caps.reasoning) {
-      result.reasoning = true;
-    }
+    result.reasoning = caps.reasoning;
   }
 
   // Smoke test presets through the proxy
