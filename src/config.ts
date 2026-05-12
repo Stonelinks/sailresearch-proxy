@@ -5,7 +5,9 @@ import {
   FIVE_MINUTES,
   FIFTEEN_MINUTES,
   SIXTY_MINUTES,
+  TWO_HOURS,
 } from "../shared/time.ts";
+import { HEARTBEAT_INTERVAL_MS } from "./constants.ts";
 
 function env(key: string, fallback: string): string {
   return process.env[key] || fallback;
@@ -49,7 +51,7 @@ export const config = {
   windowTimeouts: {
     priority: intEnv("TIMEOUT_PRIORITY_MS", FIVE_MINUTES),
     standard: intEnv("TIMEOUT_STANDARD_MS", FIFTEEN_MINUTES),
-    flex: intEnv("TIMEOUT_FLEX_MS", SIXTY_MINUTES),
+    flex: intEnv("TIMEOUT_FLEX_MS", TWO_HOURS),
   },
   polling: {
     intervalMs: intEnv("POLL_INTERVAL_MS", SECOND),
@@ -57,6 +59,7 @@ export const config = {
   },
   streaming: {
     chunkSize: intEnv("STREAM_CHUNK_SIZE", 20),
+    heartbeatIntervalMs: intEnv("HEARTBEAT_INTERVAL_MS", HEARTBEAT_INTERVAL_MS),
   },
   prune: {
     retentionDays: intEnv("PRUNE_RETENTION_DAYS", 180),

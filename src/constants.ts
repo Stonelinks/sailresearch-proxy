@@ -58,6 +58,11 @@ export const BACKOFF_BOUNDARIES = {
   slowMax: 21, // pollCount < this → slow
 } as const;
 
+// ── SSE keep-alive ─────────────────────────────────────────────────────
+
+/** How often to emit SSE comment heartbeats on long-running batched streams. */
+export const HEARTBEAT_INTERVAL_MS = 15_000;
+
 // ── Batch submit ────────────────────────────────────────────────────────
 
 /** How often to re-poll the DB as a safety net for missed waiter notifications. */

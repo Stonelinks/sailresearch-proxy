@@ -20,6 +20,7 @@ export const DAY = 24 * HOUR;
 export const FIVE_MINUTES = 5 * MINUTE;
 export const FIFTEEN_MINUTES = 15 * MINUTE;
 export const SIXTY_MINUTES = 60 * MINUTE;
+export const TWO_HOURS = 120 * MINUTE;
 
 // ── Utility functions ───────────────────────────────────────────────────
 
