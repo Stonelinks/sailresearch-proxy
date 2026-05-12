@@ -3,7 +3,7 @@ import {
   SECOND,
   MINUTE,
   FIVE_MINUTES,
-  FIFTEEN_MINUTES,
+  THIRTY_MINUTES,
   SIXTY_MINUTES,
   TWO_HOURS,
 } from "../shared/time.ts";
@@ -50,7 +50,7 @@ export const config = {
   },
   windowTimeouts: {
     priority: intEnv("TIMEOUT_PRIORITY_MS", FIVE_MINUTES),
-    standard: intEnv("TIMEOUT_STANDARD_MS", FIFTEEN_MINUTES),
+    standard: intEnv("TIMEOUT_STANDARD_MS", THIRTY_MINUTES),
     flex: intEnv("TIMEOUT_FLEX_MS", TWO_HOURS),
   },
   polling: {
