@@ -24,7 +24,8 @@ echo "Publishing $IMAGE:$PUBLISH_VERSION ..."
 
 docker login "$CONTAINER_REG_URL" -u "$CONTAINER_REG_USERNAME" -p "$CONTAINER_REG_PASSWORD"
 
-docker build -t "$IMAGE:$PUBLISH_VERSION" .
+GIT_COMMIT_SHA=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+docker build --build-arg GIT_COMMIT="$GIT_COMMIT_SHA" -t "$IMAGE:$PUBLISH_VERSION" .
 docker tag "$IMAGE:$PUBLISH_VERSION" "$IMAGE:latest"
 
 docker push "$IMAGE:$PUBLISH_VERSION"
