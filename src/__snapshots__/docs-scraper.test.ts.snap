@@ -34,3 +34,88 @@ exports[`parseCapabilitiesFromJsx snapshot: full realistic page produces stable 
   },
 ]
 `;
+
+exports[`parsePricingFromJsx snapshot: full realistic pricing page produces stable output: full-page-pricing 1`] = `
+[
+  {
+    "modelId": "moonshotai/Kimi-K2.5",
+    "prices": [
+      {
+        "cachedInputPerMTok": 0.1,
+        "completionWindow": "standard",
+        "inputPerMTok": 0.2,
+        "outputPerMTok": 1.2,
+      },
+      {
+        "cachedInputPerMTok": 0.15,
+        "completionWindow": "priority",
+        "inputPerMTok": 0.25,
+        "outputPerMTok": 1.8,
+      },
+      {
+        "cachedInputPerMTok": 0.05,
+        "completionWindow": "flex",
+        "inputPerMTok": 0.16,
+        "outputPerMTok": 0.8,
+      },
+      {
+        "cachedInputPerMTok": 0.1,
+        "completionWindow": "asap",
+        "inputPerMTok": 0.6,
+        "outputPerMTok": 3,
+      },
+    ],
+  },
+  {
+    "modelId": "deepseek-ai/DeepSeek-V3.2",
+    "prices": [
+      {
+        "cachedInputPerMTok": 0.01,
+        "completionWindow": "flex",
+        "inputPerMTok": 0.04,
+        "outputPerMTok": 0.25,
+      },
+      {
+        "cachedInputPerMTok": 0.28,
+        "completionWindow": "asap",
+        "inputPerMTok": 0.56,
+        "outputPerMTok": 1.68,
+      },
+    ],
+  },
+  {
+    "modelId": "MiniMaxAI/MiniMax-M2.7",
+    "prices": [
+      {
+        "cachedInputPerMTok": 0.015,
+        "completionWindow": "flex",
+        "inputPerMTok": 0.06,
+        "outputPerMTok": 0.3,
+      },
+      {
+        "cachedInputPerMTok": 0.06,
+        "completionWindow": "asap",
+        "inputPerMTok": 0.3,
+        "outputPerMTok": 1.2,
+      },
+    ],
+  },
+  {
+    "modelId": "google/gemma-4-31B-it",
+    "prices": [
+      {
+        "cachedInputPerMTok": 0.02,
+        "completionWindow": "flex",
+        "inputPerMTok": 0.06,
+        "outputPerMTok": 0.3,
+      },
+      {
+        "cachedInputPerMTok": 0.07,
+        "completionWindow": "asap",
+        "inputPerMTok": 0.14,
+        "outputPerMTok": 0.4,
+      },
+    ],
+  },
+]
+`;

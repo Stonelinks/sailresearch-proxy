@@ -2,6 +2,8 @@ import { describe, test, expect, mock, beforeEach } from "bun:test";
 import {
   parseCapabilitiesFromJsx,
   scrapeModelCapabilities,
+  parsePricingFromJsx,
+  scrapePricing,
 } from "./docs-scraper.ts";
 
 // ─── Realistic JSX snippets from docs.sailresearch.com/models.md ──────────
@@ -276,32 +278,409 @@ describe("parseCapabilitiesFromJsx", () => {
   });
 });
 
-describe("scrapeModelCapabilities", () => {
+// ─── Realistic JSX snippets from docs.sailresearch.com/pricing.md ──────────
+
+/** A pricing row with all 4 windows (standard, priority, flex, asap) */
+const PRICING_ROW_FULL = `<tr className="pricing-row">
+          <td className="pricing-cell pricing-cell-model" style={{ width: "18.0rem", minWidth: "18.0rem" }}>
+            <div className="pricing-cell-model-inner">
+              <span className="cap-logo" data-org="moonshot" role="img" aria-label="Moonshot AI" />
+              <div className="pricing-model-meta">
+                <div className="cap-model-name">Kimi K2.5</div>
+                <div className="cap-slug-actions">
+                  <span className="cap-slug-text" title="moonshotai/Kimi-K2.5">
+                    <code>moonshotai/Kimi-K2.5</code>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </td>
+          <td className="pricing-cell pricing-cell-price" data-axis="Input">
+            <div className="price-stack">
+              <span className="price-window" data-window="standard">Standard</span>
+              <span className="price-amount" data-window="standard">
+                <span className="price-currency" aria-hidden="true">$</span>0.20
+              </span>
+            </div>
+            <div className="price-stack">
+              <span className="price-window" data-window="priority">Priority</span>
+              <span className="price-amount" data-window="priority">
+                <span className="price-currency" aria-hidden="true">$</span>0.25
+              </span>
+            </div>
+            <div className="price-stack">
+              <span className="price-window" data-window="flex">Flex</span>
+              <span className="price-amount" data-window="flex">
+                <span className="price-currency" aria-hidden="true">$</span>0.16
+              </span>
+            </div>
+            <div className="price-stack">
+              <span className="price-window" data-window="asap">ASAP</span>
+              <span className="price-amount" data-window="asap">
+                <span className="price-currency" aria-hidden="true">$</span>0.60
+              </span>
+            </div>
+          </td>
+          <td className="pricing-cell pricing-cell-price" data-axis="Cached">
+            <div className="price-stack">
+              <span className="price-window" data-window="standard">Standard</span>
+              <span className="price-amount" data-window="standard">
+                <span className="price-currency" aria-hidden="true">$</span>0.10
+              </span>
+            </div>
+            <div className="price-stack">
+              <span className="price-window" data-window="priority">Priority</span>
+              <span className="price-amount" data-window="priority">
+                <span className="price-currency" aria-hidden="true">$</span>0.15
+              </span>
+            </div>
+            <div className="price-stack">
+              <span className="price-window" data-window="flex">Flex</span>
+              <span className="price-amount" data-window="flex">
+                <span className="price-currency" aria-hidden="true">$</span>0.05
+              </span>
+            </div>
+            <div className="price-stack">
+              <span className="price-window" data-window="asap">ASAP</span>
+              <span className="price-amount" data-window="asap">
+                <span className="price-currency" aria-hidden="true">$</span>0.10
+              </span>
+            </div>
+          </td>
+          <td className="pricing-cell pricing-cell-price" data-axis="Output">
+            <div className="price-stack">
+              <span className="price-window" data-window="standard">Standard</span>
+              <span className="price-amount" data-window="standard">
+                <span className="price-currency" aria-hidden="true">$</span>1.20
+              </span>
+            </div>
+            <div className="price-stack">
+              <span className="price-window" data-window="priority">Priority</span>
+              <span className="price-amount" data-window="priority">
+                <span className="price-currency" aria-hidden="true">$</span>1.80
+              </span>
+            </div>
+            <div className="price-stack">
+              <span className="price-window" data-window="flex">Flex</span>
+              <span className="price-amount" data-window="flex">
+                <span className="price-currency" aria-hidden="true">$</span>0.80
+              </span>
+            </div>
+            <div className="price-stack">
+              <span className="price-window" data-window="asap">ASAP</span>
+              <span className="price-amount" data-window="asap">
+                <span className="price-currency" aria-hidden="true">$</span>3.00
+              </span>
+            </div>
+          </td>
+        </tr>`;
+
+/** A pricing row with only 2 windows (flex, asap) */
+const PRICING_ROW_PARTIAL = `<tr className="pricing-row">
+          <td className="pricing-cell pricing-cell-model" style={{ width: "18.0rem", minWidth: "18.0rem" }}>
+            <div className="pricing-cell-model-inner">
+              <span className="cap-logo" data-org="deepseek" role="img" aria-label="DeepSeek" />
+              <div className="pricing-model-meta">
+                <div className="cap-model-name">DeepSeek V3.2</div>
+                <div className="cap-slug-actions">
+                  <span className="cap-slug-text" title="deepseek-ai/DeepSeek-V3.2">
+                    <code>deepseek-ai/DeepSeek-V3.2</code>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </td>
+          <td className="pricing-cell pricing-cell-price" data-axis="Input">
+            <div className="price-stack">
+              <span className="price-window" data-window="flex">Flex</span>
+              <span className="price-amount" data-window="flex">
+                <span className="price-currency" aria-hidden="true">$</span>0.04
+              </span>
+            </div>
+            <div className="price-stack">
+              <span className="price-window" data-window="asap">ASAP</span>
+              <span className="price-amount" data-window="asap">
+                <span className="price-currency" aria-hidden="true">$</span>0.56
+              </span>
+            </div>
+          </td>
+          <td className="pricing-cell pricing-cell-price" data-axis="Cached">
+            <div className="price-stack">
+              <span className="price-window" data-window="flex">Flex</span>
+              <span className="price-amount" data-window="flex">
+                <span className="price-currency" aria-hidden="true">$</span>0.01
+              </span>
+            </div>
+            <div className="price-stack">
+              <span className="price-window" data-window="asap">ASAP</span>
+              <span className="price-amount" data-window="asap">
+                <span className="price-currency" aria-hidden="true">$</span>0.28
+              </span>
+            </div>
+          </td>
+          <td className="pricing-cell pricing-cell-price" data-axis="Output">
+            <div className="price-stack">
+              <span className="price-window" data-window="flex">Flex</span>
+              <span className="price-amount" data-window="flex">
+                <span className="price-currency" aria-hidden="true">$</span>0.25
+              </span>
+            </div>
+            <div className="price-stack">
+              <span className="price-window" data-window="asap">ASAP</span>
+              <span className="price-amount" data-window="asap">
+                <span className="price-currency" aria-hidden="true">$</span>1.68
+              </span>
+            </div>
+          </td>
+        </tr>`;
+
+/** A pricing row with 2 models (MiniMax + Gemma in the same <tr>) */
+const PRICING_ROW_MULTI_MODEL = `<tr className="pricing-row">
+          <td className="pricing-cell pricing-cell-model" style={{ width: "18.0rem", minWidth: "18.0rem" }}>
+            <div className="pricing-cell-model-inner">
+              <div className="pricing-model-meta">
+                <div className="cap-model-name">MiniMax M2.7</div>
+                <div className="cap-slug-actions">
+                  <span className="cap-slug-text" title="MiniMaxAI/MiniMax-M2.7">
+                    <code>MiniMaxAI/MiniMax-M2.7</code>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </td>
+          <td className="pricing-cell pricing-cell-price" data-axis="Input">
+            <div className="price-stack">
+              <span className="price-window" data-window="flex">Flex</span>
+              <span className="price-amount" data-window="flex">
+                <span className="price-currency" aria-hidden="true">$</span>0.06
+              </span>
+            </div>
+            <div className="price-stack">
+              <span className="price-window" data-window="asap">ASAP</span>
+              <span className="price-amount" data-window="asap">
+                <span className="price-currency" aria-hidden="true">$</span>0.30
+              </span>
+            </div>
+          </td>
+          <td className="pricing-cell pricing-cell-price" data-axis="Cached">
+            <div className="price-stack">
+              <span className="price-window" data-window="flex">Flex</span>
+              <span className="price-amount" data-window="flex">
+                <span className="price-currency" aria-hidden="true">$</span>0.015
+              </span>
+            </div>
+            <div className="price-stack">
+              <span className="price-window" data-window="asap">ASAP</span>
+              <span className="price-amount" data-window="asap">
+                <span className="price-currency" aria-hidden="true">$</span>0.06
+              </span>
+            </div>
+          </td>
+          <td className="pricing-cell pricing-cell-price" data-axis="Output">
+            <div className="price-stack">
+              <span className="price-window" data-window="flex">Flex</span>
+              <span className="price-amount" data-window="flex">
+                <span className="price-currency" aria-hidden="true">$</span>0.30
+              </span>
+            </div>
+            <div className="price-stack">
+              <span className="price-window" data-window="asap">ASAP</span>
+              <span className="price-amount" data-window="asap">
+                <span className="price-currency" aria-hidden="true">$</span>1.20
+              </span>
+            </div>
+          </td>
+          <td className="pricing-cell pricing-cell-model" style={{ width: "18.0rem", minWidth: "18.0rem" }}>
+            <div className="pricing-cell-model-inner">
+              <div className="pricing-model-meta">
+                <div className="cap-model-name">Gemma 4 31B IT</div>
+                <div className="cap-slug-actions">
+                  <span className="cap-slug-text" title="google/gemma-4-31B-it">
+                    <code>google/gemma-4-31B-it</code>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </td>
+          <td className="pricing-cell pricing-cell-price" data-axis="Input">
+            <div className="price-stack">
+              <span className="price-window" data-window="flex">Flex</span>
+              <span className="price-amount" data-window="flex">
+                <span className="price-currency" aria-hidden="true">$</span>0.06
+              </span>
+            </div>
+            <div className="price-stack">
+              <span className="price-window" data-window="asap">ASAP</span>
+              <span className="price-amount" data-window="asap">
+                <span className="price-currency" aria-hidden="true">$</span>0.14
+              </span>
+            </div>
+          </td>
+          <td className="pricing-cell pricing-cell-price" data-axis="Cached">
+            <div className="price-stack">
+              <span className="price-window" data-window="flex">Flex</span>
+              <span className="price-amount" data-window="flex">
+                <span className="price-currency" aria-hidden="true">$</span>0.02
+              </span>
+            </div>
+            <div className="price-stack">
+              <span className="price-window" data-window="asap">ASAP</span>
+              <span className="price-amount" data-window="asap">
+                <span className="price-currency" aria-hidden="true">$</span>0.07
+              </span>
+            </div>
+          </td>
+          <td className="pricing-cell pricing-cell-price" data-axis="Output">
+            <div className="price-stack">
+              <span className="price-window" data-window="flex">Flex</span>
+              <span className="price-amount" data-window="flex">
+                <span className="price-currency" aria-hidden="true">$</span>0.30
+              </span>
+            </div>
+            <div className="price-stack">
+              <span className="price-window" data-window="asap">ASAP</span>
+              <span className="price-amount" data-window="asap">
+                <span className="price-currency" aria-hidden="true">$</span>0.40
+              </span>
+            </div>
+          </td>
+        </tr>`;
+
+/** Full realistic pricing page */
+const FULL_PRICING_PAGE = `# Pricing
+
+> Per-token pricing for Sail inference
+
+<div className="pricing-table-page">
+${PRICING_ROW_FULL}
+${PRICING_ROW_PARTIAL}
+${PRICING_ROW_MULTI_MODEL}
+</div>`;
+
+// ─── Pricing parser tests ─────────────────────────────────────────────────
+
+describe("parsePricingFromJsx", () => {
+  test("parses a model with all 4 windows", () => {
+    const map = parsePricingFromJsx(PRICING_ROW_FULL);
+    expect(map.size).toBe(1);
+    const prices = map.get("moonshotai/Kimi-K2.5")!;
+    expect(prices.length).toBe(4);
+
+    const standard = prices.find((p) => p.completionWindow === "standard")!;
+    expect(standard.inputPerMTok).toBe(0.2);
+    expect(standard.cachedInputPerMTok).toBe(0.1);
+    expect(standard.outputPerMTok).toBe(1.2);
+
+    const flex = prices.find((p) => p.completionWindow === "flex")!;
+    expect(flex.inputPerMTok).toBe(0.16);
+    expect(flex.cachedInputPerMTok).toBe(0.05);
+    expect(flex.outputPerMTok).toBe(0.8);
+
+    const asap = prices.find((p) => p.completionWindow === "asap")!;
+    expect(asap.inputPerMTok).toBe(0.6);
+    expect(asap.cachedInputPerMTok).toBe(0.1);
+    expect(asap.outputPerMTok).toBe(3.0);
+  });
+
+  test("parses a model with only 2 windows (flex, asap)", () => {
+    const map = parsePricingFromJsx(PRICING_ROW_PARTIAL);
+    expect(map.size).toBe(1);
+    const prices = map.get("deepseek-ai/DeepSeek-V3.2")!;
+    expect(prices.length).toBe(2);
+
+    const flex = prices.find((p) => p.completionWindow === "flex")!;
+    expect(flex.inputPerMTok).toBe(0.04);
+    expect(flex.cachedInputPerMTok).toBe(0.01);
+    expect(flex.outputPerMTok).toBe(0.25);
+
+    const asap = prices.find((p) => p.completionWindow === "asap")!;
+    expect(asap.inputPerMTok).toBe(0.56);
+    expect(asap.cachedInputPerMTok).toBe(0.28);
+    expect(asap.outputPerMTok).toBe(1.68);
+  });
+
+  test("parses a row with 2 models (MiniMax + Gemma)", () => {
+    const map = parsePricingFromJsx(PRICING_ROW_MULTI_MODEL);
+    expect(map.size).toBe(2);
+
+    const minimax = map.get("MiniMaxAI/MiniMax-M2.7")!;
+    expect(minimax.length).toBe(2);
+    const mmFlex = minimax.find((p) => p.completionWindow === "flex")!;
+    expect(mmFlex.inputPerMTok).toBe(0.06);
+    expect(mmFlex.cachedInputPerMTok).toBe(0.015);
+    expect(mmFlex.outputPerMTok).toBe(0.3);
+
+    const gemma = map.get("google/gemma-4-31B-it")!;
+    expect(gemma.length).toBe(2);
+    const gFlex = gemma.find((p) => p.completionWindow === "flex")!;
+    expect(gFlex.inputPerMTok).toBe(0.06);
+    expect(gFlex.cachedInputPerMTok).toBe(0.02);
+    expect(gFlex.outputPerMTok).toBe(0.3);
+  });
+
+  test("skips rows without valid titles", () => {
+    const noTitle = `<tr className="pricing-row">
+          <td className="pricing-cell pricing-cell-model">
+            <div className="cap-model-name">No Slug Model</div>
+          </td>
+          <td className="pricing-cell pricing-cell-price" data-axis="Input">
+            <span className="price-amount" data-window="flex">
+              <span className="price-currency" aria-hidden="true">$</span>0.10
+            </span>
+          </td>
+          <td className="pricing-cell pricing-cell-price" data-axis="Cached">
+            <span className="price-amount" data-window="flex">
+              <span className="price-currency" aria-hidden="true">$</span>0.05
+            </span>
+          </td>
+          <td className="pricing-cell pricing-cell-price" data-axis="Output">
+            <span className="price-amount" data-window="flex">
+              <span className="price-currency" aria-hidden="true">$</span>0.50
+            </span>
+          </td>
+        </tr>`;
+    const map = parsePricingFromJsx(noTitle);
+    expect(map.size).toBe(0);
+  });
+
+  test("returns empty map for content with no pricing rows", () => {
+    const map = parsePricingFromJsx("<p>Hello world</p>");
+    expect(map.size).toBe(0);
+  });
+
+  test("returns empty map for empty string", () => {
+    const map = parsePricingFromJsx("");
+    expect(map.size).toBe(0);
+  });
+
+  test("snapshot: full realistic pricing page produces stable output", () => {
+    const map = parsePricingFromJsx(FULL_PRICING_PAGE);
+    const entries = [...map.entries()].map(([id, prices]) => ({
+      modelId: id,
+      prices,
+    }));
+    expect(entries).toMatchSnapshot("full-page-pricing");
+  });
+});
+
+describe("scrapePricing", () => {
   const originalFetch = globalThis.fetch;
 
   beforeEach(() => {
     globalThis.fetch = originalFetch;
   });
 
-  test("fetches the models page and parses capabilities deterministically", async () => {
+  test("fetches the pricing page and parses deterministically", async () => {
     globalThis.fetch = mock(() =>
-      Promise.resolve(new Response(FULL_REALISTIC_PAGE, { status: 200 })),
+      Promise.resolve(new Response(FULL_PRICING_PAGE, { status: 200 })),
     ) as any;
 
-    const map = await scrapeModelCapabilities();
-    expect(map.size).toBe(6);
-    expect(map.get("moonshotai/Kimi-K2.5")).toEqual({
-      supportsImage: true,
-      reasoning: false,
-    });
-    expect(map.get("zai-org/GLM-5.1-FP8")).toEqual({
-      supportsImage: false,
-      reasoning: true,
-    });
-    expect(map.get("google/gemma-4-31B-it")).toEqual({
-      supportsImage: true,
-      reasoning: true,
-    });
+    const map = await scrapePricing();
+    expect(map.size).toBe(4);
+    expect(map.get("moonshotai/Kimi-K2.5")!.length).toBe(4);
+    expect(map.get("deepseek-ai/DeepSeek-V3.2")!.length).toBe(2);
+    expect(map.get("MiniMaxAI/MiniMax-M2.7")!.length).toBe(2);
+    expect(map.get("google/gemma-4-31B-it")!.length).toBe(2);
   });
 
   test("throws on fetch failure", async () => {
@@ -309,6 +688,6 @@ describe("scrapeModelCapabilities", () => {
       Promise.resolve(new Response("Not Found", { status: 404 })),
     ) as any;
 
-    expect(scrapeModelCapabilities()).rejects.toThrow("Failed to fetch");
+    expect(scrapePricing()).rejects.toThrow("Failed to fetch");
   });
 });
