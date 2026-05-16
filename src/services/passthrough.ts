@@ -2,7 +2,7 @@ import { sail } from "../sail-client.ts";
 import { config } from "../config.ts";
 import { log } from "../../shared/logger.ts";
 import { SSE_HEADERS } from "../constants.ts";
-import { mapSailError } from "../errors.ts";
+import { mapSailError, openAIError } from "../errors.ts";
 import { streamResponse } from "./stream.ts";
 import { stripForSailChatCompletions } from "../transforms/sail-fields.ts";
 import type { CompletionWindow } from "../types.ts";
@@ -27,7 +27,19 @@ export async function handlePassthrough(
   }
   delete sailBody.max_tokens;
 
-  const { status, data } = await sail.chatCompletions(sailBody);
+  let status: number;
+  let data: any;
+  try {
+    ({ status, data } = await sail.chatCompletions(sailBody));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    log.warn(`[passthrough] sail chat completions fetch failed: ${message}`);
+    return openAIError(
+      502,
+      `Sail request failed: ${message}`,
+      "upstream_error",
+    );
+  }
   log.debug(`[passthrough] sail status=${status}`);
 
   if (status !== 200) return mapSailError(status, data);
@@ -59,10 +71,21 @@ export async function handlePassthroughResponses(
   // Strip streaming — Sail doesn't support it on Responses API
   delete sailBody.stream;
 
-  // asap passthrough: Sail runs inference inline and returns the full result.
-  const { status, data } = await sail.createResponse(sailBody, {
-    timeoutMs: config.sail.inferenceTimeoutMs,
-  });
+  let status: number;
+  let data: any;
+  try {
+    ({ status, data } = await sail.createResponse(sailBody, {
+      timeoutMs: config.sail.inferenceTimeoutMs,
+    }));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    log.warn(`[passthrough-responses] sail fetch failed: ${message}`);
+    return openAIError(
+      502,
+      `Sail request failed: ${message}`,
+      "upstream_error",
+    );
+  }
   log.debug(`[passthrough-responses] sail status=${status}`);
 
   if (status !== 200 && status !== 202) {

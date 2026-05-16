@@ -316,6 +316,29 @@ describe("handleMessages", () => {
       const res = await handleMessages(req, mockPoller);
       expect(res.status).toBe(200);
     });
+
+    test("returns Anthropic-style 502 when Sail fetch throws", async () => {
+      mockCreateMessage.mockRejectedValueOnce(
+        new Error("The socket connection was closed unexpectedly"),
+      );
+
+      const req = makeMessagesRequest(
+        {
+          model: "test-model",
+          messages: [{ role: "user", content: "hi" }],
+          max_tokens: 1024,
+        },
+        { "x-completion-window": "asap" },
+      );
+      const res = await handleMessages(req, mockPoller);
+
+      expect(res.status).toBe(502);
+      const body: any = await res.json();
+      expect(body.type).toBe("error");
+      expect(body.error.type).toBe("api_error");
+      expect(body.error.message).toContain("Sail request failed");
+      expect(body.error.message).toContain("socket connection was closed");
+    });
   });
 
   // ── Batching tests ─────────────────────────────────────────────────────

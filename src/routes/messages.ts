@@ -108,7 +108,24 @@ async function handleMessagesPassthrough(
     },
   });
 
-  const { status, data } = await sail.createMessage(sailBody);
+  let status: number;
+  let data: any;
+  try {
+    ({ status, data } = await sail.createMessage(sailBody));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    log.warn(`[messages] sail fetch failed: ${message}`);
+    return Response.json(
+      {
+        type: "error",
+        error: {
+          type: "api_error",
+          message: `Sail request failed: ${message}`,
+        },
+      },
+      { status: 502 },
+    );
+  }
   log.debug(`[messages] sail status=${status}`);
 
   if (status !== 200) {
