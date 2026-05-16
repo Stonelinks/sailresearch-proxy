@@ -289,6 +289,7 @@ describe("Query.models", () => {
         ],
         description: "A large language model",
         source: "https://huggingface.co/org-a/model-a",
+        supportedWindows: '["asap","priority","standard","flex"]',
         researchedAt: new Date("2025-06-01T00:00:00Z"),
       },
     ]);
@@ -296,6 +297,7 @@ describe("Query.models", () => {
     const res = await run(`
       { models {
           id ownedBy contextSize description source researchedAt
+          supportedWindows
           samplingPresets { name description params }
         } }
     `);
@@ -309,6 +311,7 @@ describe("Query.models", () => {
       contextSize: 131072,
       description: "A large language model",
       source: "https://huggingface.co/org-a/model-a",
+      supportedWindows: ["asap", "priority", "standard", "flex"],
       researchedAt: "2025-06-01T00:00:00.000Z",
       samplingPresets: [
         {
@@ -324,6 +327,7 @@ describe("Query.models", () => {
       contextSize: null,
       description: null,
       source: null,
+      supportedWindows: null,
       researchedAt: null,
       samplingPresets: null,
     });
@@ -347,6 +351,7 @@ describe("Query.models", () => {
         description: null,
         source: null,
         researchedAt: new Date(),
+        supportedWindows: null,
       },
     ]);
 
@@ -394,6 +399,7 @@ describe("Mutation.refetchModel", () => {
       samplingPresets: [],
       description: "fresh",
       source: "https://example.com/m1",
+      supportedWindows: '["asap","standard"]',
       researchedAt: new Date("2025-06-02T00:00:00Z"),
     });
 
@@ -454,6 +460,7 @@ describe("Mutation.researchAllModels", () => {
         samplingPresets: [],
         description: "researched",
         source: "https://example.com/m1",
+        supportedWindows: '["asap","standard"]',
         researchedAt: new Date("2025-06-02T00:00:00Z"),
       },
       {
@@ -462,6 +469,7 @@ describe("Mutation.researchAllModels", () => {
         samplingPresets: [],
         description: "also researched",
         source: null,
+        supportedWindows: null,
         researchedAt: new Date("2025-06-02T00:01:00Z"),
       },
     ]);
@@ -511,6 +519,7 @@ describe("Mutation.researchAllModels", () => {
         samplingPresets: [],
         description: "ok",
         source: null,
+        supportedWindows: '["asap","standard"]',
         researchedAt: new Date("2025-06-02T00:00:00Z"),
       },
       {
@@ -519,6 +528,7 @@ describe("Mutation.researchAllModels", () => {
         samplingPresets: [],
         description: "ok too",
         source: null,
+        supportedWindows: null,
         researchedAt: new Date("2025-06-02T00:02:00Z"),
       },
     ]);

@@ -43,6 +43,7 @@ export interface ModelWire {
   supportsImage: boolean;
   reasoning: boolean;
   thinkingLevelMap: Record<string, string | null> | null;
+  supportedWindows: CompletionWindow[] | null;
   researchedAt: string | null;
 }
 
@@ -63,6 +64,7 @@ export interface MetaRow {
   supportsImage: boolean;
   reasoning: boolean;
   thinkingLevelMap: string | null;
+  supportedWindows: string | null;
   researchedAt: Date;
   samplingPresets: Array<{ name: string; description: string; params: string }>;
   prices: Array<{
@@ -123,6 +125,22 @@ function parseThinkingLevelMap(
   }
 }
 
+// Parse supportedWindows JSON string, returning null on failure.
+function parseSupportedWindows(raw: string | null): CompletionWindow[] | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed.filter((v): v is CompletionWindow =>
+        isValidCompletionWindow(v),
+      );
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 function rowToPriceWire(p: MetaRow["prices"][number]): PriceWire | null {
   if (!isValidCompletionWindow(p.completionWindow)) return null;
   return {
@@ -159,6 +177,9 @@ export function mergeModelMeta(
     reasoning: meta?.reasoning ?? false,
     thinkingLevelMap: meta
       ? parseThinkingLevelMap(meta.thinkingLevelMap)
+      : null,
+    supportedWindows: meta
+      ? parseSupportedWindows(meta.supportedWindows)
       : null,
     researchedAt: meta?.researchedAt?.toISOString() ?? null,
   };
@@ -235,6 +256,9 @@ export function toRestShape(
   }
   if (m.thinkingLevelMap) {
     out.thinking_level_map = m.thinkingLevelMap;
+  }
+  if (m.supportedWindows !== null && m.supportedWindows !== undefined) {
+    out.x_supported_windows = m.supportedWindows;
   }
   if (m.description != null) out.description = m.description;
   const presets = m.samplingPresets ?? [];

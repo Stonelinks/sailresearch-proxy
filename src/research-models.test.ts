@@ -3,6 +3,8 @@ import {
   parseAndValidatePiOutput,
   smokeTestPreset,
   smokeTestPresets,
+  chatCompletionsUrlForWindow,
+  smokeTestWindowCompatibility,
 } from "./research-models.ts";
 import type { SamplingPresetInput } from "./types.ts";
 
@@ -314,7 +316,7 @@ describe("smokeTestPreset", () => {
           JSON.stringify({
             choices: [
               {
-                message: { content: "Hello!" },
+                message: { content: "42" },
               },
             ],
           }),
@@ -366,7 +368,7 @@ describe("smokeTestPreset", () => {
       return Promise.resolve(
         new Response(
           JSON.stringify({
-            choices: [{ message: { content: "Thinking..." } }],
+            choices: [{ message: { content: "59" } }],
           }),
           { status: 200 },
         ),
@@ -382,6 +384,10 @@ describe("smokeTestPreset", () => {
     expect(capturedBody.reasoning_effort).toBe("high");
     expect(capturedBody.model).toBe("test-model");
     expect(capturedBody.temperature).toBe(0.5);
+    // Prompt should be a unique arithmetic question, not a static string
+    expect(capturedBody.messages[0].content).toMatch(
+      /^What is \d+ \+ \d+\? Reply with just the number\.$/,
+    );
   });
 
   test("returns ok:false on empty response content", async () => {
@@ -429,7 +435,7 @@ describe("smokeTestPresets", () => {
         return Promise.resolve(
           new Response(
             JSON.stringify({
-              choices: [{ message: { content: "Hi!" } }],
+              choices: [{ message: { content: "42" } }],
             }),
             { status: 200 },
           ),
@@ -467,7 +473,7 @@ describe("smokeTestPresets", () => {
         return Promise.resolve(
           new Response(
             JSON.stringify({
-              choices: [{ message: { content: "Hi!" } }],
+              choices: [{ message: { content: "42" } }],
             }),
             { status: 200 },
           ),
@@ -520,5 +526,123 @@ describe("smokeTestPresets", () => {
 
     expect(results).toHaveLength(2);
     expect(results.every((r) => !r.ok)).toBe(true);
+  });
+});
+
+// ─── Window compatibility smoke test ──────────────────────────────────────
+
+describe("chatCompletionsUrlForWindow", () => {
+  test("builds /asap/v1/chat/completions for asap", () => {
+    const url = chatCompletionsUrlForWindow("http://localhost:4000/v1", "asap");
+    expect(url).toBe("http://localhost:4000/asap/v1/chat/completions");
+  });
+
+  test("builds /flex/v1/chat/completions for flex", () => {
+    const url = chatCompletionsUrlForWindow("http://localhost:4000/v1", "flex");
+    expect(url).toBe("http://localhost:4000/flex/v1/chat/completions");
+  });
+
+  test("no prefix for standard", () => {
+    const url = chatCompletionsUrlForWindow(
+      "http://localhost:4000/v1",
+      "standard",
+    );
+    expect(url).toBe("http://localhost:4000/v1/chat/completions");
+  });
+
+  test("handles base URL without /v1", () => {
+    const url = chatCompletionsUrlForWindow("http://localhost:4000", "asap");
+    expect(url).toBe("http://localhost:4000/asap/v1/chat/completions");
+  });
+});
+
+describe("smokeTestWindowCompatibility", () => {
+  const originalFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  test("returns only windows that respond 200", async () => {
+    const urls: string[] = [];
+    globalThis.fetch = mock((url: string) => {
+      urls.push(url);
+      // asap and flex return 200, priority and standard return 400
+      if (url.includes("/asap/") || url.includes("/flex/")) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              choices: [{ message: { content: "42" } }],
+            }),
+            { status: 200 },
+          ),
+        );
+      }
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            error: { message: "window not available" },
+          }),
+          { status: 400 },
+        ),
+      );
+    }) as any;
+
+    const result = await smokeTestWindowCompatibility(
+      "test-model",
+      "http://localhost:4000/v1",
+    );
+
+    expect(result.size).toBe(2);
+    expect(result.has("asap")).toBe(true);
+    expect(result.has("flex")).toBe(true);
+    expect(result.has("standard")).toBe(false);
+    expect(result.has("priority")).toBe(false);
+  });
+
+  test("returns all windows when all respond 200", async () => {
+    globalThis.fetch = mock(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: "42" } }],
+          }),
+          { status: 200 },
+        ),
+      ),
+    ) as any;
+
+    const result = await smokeTestWindowCompatibility(
+      "test-model",
+      "http://localhost:4000/v1",
+    );
+
+    expect(result.size).toBe(4);
+    expect([...result].sort()).toEqual([
+      "asap",
+      "flex",
+      "priority",
+      "standard",
+    ]);
+  });
+
+  test("returns empty set when all windows fail", async () => {
+    globalThis.fetch = mock(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            error: { message: "not available" },
+          }),
+          { status: 400 },
+        ),
+      ),
+    ) as any;
+
+    const result = await smokeTestWindowCompatibility(
+      "test-model",
+      "http://localhost:4000/v1",
+    );
+
+    expect(result.size).toBe(0);
   });
 });

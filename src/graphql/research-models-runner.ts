@@ -11,6 +11,7 @@ import {
   runPiResearch,
   upsertModelMeta,
   smokeTestPresets,
+  smokeTestWindowCompatibility,
   type SmokeTestResult,
 } from "../research-models.ts";
 import { scrapeModelCapabilities, scrapePricing } from "../docs-scraper.ts";
@@ -161,6 +162,12 @@ async function researchOneWithScrapedData(
     result.thinkingLevelMap,
   );
 
+  // Smoke test window compatibility
+  const windowCompat = await runWindowCompatWithFallback(modelId);
+  if (windowCompat !== null) {
+    result.supportedWindows = [...windowCompat];
+  }
+
   // Filter out presets that failed the base-param smoke test
   const failedPresetNames = new Set<string>();
   const failedThinkingLevels = new Set<string>();
@@ -226,5 +233,24 @@ async function runSmokeTestsWithFallback(
       `[research-runner] smoke tests skipped for ${modelId} (proxy unreachable?): ${msg}`,
     );
     return [];
+  }
+}
+
+/**
+ * Run window compatibility smoke test, but skip gracefully if the proxy is
+ * unreachable. Returns null on connection error so research can proceed —
+ * window compatibility is a validation step, not a gatekeeper.
+ */
+async function runWindowCompatWithFallback(
+  modelId: string,
+): Promise<Set<import("../types.ts").CompletionWindow> | null> {
+  try {
+    return await smokeTestWindowCompatibility(modelId);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    log.warn(
+      `[research-runner] window compatibility test skipped for ${modelId} (proxy unreachable?): ${msg}`,
+    );
+    return null;
   }
 }

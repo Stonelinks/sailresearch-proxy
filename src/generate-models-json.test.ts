@@ -19,6 +19,7 @@ function makeModelData(overrides: Partial<ModelData> = {}): ModelData {
     supportsImage: false,
     reasoning: false,
     thinkingLevelMap: null,
+    supportedWindows: new Set(["asap", "priority", "standard", "flex"]),
     samplingPresets: [
       {
         name: "default",
@@ -418,20 +419,58 @@ describe("buildProvider", () => {
   });
 
   test("creates default preset entry for model with no presets", () => {
-    const data = makeModelData({
-      modelId: "org/model",
-      samplingPresets: [],
-    });
-    const modelsData = new Map([["org/model", data]]);
-
     const provider = buildProvider(
       "standard",
-      modelsData,
+      new Map([["no-presets", makeModelData({ samplingPresets: [] })]]),
       "http://localhost:4000/v1",
     );
+    expect(provider).not.toBeNull();
+    expect(provider!.models[0]!.id).toBe("test-org/test-model");
+  });
 
-    expect(provider!.models).toHaveLength(1);
-    expect(provider!.models[0]!.id).toBe("org/model");
+  test("excludes models that don't support the target window", () => {
+    const provider = buildProvider(
+      "standard",
+      new Map([
+        [
+          "asap-only",
+          makeModelData({
+            modelId: "asap-only",
+            supportedWindows: new Set(["asap"]),
+          }),
+        ],
+        [
+          "all-windows",
+          makeModelData({
+            modelId: "all-windows",
+            supportedWindows: new Set(["asap", "priority", "standard", "flex"]),
+          }),
+        ],
+      ]),
+      "http://localhost:4000/v1",
+    );
+    expect(provider).not.toBeNull();
+    const ids = provider!.models.map((m) => m.id);
+    expect(ids).toContain("all-windows");
+    expect(ids).not.toContain("asap-only");
+  });
+
+  test("includes models with empty supportedWindows (not yet tested)", () => {
+    const provider = buildProvider(
+      "standard",
+      new Map([
+        [
+          "untested",
+          makeModelData({
+            modelId: "untested",
+            supportedWindows: new Set(),
+          }),
+        ],
+      ]),
+      "http://localhost:4000/v1",
+    );
+    expect(provider).not.toBeNull();
+    expect(provider!.models[0]!.id).toBe("untested");
   });
 
   test("handles base URL without /v1 suffix", () => {
@@ -597,5 +636,31 @@ describe("restShapeToModelData", () => {
 
     const data = restShapeToModelData(entry);
     expect(data.pricesByWindow.get("asap")!.inputPerMTok).toBe(0.5);
+  });
+
+  test("parses x_supported_windows from API response", () => {
+    const entry = {
+      id: "org/model",
+      x_supported_windows: ["asap", "flex"],
+    };
+
+    const data = restShapeToModelData(entry);
+    expect(data.supportedWindows).toEqual(new Set(["asap", "flex"]));
+  });
+
+  test("ignores invalid values in x_supported_windows", () => {
+    const entry = {
+      id: "org/model",
+      x_supported_windows: ["asap", "bogus", "standard", 42],
+    };
+
+    const data = restShapeToModelData(entry);
+    expect(data.supportedWindows).toEqual(new Set(["asap", "standard"]));
+  });
+
+  test("defaults to empty set when x_supported_windows is absent", () => {
+    const entry = { id: "org/model" };
+    const data = restShapeToModelData(entry);
+    expect(data.supportedWindows).toEqual(new Set());
   });
 });

@@ -59,6 +59,7 @@ describe("handleModels", () => {
         description: "Big model",
         source: "https://hf.co/org-a/model-a",
         researchedAt: new Date("2025-06-01T00:00:00Z"),
+        supportedWindows: '["asap","priority","standard","flex"]',
         samplingPresets: [
           {
             name: "default",
@@ -143,6 +144,13 @@ describe("handleModels", () => {
         currency: "USD",
       },
     ]);
+    // supportedWindows is surfaced as x_supported_windows
+    expect(m.x_supported_windows).toEqual([
+      "asap",
+      "priority",
+      "standard",
+      "flex",
+    ]);
   });
 
   test("omits enrichment fields entirely for un-researched models", async () => {
@@ -189,6 +197,7 @@ describe("handleModels", () => {
         description: null,
         source: null,
         researchedAt: new Date(),
+        supportedWindows: null,
         samplingPresets: [
           { name: "creative", description: "", params: '{"temperature":1.2}' },
           {
@@ -232,6 +241,7 @@ describe("handleModels", () => {
         description: null,
         source: null,
         researchedAt: new Date(),
+        supportedWindows: null,
         samplingPresets: [
           { name: "broken", description: "", params: "{not json" },
         ],
@@ -262,6 +272,7 @@ describe("handleModels", () => {
         description: null,
         source: null,
         researchedAt: new Date(),
+        supportedWindows: null,
         samplingPresets: [],
         prices: [
           {
@@ -304,6 +315,7 @@ describe("handleModels", () => {
         contextSize: 1,
         description: null,
         source: null,
+        supportedWindows: null,
         researchedAt: new Date(),
         samplingPresets: [],
         prices: [
@@ -342,6 +354,7 @@ describe("handleModels", () => {
         contextSize: 1,
         description: null,
         source: null,
+        supportedWindows: null,
         researchedAt: new Date(),
         samplingPresets: [],
         prices: [
@@ -385,6 +398,7 @@ describe("handleModels", () => {
         description: null,
         source: null,
         researchedAt: new Date(),
+        supportedWindows: null,
         samplingPresets: [],
         prices: [
           {
@@ -405,5 +419,87 @@ describe("handleModels", () => {
       prompt: "0.000001",
       completion: "0.000005",
     });
+  });
+
+  test("window prefix filters models by supportedWindows", async () => {
+    mockListModels.mockResolvedValueOnce({
+      status: 200,
+      data: {
+        data: [
+          { id: "model-a", object: "model", created: 1, owned_by: "x" },
+          { id: "model-b", object: "model", created: 2, owned_by: "y" },
+          { id: "model-c", object: "model", created: 3, owned_by: "z" },
+        ],
+      },
+    });
+    mockModelMetaFindMany.mockResolvedValueOnce([
+      {
+        modelId: "model-a",
+        contextSize: 1,
+        description: null,
+        source: null,
+        researchedAt: new Date(),
+        supportedWindows: '["asap","flex"]',
+        samplingPresets: [],
+        prices: [],
+      },
+      {
+        modelId: "model-b",
+        contextSize: 1,
+        description: null,
+        source: null,
+        researchedAt: new Date(),
+        supportedWindows: '["asap","priority","standard","flex"]',
+        samplingPresets: [],
+        prices: [],
+      },
+      // model-c has no supportedWindows (not yet researched)
+    ]);
+
+    // /flex/v1/models should include model-a, model-b, and model-c
+    const res = await handleModels(reqWithWindow("flex"));
+    const body: any = await res.json();
+    const ids = body.data.map((m: any) => m.id);
+    expect(ids.sort()).toEqual(["model-a", "model-b", "model-c"]);
+  });
+
+  test("window prefix excludes incompatible models", async () => {
+    mockListModels.mockResolvedValueOnce({
+      status: 200,
+      data: {
+        data: [
+          { id: "model-a", object: "model", created: 1, owned_by: "x" },
+          { id: "model-b", object: "model", created: 2, owned_by: "y" },
+        ],
+      },
+    });
+    mockModelMetaFindMany.mockResolvedValueOnce([
+      {
+        modelId: "model-a",
+        contextSize: 1,
+        description: null,
+        source: null,
+        researchedAt: new Date(),
+        supportedWindows: '["asap","flex"]',
+        samplingPresets: [],
+        prices: [],
+      },
+      {
+        modelId: "model-b",
+        contextSize: 1,
+        description: null,
+        source: null,
+        researchedAt: new Date(),
+        supportedWindows: '["asap","priority","standard","flex"]',
+        samplingPresets: [],
+        prices: [],
+      },
+    ]);
+
+    // /standard/v1/models should exclude model-a (only asap+flex)
+    const res = await handleModels(reqWithWindow("standard"));
+    const body: any = await res.json();
+    const ids = body.data.map((m: any) => m.id);
+    expect(ids).toEqual(["model-b"]);
   });
 });

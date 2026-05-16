@@ -123,9 +123,7 @@ export function parsePricingFromJsx(
 
   for (const row of rows.slice(1)) {
     // Find all model IDs in this row (title attr in cap-slug-text spans)
-    const titles = [...row.matchAll(/title="([^"]+)"/g)].map(
-      (m) => m[1]!,
-    );
+    const titles = [...row.matchAll(/title="([^"]+)"/g)].map((m) => m[1]!);
     if (titles.length === 0) continue;
 
     // Find all price cells, each with a data-axis and one or more

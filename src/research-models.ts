@@ -7,13 +7,17 @@
  *   - `runPiResearch` — run pi SDK prompt for a single model
  *   - `upsertModelMeta` — write research results to the database
  */
-import { isValidCompletionWindow } from "./completion-window.ts";
+import {
+  isValidCompletionWindow,
+  COMPLETION_WINDOWS,
+} from "./completion-window.ts";
 import {
   type ModelPriceInput,
   type ModelResearchResult,
   type SamplingParamValue,
   type SamplingPresetInput,
 } from "./types.ts";
+import type { CompletionWindow } from "./types.ts";
 import { runPiPrompt } from "./pi-session.ts";
 import { extractJson } from "../shared/extract-json.ts";
 import { log } from "../shared/logger.ts";
@@ -272,6 +276,7 @@ export function parseAndValidatePiOutput(raw: string): ModelResearchResult {
       typeof obj.supportsImage === "boolean" ? obj.supportsImage : false,
     reasoning,
     thinkingLevelMap,
+    supportedWindows: null, // populated by smoke test, not by pi research
   };
 }
 
@@ -325,8 +330,21 @@ export interface SmokeTestResult {
 }
 
 /**
- * Smoke test a single preset + optional thinking level by sending a "hi"
- * prompt through the proxy's /v1/chat/completions endpoint.
+ * Generate a unique arithmetic prompt to defeat the proxy's dedup cache.
+ * Each call produces a different question like "What is 42 + 17? Reply with just the number."
+ * so that the sail body hash never matches a previously completed job.
+ */
+function uniqueSmokePrompt(): string {
+  const a = Math.floor(Math.random() * 1000);
+  const b = Math.floor(Math.random() * 1000);
+  return `What is ${a} + ${b}? Reply with just the number.`;
+}
+
+/**
+ * Smoke test a single preset + optional thinking level by sending a unique
+ * arithmetic prompt through the proxy's /v1/chat/completions endpoint.
+ * Each call uses a different prompt (e.g. "What is 42 + 17? Reply with just
+ * the number.") to defeat the proxy's dedup cache and force real inference.
  *
  * @param baseUrl  Full URL for the chat completions endpoint.
  *                Defaults to `http://127.0.0.1:{port}/v1/chat/completions`.
@@ -341,7 +359,7 @@ export async function smokeTestPreset(
 
   const body: Record<string, unknown> = {
     model: modelId,
-    messages: [{ role: "user", content: "hi" }],
+    messages: [{ role: "user", content: uniqueSmokePrompt() }],
     ...params,
   };
 
@@ -472,6 +490,61 @@ export async function smokeTestPresets(
   return results;
 }
 
+// ─── Window compatibility smoke test ──────────────────────────────────────────
+
+/**
+ * Build a chat completions URL for a specific completion window.
+ * Input:  http://host:4000/v1  (or http://host:4000)
+ *         window: "asap"
+ * Output: http://host:4000/asap/v1/chat/completions
+ *
+ * For "standard" (the default), no prefix is injected.
+ */
+export function chatCompletionsUrlForWindow(
+  baseUrl: string,
+  window: CompletionWindow,
+): string {
+  const stripped = baseUrl.replace(/\/v1\/?$/, "").replace(/\/+$/, "");
+  if (window === "standard") {
+    return `${stripped}/v1/chat/completions`;
+  }
+  return `${stripped}/${window}/v1/chat/completions`;
+}
+
+/**
+ * Smoke test a model against all 4 completion windows by sending a simple
+ * request to each window-prefixed chat completions endpoint. Returns the
+ * set of windows where the model returned a successful response.
+ *
+ * Uses default (empty) params — this tests window compatibility, not preset
+ * validity. Models not yet researched (no preset data) are still tested.
+ *
+ * Runs sequentially to avoid overwhelming Sail.
+ */
+export async function smokeTestWindowCompatibility(
+  modelId: string,
+  baseUrl: string = `http://127.0.0.1:${config.server.port}/v1`,
+): Promise<Set<CompletionWindow>> {
+  const supported = new Set<CompletionWindow>();
+
+  for (const window of COMPLETION_WINDOWS) {
+    const url = chatCompletionsUrlForWindow(baseUrl, window);
+    const result = await smokeTestPreset(modelId, {}, null, url);
+    if (result.ok) {
+      supported.add(window);
+    } else {
+      log.debug(
+        `[window-compat] ${modelId} ✗ ${window}: ${result.error?.slice(0, 100)}`,
+      );
+    }
+  }
+
+  log.info(
+    `[window-compat] ${modelId} supported: ${supported.size > 0 ? [...supported].join(",") : "(none)"}`,
+  );
+  return supported;
+}
+
 // ─── Upsert model metadata ─────────────────────────────────────────────────
 
 export async function upsertModelMeta(
@@ -492,6 +565,9 @@ export async function upsertModelMeta(
         thinkingLevelMap: result.thinkingLevelMap
           ? JSON.stringify(result.thinkingLevelMap)
           : null,
+        supportedWindows: result.supportedWindows
+          ? JSON.stringify(result.supportedWindows)
+          : null,
         researchedAt: new Date(),
       },
       create: {
@@ -503,6 +579,9 @@ export async function upsertModelMeta(
         reasoning: result.reasoning,
         thinkingLevelMap: result.thinkingLevelMap
           ? JSON.stringify(result.thinkingLevelMap)
+          : null,
+        supportedWindows: result.supportedWindows
+          ? JSON.stringify(result.supportedWindows)
           : null,
       },
     });

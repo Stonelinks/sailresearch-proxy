@@ -17,7 +17,10 @@ import { COMPLETION_WINDOWS } from "./completion-window.ts";
 import { WINDOW_PROVIDER_NAMES } from "./constants.ts";
 import type { CompletionWindow, SamplingPresetInput } from "./types.ts";
 import type { PriceWire, PresetWire } from "./models-meta.ts";
-import { smokeTestPresets } from "./research-models.ts";
+import {
+  smokeTestPresets,
+  smokeTestWindowCompatibility,
+} from "./research-models.ts";
 
 // ─── CLI arg parsing ────────────────────────────────────────────────────────
 
@@ -59,7 +62,10 @@ provider section. Models with multiple sampling presets are broken out by
 name using the convention: "model-id::preset-name" for non-default presets.
 
 With --smoke-test, each preset (and one thinking level for reasoning models)
-is tested by sending a "hi" prompt through /v1/chat/completions. Failed
+is tested by sending a unique arithmetic prompt (e.g. "What is 42 + 17?
+Reply with just the number.") through /v1/chat/completions. Each call uses
+different random numbers to defeat the proxy's dedup cache and force real
+inference. Failed
 presets and thinking levels are filtered from the output, matching the
 behavior of model research.
 
@@ -114,6 +120,7 @@ export interface ModelData {
   thinkingLevelMap: Record<string, string | null> | null;
   samplingPresets: PresetWire[];
   pricesByWindow: Map<CompletionWindow, PriceWire>;
+  supportedWindows: Set<CompletionWindow>;
 }
 
 // ─── Data loading ───────────────────────────────────────────────────────────
@@ -254,6 +261,19 @@ export function restShapeToModelData(
     }
   }
 
+  // supportedWindows — from API response
+  let supportedWindows: Set<CompletionWindow> = new Set();
+  if (Array.isArray(entry.x_supported_windows)) {
+    for (const w of entry.x_supported_windows) {
+      if (
+        typeof w === "string" &&
+        (w === "asap" || w === "priority" || w === "standard" || w === "flex")
+      ) {
+        supportedWindows.add(w);
+      }
+    }
+  }
+
   return {
     modelId,
     contextSize,
@@ -263,6 +283,7 @@ export function restShapeToModelData(
     thinkingLevelMap,
     samplingPresets,
     pricesByWindow,
+    supportedWindows,
   };
 }
 
@@ -409,6 +430,12 @@ export function buildProvider(
   }
 
   for (const data of [...modelsData.values()]) {
+    // Skip models that don't support this window.
+    // If supportedWindows is empty (not yet tested), include by default.
+    if (data.supportedWindows.size > 0 && !data.supportedWindows.has(window)) {
+      continue;
+    }
+
     const price = data.pricesByWindow.get(window) ?? null;
 
     if (data.samplingPresets.length === 0) {
@@ -626,6 +653,25 @@ async function main() {
     console.log("Running smoke tests ...\n");
     const completionsUrl = chatCompletionsUrl(opts.baseUrl);
     const smokeRows = await runSmokeTests(metaMap, completionsUrl);
+
+    // Also test window compatibility for each model
+    console.log("Testing window compatibility ...\n");
+    const modelIds = [...metaMap.keys()];
+    for (let i = 0; i < modelIds.length; i++) {
+      const modelId = modelIds[i]!;
+      const data = metaMap.get(modelId)!;
+      console.log(
+        `[${i + 1}/${modelIds.length}] Window compat: ${modelId} ...`,
+      );
+      const windows = await smokeTestWindowCompatibility(
+        modelId,
+        opts.baseUrl.replace(/\/v1\/?$/, "").replace(/\/+$/, ""),
+      );
+      data.supportedWindows = windows;
+      console.log(`  ${windows.size > 0 ? [...windows].join(", ") : "(none)"}`);
+    }
+    console.log();
+
     printSmokeTestSummary(smokeRows);
 
     const hasFailures = smokeRows.some((r) => !r.ok);

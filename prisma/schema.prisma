@@ -18,9 +18,10 @@ model ModelMeta {
   description     String?
   source          String?
   supportsImage   Boolean         @default(false)
-  reasoning       Boolean         @default(false)
+  reasoning        Boolean         @default(false)
   thinkingLevelMap String?
-  researchedAt    DateTime         @default(now())
+  supportedWindows String?          // JSON array of CompletionWindow values, e.g. '["asap","flex"]'
+  researchedAt     DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
   samplingPresets SamplingPreset[]
   prices          ModelPrice[]

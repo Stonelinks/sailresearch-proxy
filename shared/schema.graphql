@@ -73,6 +73,7 @@ type Model {
   researchedAt: DateTime
   samplingPresets: [SamplingPreset!]
   source: String
+  supportedWindows: [String!]
   supportsImage: Boolean!
   thinkingLevelMap: JSON
 }

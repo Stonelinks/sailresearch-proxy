@@ -115,6 +115,11 @@ builder.objectType("Model", {
       resolve: (m) =>
         m.thinkingLevelMap as Record<string, string | number | boolean> | null,
     }),
+    supportedWindows: t.field({
+      type: ["String"],
+      nullable: true,
+      resolve: (m) => m.supportedWindows,
+    }),
     researchedAt: t.field({
       type: "DateTime",
       nullable: true,
