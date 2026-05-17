@@ -12,11 +12,18 @@ import {
   upsertModelMeta,
   smokeTestPresets,
   smokeTestWindowCompatibility,
+  chatCompletionsUrlForWindow,
   type SmokeTestResult,
 } from "../research-models.ts";
 import { scrapeModelCapabilities, scrapePricing } from "../docs-scraper.ts";
 import { log } from "../../shared/logger.ts";
-import type { ModelPriceInput, SamplingPresetInput } from "../types.ts";
+import type {
+  CompletionWindow,
+  ModelPriceInput,
+  SamplingPresetInput,
+} from "../types.ts";
+import { COMPLETION_WINDOWS } from "../completion-window.ts";
+import { config } from "../config.ts";
 import { researchTracker } from "./research-tracker.ts";
 
 // ─── Shared scraped data ─────────────────────────────────────────────────────
@@ -121,6 +128,23 @@ export async function researchAndUpsertMany(
   }
 
   // Batch is auto-ended by completeModel/failModel when all are accounted for
+
+  // Clean up stale ModelMeta rows for models no longer in Sail's API
+  const { prisma } = await import("../db.ts");
+  const stale = await prisma.modelMeta.findMany({
+    where: { modelId: { notIn: modelIds } },
+    select: { modelId: true },
+  });
+  if (stale.length > 0) {
+    const staleIds = stale.map((s) => s.modelId);
+    await prisma.modelMeta.deleteMany({
+      where: { modelId: { in: staleIds } },
+    });
+    log.info(
+      `[researchAllModels] removed ${staleIds.length} stale model(s): ${staleIds.join(", ")}`,
+    );
+  }
+
   return errors;
 }
 
@@ -155,18 +179,30 @@ async function researchOneWithScrapedData(
     result.reasoning = caps.reasoning;
   }
 
-  // Smoke test presets through the proxy
-  const smokeResults = await runSmokeTestsWithFallback(
-    modelId,
-    result.samplingPresets,
-    result.thinkingLevelMap,
-  );
-
-  // Smoke test window compatibility
+  // Smoke test window compatibility FIRST — we need to know which windows
+  // the model supports before running preset smoke tests, because preset
+  // tests route through the proxy and the proxy's default window
+  // ("standard") may not be available for all models.
   const windowCompat = await runWindowCompatWithFallback(modelId);
   if (windowCompat !== null) {
     result.supportedWindows = [...windowCompat];
   }
+
+  // Pick the best available window for preset smoke tests.
+  // Prefer: standard > priority > flex > asap (cheapest batched first).
+  const bestWindow = pickBestWindow(windowCompat);
+  const smokeTestUrl = chatCompletionsUrlForWindow(
+    `http://127.0.0.1:${config.server.port}/v1`,
+    bestWindow,
+  );
+
+  // Smoke test presets through the proxy using a window the model supports
+  const smokeResults = await runSmokeTestsWithFallback(
+    modelId,
+    result.samplingPresets,
+    result.thinkingLevelMap,
+    smokeTestUrl,
+  );
 
   // Filter out presets that failed the base-param smoke test
   const failedPresetNames = new Set<string>();
@@ -215,18 +251,41 @@ async function researchOneWithScrapedData(
 }
 
 /**
+ * Pick the best completion window for smoke testing presets.
+ * Prefers batched windows (cheaper) over asap (expensive passthrough).
+ * Order: standard > priority > flex > asap.
+ * Returns "standard" as fallback when compatibility is unknown.
+ */
+function pickBestWindow(
+  supported: Set<CompletionWindow> | null,
+): CompletionWindow {
+  if (supported === null || supported.size === 0) {
+    // Unknown compatibility — fall back to standard (the proxy default)
+    return "standard";
+  }
+  for (const window of COMPLETION_WINDOWS) {
+    if (supported.has(window)) return window;
+  }
+  return "standard";
+}
+
+/**
  * Run smoke tests for presets, but skip gracefully if the proxy is
  * unreachable. Returns empty array (no failures) on connection error
  * so research can proceed — smoke tests are a validation step, not
  * a gatekeeper.
+ *
+ * @param baseUrl  The chat completions URL to use (should target a
+ *                window the model supports).
  */
 async function runSmokeTestsWithFallback(
   modelId: string,
   presets: SamplingPresetInput[],
   thinkingLevelMap: Record<string, string | null> | null,
+  baseUrl: string = `http://127.0.0.1:${config.server.port}/v1/chat/completions`,
 ): Promise<SmokeTestResult[]> {
   try {
-    return await smokeTestPresets(modelId, presets, thinkingLevelMap);
+    return await smokeTestPresets(modelId, presets, thinkingLevelMap, baseUrl);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     log.warn(
