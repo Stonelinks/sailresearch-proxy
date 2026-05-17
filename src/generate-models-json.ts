@@ -20,6 +20,7 @@ import type { PriceWire, PresetWire } from "./models-meta.ts";
 import {
   smokeTestPresets,
   smokeTestWindowCompatibility,
+  chatCompletionsUrlForWindow,
 } from "./research-models.ts";
 
 // ─── CLI arg parsing ────────────────────────────────────────────────────────
@@ -513,6 +514,20 @@ function printSmokeTestSummary(results: SmokeRow[]): void {
 }
 
 /**
+ * Pick the best completion window for smoke testing presets.
+ * Prefers batched windows (cheaper) over asap (expensive passthrough).
+ * Order: standard > priority > flex > asap.
+ * Returns "standard" as fallback when compatibility is unknown.
+ */
+function pickBestWindow(supported: Set<CompletionWindow>): CompletionWindow {
+  if (supported.size === 0) return "standard";
+  for (const window of COMPLETION_WINDOWS) {
+    if (supported.has(window)) return window;
+  }
+  return "standard";
+}
+
+/**
  * Compute the chat completions URL from the user-supplied base URL.
  * Input:  http://host:4000/v1  (or http://host:4000)
  * Output: http://host:4000/v1/chat/completions
@@ -525,14 +540,41 @@ function chatCompletionsUrl(baseUrl: string): string {
 /**
  * Run smoke tests for all models, filtering out failed presets and thinking
  * levels from the metaMap in-place. Returns the display rows for the summary.
+ *
+ * @param metaMap          Model data map (mutated in-place to remove failed presets)
+ * @param proxyBaseUrl     Proxy base URL (e.g. http://localhost:4000/v1)
  */
 async function runSmokeTests(
   metaMap: Map<string, ModelData>,
-  completionsUrl: string,
+  proxyBaseUrl: string,
 ): Promise<SmokeRow[]> {
   const rows: SmokeRow[] = [];
   const modelIds = [...metaMap.keys()];
+  const strippedBaseUrl = proxyBaseUrl
+    .replace(/\/v1\/?$/, "")
+    .replace(/\/+$/, "");
 
+  // ── Phase 1: Window compatibility ────────────────────────────────
+  // Must run FIRST so we know which windows each model supports.
+  // Preset smoke tests need to use a supported window.
+  console.log("Testing window compatibility ...\n");
+  for (let i = 0; i < modelIds.length; i++) {
+    const modelId = modelIds[i]!;
+    const data = metaMap.get(modelId)!;
+    console.log(`[${i + 1}/${modelIds.length}] Window compat: ${modelId} ...`);
+    const windows = await smokeTestWindowCompatibility(
+      modelId,
+      strippedBaseUrl,
+    );
+    data.supportedWindows = windows;
+    console.log(`  ${windows.size > 0 ? [...windows].join(", ") : "(none)"}`);
+  }
+  console.log();
+
+  // ── Phase 2: Preset + thinking level smoke tests ────────────────
+  // Use a supported window for each model so the request doesn't fail
+  // due to the proxy's default window being unavailable.
+  console.log("Testing presets ...\n");
   for (let i = 0; i < modelIds.length; i++) {
     const modelId = modelIds[i]!;
     const data = metaMap.get(modelId)!;
@@ -551,8 +593,14 @@ async function runSmokeTests(
       continue;
     }
 
+    const bestWindow = pickBestWindow(data.supportedWindows);
+    const completionsUrl = chatCompletionsUrlForWindow(
+      strippedBaseUrl,
+      bestWindow,
+    );
+
     console.log(
-      `[${i + 1}/${modelIds.length}] Testing ${modelId} (${presets.length} preset${presets.length > 1 ? "s" : ""}) ...`,
+      `[${i + 1}/${modelIds.length}] Testing ${modelId} (${presets.length} preset${presets.length > 1 ? "s" : ""}, window=${bestWindow}) ...`,
     );
 
     const results = await smokeTestPresets(
@@ -651,26 +699,7 @@ async function main() {
   // are filtered out of the generated models.json
   if (opts.smokeTest) {
     console.log("Running smoke tests ...\n");
-    const completionsUrl = chatCompletionsUrl(opts.baseUrl);
-    const smokeRows = await runSmokeTests(metaMap, completionsUrl);
-
-    // Also test window compatibility for each model
-    console.log("Testing window compatibility ...\n");
-    const modelIds = [...metaMap.keys()];
-    for (let i = 0; i < modelIds.length; i++) {
-      const modelId = modelIds[i]!;
-      const data = metaMap.get(modelId)!;
-      console.log(
-        `[${i + 1}/${modelIds.length}] Window compat: ${modelId} ...`,
-      );
-      const windows = await smokeTestWindowCompatibility(
-        modelId,
-        opts.baseUrl.replace(/\/v1\/?$/, "").replace(/\/+$/, ""),
-      );
-      data.supportedWindows = windows;
-      console.log(`  ${windows.size > 0 ? [...windows].join(", ") : "(none)"}`);
-    }
-    console.log();
+    const smokeRows = await runSmokeTests(metaMap, opts.baseUrl);
 
     printSmokeTestSummary(smokeRows);
 
