@@ -32,8 +32,7 @@ describe("extractJson", () => {
   });
 
   test("extracts nested JSON objects", () => {
-    const raw =
-      'Commentary before.{"outer": {"inner": 42}, "list": [1, 2, 3]}';
+    const raw = 'Commentary before.{"outer": {"inner": 42}, "list": [1, 2, 3]}';
     expect(extractJson(raw)).toBe(
       '{"outer": {"inner": 42}, "list": [1, 2, 3]}',
     );
@@ -61,13 +60,16 @@ describe("extractJson", () => {
     expect(extractJson(raw)).toBe('{"first": 1}');
   });
 
+  test("returns null for Jinja template syntax", () => {
+    expect(extractJson("{%- if condition %}output{% endif %}")).toBeNull();
+    expect(extractJson("{% if condition %}output{% endif %}")).toBeNull();
+  });
+
   test("handles real LLM pricing scrape output", () => {
     const raw =
       'Let me check if there are any local files with the full pricing data, since the HTML provided is truncated.Now I have the complete pricing page. Let me extract all the data carefully.{"models":[{"modelId":"test/model","prices":[]}]}';
     const result = extractJson(raw);
-    expect(result).toBe(
-      '{"models":[{"modelId":"test/model","prices":[]}]}',
-    );
+    expect(result).toBe('{"models":[{"modelId":"test/model","prices":[]}]}');
     // Verify it's valid JSON
     expect(() => JSON.parse(result!)).not.toThrow();
   });

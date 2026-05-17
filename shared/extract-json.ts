@@ -19,6 +19,12 @@ export function extractJson(raw: string): string | null {
   const firstBrace = raw.indexOf("{");
   if (firstBrace === -1) return null;
 
+  // Reject Jinja/template syntax that starts with "{%-" or "{%" — LLMs
+  // sometimes emit template code instead of JSON. The brace counter below
+  // would find a matching "}" but the content is not valid JSON.
+  const afterBrace = raw.slice(firstBrace, firstBrace + 3);
+  if (afterBrace === "{%-" || afterBrace === "{% ") return null;
+
   let braceCount = 0;
   let end = -1;
 
