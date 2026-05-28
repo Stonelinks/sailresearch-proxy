@@ -10,7 +10,7 @@ services:
       - SAIL_API_KEY=${SAIL_API_KEY}
       - PORT=4000
       - HOST=0.0.0.0
-      - DEFAULT_COMPLETION_WINDOW=standard
+      - DEFAULT_COMPLETION_WINDOW=flex
       - LOG_LEVEL=info
       - PROXY_API_KEY=${PROXY_API_KEY:-}
       - PI_SAIL_BASE_URL=http://localhost:4000/v1
