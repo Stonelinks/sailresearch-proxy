@@ -52,7 +52,7 @@ describe("messagesToResponsesAPI", () => {
     expect(result.top_p).toBeUndefined();
   });
 
-  test("maps output_config.format with json_schema to text", () => {
+  test("maps output_config.format with json_schema to text.format (Sail Responses API shape)", () => {
     const result = messagesToResponsesAPI(
       {
         model: "m",
@@ -62,6 +62,7 @@ describe("messagesToResponsesAPI", () => {
             type: "json_schema",
             json_schema: {
               name: "Test",
+              strict: true,
               schema: { type: "object", properties: { x: { type: "number" } } },
             },
           },
@@ -70,10 +71,30 @@ describe("messagesToResponsesAPI", () => {
       "standard",
     );
     expect(result.text).toEqual({
-      type: "json_schema",
-      json_schema: {
+      format: {
+        type: "json_schema",
         name: "Test",
+        strict: true,
         schema: { type: "object", properties: { x: { type: "number" } } },
+      },
+    });
+  });
+
+  test("maps output_config.format with json_object to open-ended json_schema", () => {
+    const result = messagesToResponsesAPI(
+      {
+        model: "m",
+        messages: [],
+        output_config: { format: { type: "json_object" } },
+      },
+      "standard",
+    );
+    expect(result.text).toEqual({
+      format: {
+        type: "json_schema",
+        name: "response",
+        strict: false,
+        schema: { type: "object", additionalProperties: true },
       },
     });
   });

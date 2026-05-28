@@ -25,14 +25,8 @@ export function chatToResponsesAPI(
   if (body.top_p != null) sailBody.top_p = body.top_p;
 
   if (body.response_format) {
-    if (body.response_format.type === "json_schema") {
-      sailBody.text = {
-        type: "json_schema",
-        json_schema: body.response_format.json_schema,
-      };
-    } else if (body.response_format.type === "json_object") {
-      sailBody.text = { type: "json_schema" };
-    }
+    const fmt = responseFormatToSailTextFormat(body.response_format);
+    if (fmt) sailBody.text = { format: fmt };
   }
 
   if (body.reasoning_effort) {
@@ -44,6 +38,36 @@ export function chatToResponsesAPI(
   if (body.user) sailBody.user = body.user;
 
   return sailBody;
+}
+
+// SAIL's Responses API expects structured output config as
+// `text.format = { type, name, strict, schema, description? }`. OpenAI's
+// `response_format` and Anthropic's `output_config.format` both wrap the
+// schema under a `json_schema` field, so we have to unwrap it. SAIL no
+// longer accepts `type: "json_object"` — translate that to an open-ended
+// json_schema so existing callers don't break in batched mode.
+export function responseFormatToSailTextFormat(fmt: any): any | null {
+  if (!fmt) return null;
+  if (fmt.type === "json_schema") {
+    const js = fmt.json_schema ?? {};
+    const out: any = {
+      type: "json_schema",
+      name: js.name ?? "response",
+      strict: js.strict ?? false,
+      schema: js.schema ?? { type: "object", additionalProperties: true },
+    };
+    if (js.description !== undefined) out.description = js.description;
+    return out;
+  }
+  if (fmt.type === "json_object") {
+    return {
+      type: "json_schema",
+      name: "response",
+      strict: false,
+      schema: { type: "object", additionalProperties: true },
+    };
+  }
+  return null;
 }
 
 // Chat Completions wraps function fields under `function`; the Responses API

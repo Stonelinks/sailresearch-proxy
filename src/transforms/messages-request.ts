@@ -1,5 +1,8 @@
 import type { CompletionWindow } from "../types.ts";
-import { messagesToResponsesInput } from "./request.ts";
+import {
+  messagesToResponsesInput,
+  responseFormatToSailTextFormat,
+} from "./request.ts";
 
 /**
  * Transform an Anthropic Messages API request body into a Sail Responses API
@@ -41,15 +44,10 @@ export function messagesToResponsesAPI(
   if (body.temperature != null) sailBody.temperature = body.temperature;
   if (body.top_p != null) sailBody.top_p = body.top_p;
 
-  // Map Anthropic output_config.format → Sail text
+  // Map Anthropic output_config.format → Sail text.format
   if (body.output_config?.format) {
-    const fmt = body.output_config.format;
-    if (fmt.type === "json_schema") {
-      sailBody.text = {
-        type: "json_schema",
-        json_schema: fmt.json_schema,
-      };
-    }
+    const fmt = responseFormatToSailTextFormat(body.output_config.format);
+    if (fmt) sailBody.text = { format: fmt };
   }
 
   if (body.user) sailBody.user = body.user;

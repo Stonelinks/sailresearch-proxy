@@ -61,7 +61,7 @@ describe("chatToResponsesAPI", () => {
     expect(result.top_p).toBeUndefined();
   });
 
-  test("maps json_schema response_format to text", () => {
+  test("maps json_schema response_format to text.format (Sail Responses API shape)", () => {
     const result = chatToResponsesAPI(
       {
         model: "m",
@@ -70,6 +70,7 @@ describe("chatToResponsesAPI", () => {
           type: "json_schema",
           json_schema: {
             name: "Test",
+            strict: true,
             schema: { type: "object", properties: { x: { type: "number" } } },
           },
         },
@@ -77,20 +78,81 @@ describe("chatToResponsesAPI", () => {
       "standard",
     );
     expect(result.text).toEqual({
-      type: "json_schema",
-      json_schema: {
+      format: {
+        type: "json_schema",
         name: "Test",
+        strict: true,
         schema: { type: "object", properties: { x: { type: "number" } } },
       },
     });
   });
 
-  test("maps json_object response_format", () => {
+  test("defaults strict=false and name='response' when omitted", () => {
+    const result = chatToResponsesAPI(
+      {
+        model: "m",
+        messages: [],
+        response_format: {
+          type: "json_schema",
+          json_schema: { schema: { type: "object" } },
+        },
+      },
+      "standard",
+    );
+    expect(result.text).toEqual({
+      format: {
+        type: "json_schema",
+        name: "response",
+        strict: false,
+        schema: { type: "object" },
+      },
+    });
+  });
+
+  test("preserves description on json_schema when provided", () => {
+    const result = chatToResponsesAPI(
+      {
+        model: "m",
+        messages: [],
+        response_format: {
+          type: "json_schema",
+          json_schema: {
+            name: "Test",
+            description: "a category guess",
+            schema: { type: "object" },
+          },
+        },
+      },
+      "standard",
+    );
+    expect(result.text.format.description).toBe("a category guess");
+  });
+
+  test("maps json_object to an open-ended json_schema (Sail dropped json_object)", () => {
     const result = chatToResponsesAPI(
       { model: "m", messages: [], response_format: { type: "json_object" } },
       "standard",
     );
-    expect(result.text).toEqual({ type: "json_schema" });
+    expect(result.text).toEqual({
+      format: {
+        type: "json_schema",
+        name: "response",
+        strict: false,
+        schema: { type: "object", additionalProperties: true },
+      },
+    });
+  });
+
+  test("omits text when response_format has unknown type", () => {
+    const result = chatToResponsesAPI(
+      {
+        model: "m",
+        messages: [],
+        response_format: { type: "weird_format" },
+      },
+      "standard",
+    );
+    expect(result.text).toBeUndefined();
   });
 
   test("maps reasoning_effort", () => {
