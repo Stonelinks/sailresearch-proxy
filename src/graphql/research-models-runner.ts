@@ -24,6 +24,7 @@ import type {
 } from "../types.ts";
 import { COMPLETION_WINDOWS } from "../completion-window.ts";
 import { config } from "../config.ts";
+import { mapSettledWithLimit } from "../concurrency.ts";
 import { researchTracker } from "./research-tracker.ts";
 
 // ─── Shared scraped data ─────────────────────────────────────────────────────
@@ -86,7 +87,8 @@ export async function researchAndUpsertOne(modelId: string): Promise<void> {
 
 /**
  * Research multiple models in parallel. Scrapes docs once and shares
- * the results across all models. All pi research calls run concurrently.
+ * the results across all models. Pi research calls run through a bounded
+ * worker pool (`config.research.maxConcurrent`) so we don't flood the proxy.
  *
  * Returns an array of errors for any models that failed. Models that
  * succeed are silently upserted.
@@ -98,9 +100,12 @@ export async function researchAndUpsertMany(
   const scraped = await scrapeDocs();
   const errors: Array<{ modelId: string; error: string }> = [];
 
-  // Fire all research calls concurrently
-  const results = await Promise.allSettled(
-    modelIds.map((modelId) => {
+  // Fire research calls through a bounded pool — at most
+  // config.research.maxConcurrent models in flight at once.
+  const results = await mapSettledWithLimit(
+    modelIds,
+    config.research.maxConcurrent,
+    (modelId) => {
       researchTracker.startModel(modelId);
       return researchOneWithScrapedData(modelId, scraped)
         .then(() => {
@@ -111,7 +116,7 @@ export async function researchAndUpsertMany(
           researchTracker.failModel(modelId, msg);
           throw err;
         });
-    }),
+    },
   );
 
   for (let i = 0; i < results.length; i++) {

@@ -57,6 +57,12 @@ export const config = {
     intervalMs: intEnv("POLL_INTERVAL_MS", SECOND),
     maxConcurrent: intEnv("MAX_CONCURRENT_POLLS", 10),
   },
+  research: {
+    // Max models researched / smoke tested in parallel. Bounds the load
+    // placed on the proxy (and Sail upstream) during batch research and
+    // `generate-models-json --smoke-test`.
+    maxConcurrent: intEnv("MAX_CONCURRENT_RESEARCH", 5),
+  },
   streaming: {
     chunkSize: intEnv("STREAM_CHUNK_SIZE", 20),
     heartbeatIntervalMs: intEnv("HEARTBEAT_INTERVAL_MS", HEARTBEAT_INTERVAL_MS),

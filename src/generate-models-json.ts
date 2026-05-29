@@ -22,6 +22,8 @@ import {
   smokeTestWindowCompatibility,
   chatCompletionsUrlForWindow,
 } from "./research-models.ts";
+import { config } from "./config.ts";
+import { mapSettledWithLimit } from "./concurrency.ts";
 
 // ─── CLI arg parsing ────────────────────────────────────────────────────────
 
@@ -538,8 +540,122 @@ function chatCompletionsUrl(baseUrl: string): string {
 }
 
 /**
+ * Smoke test a single model: window compatibility first, then presets +
+ * thinking levels through a supported window. Mutates `data` in-place to
+ * remove failed presets / disable failed thinking levels, and returns the
+ * display rows for that model.
+ *
+ * Output is buffered into a single block so concurrent models don't
+ * interleave their log lines.
+ */
+async function smokeTestOneModel(
+  modelId: string,
+  data: ModelData,
+  strippedBaseUrl: string,
+): Promise<SmokeRow[]> {
+  const rows: SmokeRow[] = [];
+  const out: string[] = [];
+
+  // ── Phase 1: Window compatibility ────────────────────────────────
+  // Must run FIRST so we know which windows the model supports — preset
+  // smoke tests need to route through a supported window.
+  const windows = await smokeTestWindowCompatibility(modelId, strippedBaseUrl);
+  data.supportedWindows = windows;
+  out.push(
+    `  windows: ${windows.size > 0 ? [...windows].join(", ") : "(none)"}`,
+  );
+
+  // ── Phase 2: Preset + thinking level smoke tests ────────────────
+  // Convert PresetWire[] to SamplingPresetInput[] for smokeTestPresets
+  const presets: SamplingPresetInput[] = data.samplingPresets.map((p) => ({
+    name: p.name,
+    description: p.description,
+    params: p.params,
+  }));
+
+  if (presets.length === 0) {
+    out.push("  no presets, skipping");
+    console.log(`${modelId}:\n${out.join("\n")}`);
+    return rows;
+  }
+
+  const bestWindow = pickBestWindow(data.supportedWindows);
+  const completionsUrl = chatCompletionsUrlForWindow(
+    strippedBaseUrl,
+    bestWindow,
+  );
+  out.push(
+    `  testing ${presets.length} preset${presets.length > 1 ? "s" : ""} (window=${bestWindow})`,
+  );
+
+  const results = await smokeTestPresets(
+    modelId,
+    presets,
+    data.thinkingLevelMap,
+    completionsUrl,
+  );
+
+  // Collect results for display
+  for (const r of results) {
+    rows.push({
+      modelId,
+      presetName: r.presetName,
+      thinkingLevel: r.thinkingLevel,
+      ok: r.ok,
+      error: r.error,
+    });
+  }
+
+  // Filter out presets that failed the base-param smoke test
+  const failedPresetNames = new Set<string>();
+  const failedThinkingLevels = new Set<string>();
+
+  for (const sr of results) {
+    if (sr.ok) continue;
+    if (sr.thinkingLevel !== null) {
+      failedThinkingLevels.add(sr.thinkingLevel);
+      out.push(
+        `  ✗ preset="${sr.presetName}" thinkingLevel=${sr.thinkingLevel} — ${sr.error}`,
+      );
+    } else {
+      failedPresetNames.add(sr.presetName);
+      out.push(`  ✗ preset="${sr.presetName}" base params — ${sr.error}`);
+    }
+  }
+
+  // Remove failed presets from the model data
+  if (failedPresetNames.size > 0) {
+    data.samplingPresets = data.samplingPresets.filter(
+      (p) => !failedPresetNames.has(p.name),
+    );
+    out.push(
+      `  removed ${failedPresetNames.size} failed preset(s): ${[...failedPresetNames].join(", ")}`,
+    );
+  }
+
+  // Disable failed thinking levels
+  if (data.thinkingLevelMap && failedThinkingLevels.size > 0) {
+    for (const level of failedThinkingLevels) {
+      if (level in data.thinkingLevelMap) {
+        data.thinkingLevelMap[level] = null;
+        out.push(`  disabled thinking level "${level}"`);
+      }
+    }
+  }
+
+  const passCount = results.filter((r) => r.ok).length;
+  out.push(`  ✓ ${passCount}/${results.length} passed`);
+  console.log(`${modelId}:\n${out.join("\n")}`);
+  return rows;
+}
+
+/**
  * Run smoke tests for all models, filtering out failed presets and thinking
  * levels from the metaMap in-place. Returns the display rows for the summary.
+ *
+ * Models are smoke tested through a bounded worker pool
+ * (`config.research.maxConcurrent`), mirroring `researchAndUpsertMany`
+ * (see graphql/research-models-runner.ts).
  *
  * @param metaMap          Model data map (mutated in-place to remove failed presets)
  * @param proxyBaseUrl     Proxy base URL (e.g. http://localhost:4000/v1)
@@ -548,118 +664,33 @@ async function runSmokeTests(
   metaMap: Map<string, ModelData>,
   proxyBaseUrl: string,
 ): Promise<SmokeRow[]> {
-  const rows: SmokeRow[] = [];
   const modelIds = [...metaMap.keys()];
   const strippedBaseUrl = proxyBaseUrl
     .replace(/\/v1\/?$/, "")
     .replace(/\/+$/, "");
 
-  // ── Phase 1: Window compatibility ────────────────────────────────
-  // Must run FIRST so we know which windows each model supports.
-  // Preset smoke tests need to use a supported window.
-  console.log("Testing window compatibility ...\n");
-  for (let i = 0; i < modelIds.length; i++) {
-    const modelId = modelIds[i]!;
-    const data = metaMap.get(modelId)!;
-    console.log(`[${i + 1}/${modelIds.length}] Window compat: ${modelId} ...`);
-    const windows = await smokeTestWindowCompatibility(
-      modelId,
-      strippedBaseUrl,
-    );
-    data.supportedWindows = windows;
-    console.log(`  ${windows.size > 0 ? [...windows].join(", ") : "(none)"}`);
-  }
-  console.log();
+  const limit = config.research.maxConcurrent;
+  console.log(
+    `Smoke testing ${modelIds.length} models (up to ${limit} at a time) ...\n`,
+  );
 
-  // ── Phase 2: Preset + thinking level smoke tests ────────────────
-  // Use a supported window for each model so the request doesn't fail
-  // due to the proxy's default window being unavailable.
-  console.log("Testing presets ...\n");
-  for (let i = 0; i < modelIds.length; i++) {
-    const modelId = modelIds[i]!;
-    const data = metaMap.get(modelId)!;
+  const settled = await mapSettledWithLimit(modelIds, limit, (modelId) =>
+    smokeTestOneModel(modelId, metaMap.get(modelId)!, strippedBaseUrl),
+  );
 
-    // Convert PresetWire[] to SamplingPresetInput[] for smokeTestPresets
-    const presets: SamplingPresetInput[] = data.samplingPresets.map((p) => ({
-      name: p.name,
-      description: p.description,
-      params: p.params,
-    }));
-
-    if (presets.length === 0) {
-      console.log(
-        `[${i + 1}/${modelIds.length}] ${modelId} — no presets, skipping`,
-      );
-      continue;
+  const rows: SmokeRow[] = [];
+  for (let i = 0; i < settled.length; i++) {
+    const result = settled[i]!;
+    if (result.status === "fulfilled") {
+      rows.push(...result.value);
+    } else {
+      const modelId = modelIds[i]!;
+      const msg =
+        result.reason instanceof Error
+          ? result.reason.message
+          : String(result.reason);
+      console.warn(`✗ ${modelId}: smoke test errored — ${msg}`);
     }
-
-    const bestWindow = pickBestWindow(data.supportedWindows);
-    const completionsUrl = chatCompletionsUrlForWindow(
-      strippedBaseUrl,
-      bestWindow,
-    );
-
-    console.log(
-      `[${i + 1}/${modelIds.length}] Testing ${modelId} (${presets.length} preset${presets.length > 1 ? "s" : ""}, window=${bestWindow}) ...`,
-    );
-
-    const results = await smokeTestPresets(
-      modelId,
-      presets,
-      data.thinkingLevelMap,
-      completionsUrl,
-    );
-
-    // Collect results for display
-    for (const r of results) {
-      rows.push({
-        modelId,
-        presetName: r.presetName,
-        thinkingLevel: r.thinkingLevel,
-        ok: r.ok,
-        error: r.error,
-      });
-    }
-
-    // Filter out presets that failed the base-param smoke test
-    const failedPresetNames = new Set<string>();
-    const failedThinkingLevels = new Set<string>();
-
-    for (const sr of results) {
-      if (sr.ok) continue;
-      if (sr.thinkingLevel !== null) {
-        failedThinkingLevels.add(sr.thinkingLevel);
-        console.warn(
-          `  ✗ preset="${sr.presetName}" thinkingLevel=${sr.thinkingLevel} — ${sr.error}`,
-        );
-      } else {
-        failedPresetNames.add(sr.presetName);
-        console.warn(`  ✗ preset="${sr.presetName}" base params — ${sr.error}`);
-      }
-    }
-
-    // Remove failed presets from the model data
-    if (failedPresetNames.size > 0) {
-      data.samplingPresets = data.samplingPresets.filter(
-        (p) => !failedPresetNames.has(p.name),
-      );
-      console.log(
-        `  Removed ${failedPresetNames.size} failed preset(s): ${[...failedPresetNames].join(", ")}`,
-      );
-    }
-
-    // Disable failed thinking levels
-    if (data.thinkingLevelMap && failedThinkingLevels.size > 0) {
-      for (const level of failedThinkingLevels) {
-        if (level in data.thinkingLevelMap) {
-          data.thinkingLevelMap[level] = null;
-          console.log(`  Disabled thinking level "${level}"`);
-        }
-      }
-    }
-
-    const passCount = results.filter((r) => r.ok).length;
-    console.log(`  ✓ ${passCount}/${results.length} passed`);
   }
 
   return rows;
