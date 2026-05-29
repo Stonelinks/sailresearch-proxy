@@ -417,20 +417,15 @@ export function buildProvider(
 ): PiProvider | null {
   const entries: PiModelEntry[] = [];
 
-  // Build the base URL for this window.
-  // For "standard" (the default), use the base URL as-is.
-  // For others, inject the window prefix.
-  let providerBaseUrl: string;
-
-  if (window === "standard") {
-    // Standard is the default — no prefix needed
-    providerBaseUrl = baseUrl.replace(/\/+$/, "");
-  } else {
-    // e.g. http://localhost:4000/v1 → http://localhost:4000/asap/v1
-    // Strip /v1 from the end, add /{window}/v1
-    const stripped = baseUrl.replace(/\/v1\/?$/, "").replace(/\/+$/, "");
-    providerBaseUrl = `${stripped}/${window}/v1`;
-  }
+  // Build the base URL for this window. Normalize first by stripping any
+  // trailing "/v1" and slashes so the result is correct whether the caller
+  // passed ".../v1" (e.g. http://localhost:4000/v1) or a bare host (e.g.
+  // https://llm3.cricket.routers.stonelinks.org).
+  //   standard (default): {host}/v1
+  //   others:             {host}/{window}/v1
+  const stripped = baseUrl.replace(/\/v1\/?$/, "").replace(/\/+$/, "");
+  const providerBaseUrl =
+    window === "standard" ? `${stripped}/v1` : `${stripped}/${window}/v1`;
 
   for (const data of [...modelsData.values()]) {
     // Skip models that don't support this window.

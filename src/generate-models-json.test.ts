@@ -318,6 +318,46 @@ describe("buildProvider", () => {
     expect(provider!.models).toHaveLength(1);
   });
 
+  test("appends /v1 to standard provider when base URL has no /v1", () => {
+    // Regression: `generate-models-json --base-url https://host` (no /v1)
+    // must still produce a /v1 path, otherwise pi POSTs to {host}/chat/completions
+    // and the proxy returns 404.
+    const modelsData = new Map([
+      ["org/model", makeModelData({ modelId: "org/model" })],
+    ]);
+
+    const provider = buildProvider(
+      "standard",
+      modelsData,
+      "https://llm3.cricket.routers.stonelinks.org",
+    );
+
+    expect(provider).not.toBeNull();
+    expect(provider!.baseUrl).toBe(
+      "https://llm3.cricket.routers.stonelinks.org/v1",
+    );
+  });
+
+  test("appends /asap/v1 to asap provider when base URL has no /v1", () => {
+    const price = makePrice({ completionWindow: "asap" });
+    const data = makeModelData({
+      modelId: "org/model",
+      pricesByWindow: new Map([["asap", price]]),
+    });
+    const modelsData = new Map([["org/model", data]]);
+
+    const provider = buildProvider(
+      "asap",
+      modelsData,
+      "https://llm3.cricket.routers.stonelinks.org",
+    );
+
+    expect(provider).not.toBeNull();
+    expect(provider!.baseUrl).toBe(
+      "https://llm3.cricket.routers.stonelinks.org/asap/v1",
+    );
+  });
+
   test("builds asap provider with /asap/v1 prefix", () => {
     const price = makePrice({ completionWindow: "asap" });
     const data = makeModelData({
