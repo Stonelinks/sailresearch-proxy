@@ -5,21 +5,21 @@
     "": {
       "name": "sailresearch-proxy-frontend",
       "devDependencies": {
-        "@sveltejs/vite-plugin-svelte": "^5.1.1",
-        "@tailwindcss/vite": "^4.3.0",
+        "@sveltejs/vite-plugin-svelte": "^5",
+        "@tailwindcss/vite": "^4",
         "@testing-library/jest-dom": "^6.9.1",
         "@testing-library/svelte": "^5.3.1",
-        "graphql": "^16.14.0",
+        "graphql": "^16.13.2",
         "graphql-ws": "^6.0.8",
         "houdini": "^1.5.10",
         "houdini-svelte": "^2.1.20",
         "jsdom": "^29.1.1",
-        "svelte": "^5.55.10",
-        "svelte-spa-router": "^4.0.2",
-        "tailwindcss": "^4.3.0",
-        "typescript": "^5.9.3",
-        "vite": "^6.4.2",
-        "vitest": "^4.1.7",
+        "svelte": "^5",
+        "svelte-spa-router": "^4",
+        "tailwindcss": "^4",
+        "typescript": "^6",
+        "vite": "^6",
+        "vitest": "^4.1.5",
       },
     },
   },
@@ -624,7 +624,7 @@
 
     "tslib": ["tslib@2.8.1", "", {}, "sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w=="],
 
-    "typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
+    "typescript": ["typescript@6.0.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw=="],
 
     "undici": ["undici@7.25.0", "", {}, "sha512-xXnp4kTyor2Zq+J1FfPI6Eq3ew5h6Vl0F/8d9XU5zZQf1tX9s2Su1/3PiMmUANFULpmksxkClamIZcaUqryHsQ=="],
 

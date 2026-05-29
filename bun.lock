@@ -5,22 +5,22 @@
     "": {
       "name": "sailresearch-proxy",
       "dependencies": {
-        "@mariozechner/pi-coding-agent": "^0.73.1",
+        "@mariozechner/pi-coding-agent": "^0.73.0",
         "@pothos/core": "^4.12.0",
         "@pothos/plugin-prisma": "^4.14.3",
-        "@prisma/client": "^6.19.3",
-        "graphql": "^16.14.0",
+        "@prisma/client": "^6",
+        "graphql": "^16.13.2",
         "graphql-ws": "^6.0.8",
         "graphql-yoga": "^5.21.0",
-        "prisma": "^6.19.3",
+        "prisma": "^6",
         "winston": "^3.19.0",
       },
       "devDependencies": {
         "@types/bun": "latest",
-        "prettier": "^3.8.3",
+        "prettier": "^3.8.1",
       },
       "peerDependencies": {
-        "typescript": "^5.9.3",
+        "typescript": "^6",
       },
     },
   },

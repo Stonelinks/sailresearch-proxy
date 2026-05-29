@@ -17,10 +17,8 @@
   },
   "devDependencies": {
     "@types/bun": "latest",
-    "prettier": "^3.8.1"
-  },
-  "peerDependencies": {
-    "typescript": "^5"
+    "prettier": "^3.8.1",
+    "typescript": "^6"
   },
   "dependencies": {
     "@mariozechner/pi-coding-agent": "^0.73.0",
