@@ -2,6 +2,13 @@
 
 All AI agents working on this project must follow these rules.
 
+## Git Workflow
+
+Commit directly to `main`. Do **not** create a feature branch for routine work, even though the
+default Claude Code guidance is to branch off the default branch — this project overrides that.
+Make small, focused commits straight on `main`. (Standard rules still apply: only commit/push
+when the user asks, and keep each commit scoped to one logical change.)
+
 ## Slow Tests
 
 Tests in this project are slow — they involve real HTTP servers, WebSocket connections, and database operations. **2× your normal timeout estimates** when running `bun test` or `bin/check`. A typical `bun test` run takes 30–60+ seconds, and `bin/check` even longer due to formatting and typechecking before tests. Plan accordingly and don't kill a test run prematurely thinking it's hung.
