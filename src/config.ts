@@ -3,7 +3,6 @@ import {
   SECOND,
   MINUTE,
   FIVE_MINUTES,
-  TEN_MINUTES,
   THIRTY_MINUTES,
   SIXTY_MINUTES,
   TWO_HOURS,
@@ -68,10 +67,12 @@ export const config = {
     // prompts are tiny and it turns 30-minute batch waits into
     // interactive-latency calls. The default model must support this window.
     window: env("RESEARCH_WINDOW", "asap") as CompletionWindow,
-    // Client-side cap on every research-path smoke-test fetch. A window that
-    // doesn't answer within this bound is reported "unconfirmed" rather than
-    // hanging the batch.
-    smokeTimeoutMs: intEnv("SMOKE_TEST_TIMEOUT_MS", TEN_MINUTES),
+    // Slack added on top of a window's server-side timeout to form the
+    // client-side smoke-test cap. The proxy always answers within the
+    // window's own bound (success, failure, or job-timeout error), so the
+    // client cap exists only to catch wedged sockets — flex jobs still get
+    // their full window to complete.
+    smokeTimeoutSlackMs: intEnv("SMOKE_TEST_TIMEOUT_SLACK_MS", MINUTE),
     // Max preset smoke tests in flight at once within a single model.
     presetConcurrency: intEnv("RESEARCH_PRESET_CONCURRENCY", 3),
     // Cap on docs-scraper page fetches.

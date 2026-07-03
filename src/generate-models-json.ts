@@ -22,6 +22,7 @@ import {
   smokeTestWindowCompatibility,
   chatCompletionsUrlForWindow,
   pickBestWindow,
+  smokeTimeoutForWindow,
 } from "./research-models.ts";
 import { config } from "./config.ts";
 import { mapSettledWithLimit } from "./concurrency.ts";
@@ -580,6 +581,7 @@ async function smokeTestOneModel(
     presets,
     data.thinkingLevelMap,
     completionsUrl,
+    smokeTimeoutForWindow(bestWindow),
   );
 
   // Collect results for display

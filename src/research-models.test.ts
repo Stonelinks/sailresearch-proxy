@@ -6,8 +6,10 @@ import {
   chatCompletionsUrlForWindow,
   smokeTestWindowCompatibility,
   pickBestWindow,
+  smokeTimeoutForWindow,
 } from "./research-models.ts";
 import type { CompletionWindow, SamplingPresetInput } from "./types.ts";
+import { config } from "./config.ts";
 
 // Set required env vars before any imports that use config
 beforeAll(() => {
@@ -757,5 +759,29 @@ describe("pickBestWindow", () => {
   test("returns the configured research window when compatibility is unknown", () => {
     expect(pickBestWindow(null)).toBe("asap");
     expect(pickBestWindow(windows())).toBe("asap");
+  });
+});
+
+describe("smokeTimeoutForWindow", () => {
+  test("is the window's server bound plus slack", () => {
+    const slack = config.research.smokeTimeoutSlackMs;
+    expect(smokeTimeoutForWindow("asap")).toBe(
+      config.sail.inferenceTimeoutMs + slack,
+    );
+    expect(smokeTimeoutForWindow("priority")).toBe(
+      config.windowTimeouts.priority + slack,
+    );
+    expect(smokeTimeoutForWindow("standard")).toBe(
+      config.windowTimeouts.standard + slack,
+    );
+    expect(smokeTimeoutForWindow("flex")).toBe(
+      config.windowTimeouts.flex + slack,
+    );
+  });
+
+  test("flex gets its full 2h window (regression: flex must complete)", () => {
+    expect(smokeTimeoutForWindow("flex")).toBeGreaterThanOrEqual(
+      2 * 60 * 60 * 1000,
+    );
   });
 });

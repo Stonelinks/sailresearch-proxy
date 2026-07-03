@@ -14,6 +14,7 @@ import {
   smokeTestWindowCompatibility,
   chatCompletionsUrlForWindow,
   pickBestWindow,
+  smokeTimeoutForWindow,
   type SmokeTestResult,
   type WindowCompatResult,
 } from "../research-models.ts";
@@ -215,6 +216,7 @@ async function researchOneWithScrapedData(
     result.samplingPresets,
     result.thinkingLevelMap,
     smokeTestUrl,
+    smokeTimeoutForWindow(bestWindow),
   );
 
   // Filter out presets that failed the base-param smoke test
@@ -277,9 +279,16 @@ async function runSmokeTestsWithFallback(
   presets: SamplingPresetInput[],
   thinkingLevelMap: Record<string, string | null> | null,
   baseUrl: string = `http://127.0.0.1:${config.server.port}/v1/chat/completions`,
+  timeoutMs?: number,
 ): Promise<SmokeTestResult[]> {
   try {
-    return await smokeTestPresets(modelId, presets, thinkingLevelMap, baseUrl);
+    return await smokeTestPresets(
+      modelId,
+      presets,
+      thinkingLevelMap,
+      baseUrl,
+      timeoutMs,
+    );
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     log.warn(

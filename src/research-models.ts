@@ -21,7 +21,7 @@ import type { CompletionWindow } from "./types.ts";
 import { runPiPrompt } from "./pi-session.ts";
 import { extractJson } from "../shared/extract-json.ts";
 import { log } from "../shared/logger.ts";
-import { config } from "./config.ts";
+import { config, getTimeoutMs } from "./config.ts";
 import { mapSettledWithLimit } from "./concurrency.ts";
 
 // ─── Validation ─────────────────────────────────────────────────────────────
@@ -333,6 +333,18 @@ export interface SmokeTestResult {
 }
 
 /**
+ * Client-side timeout for a smoke test against a given window: the window's
+ * server-side bound plus slack. The proxy always answers within its own
+ * bound (success, failure, or job-timeout error), so this cap only fires on
+ * a wedged socket — flex jobs get their full window to complete.
+ */
+export function smokeTimeoutForWindow(window: CompletionWindow): number {
+  const serverBound =
+    window === "asap" ? config.sail.inferenceTimeoutMs : getTimeoutMs(window);
+  return serverBound + config.research.smokeTimeoutSlackMs;
+}
+
+/**
  * Generate a unique arithmetic prompt to defeat the proxy's dedup cache.
  * Each call produces a different question like "What is 42 + 17? Reply with just the number."
  * so that the sail body hash never matches a previously completed job.
@@ -351,16 +363,19 @@ function uniqueSmokePrompt(): string {
  *
  * @param baseUrl  Full URL for the chat completions endpoint.
  *                Defaults to `http://127.0.0.1:{port}/v1/chat/completions`.
- * @param timeoutMs  Client-side cap on the request. Batched windows can
- *                legitimately take a long time server-side; this bound keeps
- *                a slow or wedged request from hanging research forever.
+ * @param timeoutMs  Client-side cap on the request, defaulting to the proxy
+ *                default window's server bound plus slack. Pass
+ *                `smokeTimeoutForWindow(window)` when targeting a specific
+ *                window so slow-but-legitimate batch jobs (e.g. flex) get
+ *                their full window while a wedged socket still can't hang
+ *                research forever.
  */
 export async function smokeTestPreset(
   modelId: string,
   params: Record<string, SamplingParamValue>,
   thinkingLevel: string | null = null,
   baseUrl: string = `http://127.0.0.1:${config.server.port}/v1/chat/completions`,
-  timeoutMs: number = config.research.smokeTimeoutMs,
+  timeoutMs: number = smokeTimeoutForWindow(config.defaults.completionWindow),
 ): Promise<SmokeTestResult> {
   const url = baseUrl;
 
@@ -463,12 +478,16 @@ function highestThinkingLevel(
  *
  * @param baseUrl  Full URL for the chat completions endpoint.
  *                Defaults to `http://127.0.0.1:{port}/v1/chat/completions`.
+ * @param timeoutMs  Client-side cap per request — pass
+ *                `smokeTimeoutForWindow(window)` for the window `baseUrl`
+ *                targets. Defaults to the proxy default window's cap.
  */
 export async function smokeTestPresets(
   modelId: string,
   presets: SamplingPresetInput[],
   thinkingLevelMap: Record<string, string | null> | null,
   baseUrl: string = `http://127.0.0.1:${config.server.port}/v1/chat/completions`,
+  timeoutMs?: number,
 ): Promise<SmokeTestResult[]> {
   // Pick the highest available thinking level to test with
   const testThinkingLevel = thinkingLevelMap
@@ -495,6 +514,7 @@ export async function smokeTestPresets(
         preset.params,
         thinkingLevel,
         baseUrl,
+        timeoutMs,
       );
       result.presetName = preset.name;
       return result;
@@ -557,13 +577,17 @@ export interface WindowCompatResult {
  * Uses default (empty) params — this tests window compatibility, not preset
  * validity. Models not yet researched (no preset data) are still tested.
  *
- * All windows are tested in parallel, so wall time is bounded by `timeoutMs`
- * rather than the sum of the windows' server-side timeouts.
+ * All windows are tested in parallel and each gets its own server-side
+ * bound plus slack (`smokeTimeoutForWindow`), so slow-but-legitimate batch
+ * windows (flex: up to 2 h) run to completion while a wedged socket still
+ * can't hang research. Wall time is bounded by the slowest window's cap.
+ *
+ * @param timeoutMs  Overrides the per-window cap for every window (tests).
  */
 export async function smokeTestWindowCompatibility(
   modelId: string,
   baseUrl: string = `http://127.0.0.1:${config.server.port}/v1`,
-  timeoutMs: number = config.research.smokeTimeoutMs,
+  timeoutMs?: number,
 ): Promise<WindowCompatResult> {
   const supported = new Set<CompletionWindow>();
   const timedOut = new Set<CompletionWindow>();
@@ -571,13 +595,14 @@ export async function smokeTestWindowCompatibility(
   await Promise.all(
     COMPLETION_WINDOWS.map(async (window) => {
       const url = chatCompletionsUrlForWindow(baseUrl, window);
-      const result = await smokeTestPreset(modelId, {}, null, url, timeoutMs);
+      const cap = timeoutMs ?? smokeTimeoutForWindow(window);
+      const result = await smokeTestPreset(modelId, {}, null, url, cap);
       if (result.ok) {
         supported.add(window);
       } else if (result.timedOut) {
         timedOut.add(window);
         log.warn(
-          `[window-compat] ${modelId} ? ${window}: unconfirmed — no response within ${timeoutMs}ms`,
+          `[window-compat] ${modelId} ? ${window}: unconfirmed — no response within ${cap}ms`,
         );
       } else {
         log.debug(
