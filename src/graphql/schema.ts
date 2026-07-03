@@ -316,8 +316,11 @@ builder.mutationType({
         const list = (sailRes.data?.data ?? []) as SailUpstreamModel[];
         const modelIds = list.map((m) => m.id);
 
-        // Research all models in parallel (scrapes docs once, shares results)
-        const errors = await researchAndUpsertMany(modelIds);
+        // Research all models in parallel (scrapes docs once, shares results).
+        // This is the full Sail list, so stale ModelMeta rows are pruned.
+        const errors = await researchAndUpsertMany(modelIds, {
+          pruneStale: true,
+        });
 
         if (errors.length > 0) {
           log.warn(

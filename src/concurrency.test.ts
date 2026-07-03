@@ -10,19 +10,21 @@ describe("mapSettledWithLimit", () => {
       await new Promise((r) => setTimeout(r, ms));
       return ms * 2;
     });
-    expect(results.map((r) => (r.status === "fulfilled" ? r.value : null))).toEqual([
-      60, 20, 40, 10,
-    ]);
+    expect(
+      results.map((r) => (r.status === "fulfilled" ? r.value : null)),
+    ).toEqual([60, 20, 40, 10]);
   });
 
   test("passes the index to the worker", async () => {
     const items = ["a", "b", "c"];
-    const results = await mapSettledWithLimit(items, 2, async (item, i) => `${i}:${item}`);
-    expect(results.map((r) => (r.status === "fulfilled" ? r.value : null))).toEqual([
-      "0:a",
-      "1:b",
-      "2:c",
-    ]);
+    const results = await mapSettledWithLimit(
+      items,
+      2,
+      async (item, i) => `${i}:${item}`,
+    );
+    expect(
+      results.map((r) => (r.status === "fulfilled" ? r.value : null)),
+    ).toEqual(["0:a", "1:b", "2:c"]);
   });
 
   test("never exceeds the concurrency limit", async () => {
@@ -81,9 +83,9 @@ describe("mapSettledWithLimit", () => {
   test("limit larger than item count just runs everything at once", async () => {
     const items = [1, 2, 3];
     const results = await mapSettledWithLimit(items, 100, async (n) => n);
-    expect(results.map((r) => (r.status === "fulfilled" ? r.value : null))).toEqual([
-      1, 2, 3,
-    ]);
+    expect(
+      results.map((r) => (r.status === "fulfilled" ? r.value : null)),
+    ).toEqual([1, 2, 3]);
   });
 
   test.each([0, -5, NaN, Infinity])(
@@ -93,18 +95,22 @@ describe("mapSettledWithLimit", () => {
       let maxInFlight = 0;
       const items = [1, 2, 3, 4];
 
-      const results = await mapSettledWithLimit(items, badLimit as number, async (n) => {
-        inFlight++;
-        maxInFlight = Math.max(maxInFlight, inFlight);
-        await tick();
-        inFlight--;
-        return n;
-      });
+      const results = await mapSettledWithLimit(
+        items,
+        badLimit as number,
+        async (n) => {
+          inFlight++;
+          maxInFlight = Math.max(maxInFlight, inFlight);
+          await tick();
+          inFlight--;
+          return n;
+        },
+      );
 
       expect(maxInFlight).toBe(1);
-      expect(results.map((r) => (r.status === "fulfilled" ? r.value : null))).toEqual([
-        1, 2, 3, 4,
-      ]);
+      expect(
+        results.map((r) => (r.status === "fulfilled" ? r.value : null)),
+      ).toEqual([1, 2, 3, 4]);
     },
   );
 });

@@ -21,6 +21,7 @@ import {
   smokeTestPresets,
   smokeTestWindowCompatibility,
   chatCompletionsUrlForWindow,
+  pickBestWindow,
 } from "./research-models.ts";
 import { config } from "./config.ts";
 import { mapSettledWithLimit } from "./concurrency.ts";
@@ -511,20 +512,6 @@ function printSmokeTestSummary(results: SmokeRow[]): void {
 }
 
 /**
- * Pick the best completion window for smoke testing presets.
- * Prefers batched windows (cheaper) over asap (expensive passthrough).
- * Order: standard > priority > flex > asap.
- * Returns "standard" as fallback when compatibility is unknown.
- */
-function pickBestWindow(supported: Set<CompletionWindow>): CompletionWindow {
-  if (supported.size === 0) return "standard";
-  for (const window of COMPLETION_WINDOWS) {
-    if (supported.has(window)) return window;
-  }
-  return "standard";
-}
-
-/**
  * Compute the chat completions URL from the user-supplied base URL.
  * Input:  http://host:4000/v1  (or http://host:4000)
  * Output: http://host:4000/v1/chat/completions
@@ -554,11 +541,16 @@ async function smokeTestOneModel(
   // ── Phase 1: Window compatibility ────────────────────────────────
   // Must run FIRST so we know which windows the model supports — preset
   // smoke tests need to route through a supported window.
-  const windows = await smokeTestWindowCompatibility(modelId, strippedBaseUrl);
-  data.supportedWindows = windows;
+  const compat = await smokeTestWindowCompatibility(modelId, strippedBaseUrl);
+  data.supportedWindows = compat.supported;
   out.push(
-    `  windows: ${windows.size > 0 ? [...windows].join(", ") : "(none)"}`,
+    `  windows: ${compat.supported.size > 0 ? [...compat.supported].join(", ") : "(none)"}`,
   );
+  if (compat.timedOut.size > 0) {
+    out.push(
+      `  windows unconfirmed (timeout): ${[...compat.timedOut].join(", ")}`,
+    );
+  }
 
   // ── Phase 2: Preset + thinking level smoke tests ────────────────
   // Convert PresetWire[] to SamplingPresetInput[] for smokeTestPresets

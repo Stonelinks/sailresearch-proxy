@@ -22,6 +22,7 @@ import { runPiPrompt } from "./pi-session.ts";
 import { extractJson } from "../shared/extract-json.ts";
 import { log } from "../shared/logger.ts";
 import { config } from "./config.ts";
+import { mapSettledWithLimit } from "./concurrency.ts";
 
 // ─── Validation ─────────────────────────────────────────────────────────────
 
@@ -327,6 +328,8 @@ export interface SmokeTestResult {
   thinkingLevel: string | null;
   ok: boolean;
   error?: string;
+  /** True when the request hit the client-side timeout rather than failing. */
+  timedOut?: boolean;
 }
 
 /**
@@ -348,12 +351,16 @@ function uniqueSmokePrompt(): string {
  *
  * @param baseUrl  Full URL for the chat completions endpoint.
  *                Defaults to `http://127.0.0.1:{port}/v1/chat/completions`.
+ * @param timeoutMs  Client-side cap on the request. Batched windows can
+ *                legitimately take a long time server-side; this bound keeps
+ *                a slow or wedged request from hanging research forever.
  */
 export async function smokeTestPreset(
   modelId: string,
   params: Record<string, SamplingParamValue>,
   thinkingLevel: string | null = null,
   baseUrl: string = `http://127.0.0.1:${config.server.port}/v1/chat/completions`,
+  timeoutMs: number = config.research.smokeTimeoutMs,
 ): Promise<SmokeTestResult> {
   const url = baseUrl;
 
@@ -372,6 +379,7 @@ export async function smokeTestPreset(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(timeoutMs),
     });
 
     if (!res.ok) {
@@ -413,12 +421,16 @@ export async function smokeTestPreset(
       ok: true,
     };
   } catch (err) {
+    const timedOut =
+      err instanceof DOMException &&
+      (err.name === "TimeoutError" || err.name === "AbortError");
     const msg = err instanceof Error ? err.message : String(err);
     return {
       presetName: "",
       thinkingLevel,
       ok: false,
-      error: msg,
+      timedOut,
+      error: timedOut ? `timed out after ${timeoutMs}ms` : msg,
     };
   }
 }
@@ -445,7 +457,9 @@ function highestThinkingLevel(
  * and (for reasoning models) one thinking level. Returns results for each
  * combination, with presetName filled in.
  *
- * Runs sequentially to avoid overwhelming Sail.
+ * Test cases run through a bounded pool (`config.research.presetConcurrency`)
+ * so a single model's presets don't flood Sail. Result order matches the
+ * sequential version: base then thinking-level, per preset.
  *
  * @param baseUrl  Full URL for the chat completions endpoint.
  *                Defaults to `http://127.0.0.1:{port}/v1/chat/completions`.
@@ -456,38 +470,49 @@ export async function smokeTestPresets(
   thinkingLevelMap: Record<string, string | null> | null,
   baseUrl: string = `http://127.0.0.1:${config.server.port}/v1/chat/completions`,
 ): Promise<SmokeTestResult[]> {
-  const results: SmokeTestResult[] = [];
-
   // Pick the highest available thinking level to test with
   const testThinkingLevel = thinkingLevelMap
     ? highestThinkingLevel(thinkingLevelMap)
     : null;
 
+  const cases: Array<{
+    preset: SamplingPresetInput;
+    thinkingLevel: string | null;
+  }> = [];
   for (const preset of presets) {
-    // Test base params (no thinking level)
-    const baseResult = await smokeTestPreset(
-      modelId,
-      preset.params,
-      null,
-      baseUrl,
-    );
-    baseResult.presetName = preset.name;
-    results.push(baseResult);
-
-    // For reasoning models, also test with a thinking level
+    cases.push({ preset, thinkingLevel: null });
     if (testThinkingLevel) {
-      const thinkResult = await smokeTestPreset(
-        modelId,
-        preset.params,
-        testThinkingLevel,
-        baseUrl,
-      );
-      thinkResult.presetName = preset.name;
-      results.push(thinkResult);
+      cases.push({ preset, thinkingLevel: testThinkingLevel });
     }
   }
 
-  return results;
+  const settled = await mapSettledWithLimit(
+    cases,
+    config.research.presetConcurrency,
+    async ({ preset, thinkingLevel }) => {
+      const result = await smokeTestPreset(
+        modelId,
+        preset.params,
+        thinkingLevel,
+        baseUrl,
+      );
+      result.presetName = preset.name;
+      return result;
+    },
+  );
+
+  // smokeTestPreset never throws, so every result is fulfilled.
+  return settled.map((s, i) =>
+    s.status === "fulfilled"
+      ? s.value
+      : {
+          presetName: cases[i]!.preset.name,
+          thinkingLevel: cases[i]!.thinkingLevel,
+          ok: false,
+          error:
+            s.reason instanceof Error ? s.reason.message : String(s.reason),
+        },
+  );
 }
 
 // ─── Window compatibility smoke test ──────────────────────────────────────────
@@ -511,38 +536,85 @@ export function chatCompletionsUrlForWindow(
   return `${stripped}/${window}/v1/chat/completions`;
 }
 
+export interface WindowCompatResult {
+  /** Windows that returned a successful response within the timeout. */
+  supported: Set<CompletionWindow>;
+  /**
+   * Windows whose smoke request hit the client-side timeout — unconfirmed,
+   * not proven broken. They are excluded from `supported` (and thus from
+   * the DB) until a later re-research confirms them.
+   */
+  timedOut: Set<CompletionWindow>;
+}
+
 /**
  * Smoke test a model against all 4 completion windows by sending a simple
  * request to each window-prefixed chat completions endpoint. Returns the
- * set of windows where the model returned a successful response.
+ * set of windows where the model returned a successful response, plus the
+ * set that timed out client-side (batched windows can legitimately take
+ * longer than `timeoutMs` to schedule).
  *
  * Uses default (empty) params — this tests window compatibility, not preset
  * validity. Models not yet researched (no preset data) are still tested.
  *
- * Runs sequentially to avoid overwhelming Sail.
+ * All windows are tested in parallel, so wall time is bounded by `timeoutMs`
+ * rather than the sum of the windows' server-side timeouts.
  */
 export async function smokeTestWindowCompatibility(
   modelId: string,
   baseUrl: string = `http://127.0.0.1:${config.server.port}/v1`,
-): Promise<Set<CompletionWindow>> {
+  timeoutMs: number = config.research.smokeTimeoutMs,
+): Promise<WindowCompatResult> {
   const supported = new Set<CompletionWindow>();
+  const timedOut = new Set<CompletionWindow>();
 
-  for (const window of COMPLETION_WINDOWS) {
-    const url = chatCompletionsUrlForWindow(baseUrl, window);
-    const result = await smokeTestPreset(modelId, {}, null, url);
-    if (result.ok) {
-      supported.add(window);
-    } else {
-      log.debug(
-        `[window-compat] ${modelId} ✗ ${window}: ${result.error?.slice(0, 100)}`,
-      );
-    }
-  }
+  await Promise.all(
+    COMPLETION_WINDOWS.map(async (window) => {
+      const url = chatCompletionsUrlForWindow(baseUrl, window);
+      const result = await smokeTestPreset(modelId, {}, null, url, timeoutMs);
+      if (result.ok) {
+        supported.add(window);
+      } else if (result.timedOut) {
+        timedOut.add(window);
+        log.warn(
+          `[window-compat] ${modelId} ? ${window}: unconfirmed — no response within ${timeoutMs}ms`,
+        );
+      } else {
+        log.debug(
+          `[window-compat] ${modelId} ✗ ${window}: ${result.error?.slice(0, 100)}`,
+        );
+      }
+    }),
+  );
 
   log.info(
-    `[window-compat] ${modelId} supported: ${supported.size > 0 ? [...supported].join(",") : "(none)"}`,
+    `[window-compat] ${modelId} supported: ${supported.size > 0 ? [...supported].join(",") : "(none)"}${timedOut.size > 0 ? ` unconfirmed: ${[...timedOut].join(",")}` : ""}`,
   );
-  return supported;
+  return { supported, timedOut };
+}
+
+/**
+ * Pick the best completion window for smoke testing presets. Prefers fast
+ * windows so preset validation doesn't wait on batch scheduling.
+ * Order: asap > priority > standard > flex.
+ * Falls back to `config.research.window` when compatibility is unknown.
+ */
+export function pickBestWindow(
+  supported: Set<CompletionWindow> | null,
+): CompletionWindow {
+  const preference: readonly CompletionWindow[] = [
+    "asap",
+    "priority",
+    "standard",
+    "flex",
+  ];
+  if (supported === null || supported.size === 0) {
+    return config.research.window;
+  }
+  for (const window of preference) {
+    if (supported.has(window)) return window;
+  }
+  return config.research.window;
 }
 
 // ─── Upsert model metadata ─────────────────────────────────────────────────

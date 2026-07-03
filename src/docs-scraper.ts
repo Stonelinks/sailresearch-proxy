@@ -12,6 +12,7 @@
  */
 import { log } from "../shared/logger.ts";
 import { type ModelPriceInput, type CompletionWindow } from "./types.ts";
+import { config } from "./config.ts";
 import { isValidCompletionWindow } from "./completion-window.ts";
 
 // ─── Deterministic capabilities parser ──────────────────────────────────────
@@ -76,7 +77,9 @@ export async function scrapeModelCapabilities(): Promise<
 > {
   const url = "https://docs.sailresearch.com/models.md";
   log.info(`[docs-scraper] fetching ${url}`);
-  const res = await fetch(url);
+  const res = await fetch(url, {
+    signal: AbortSignal.timeout(config.research.scrapeTimeoutMs),
+  });
   if (!res.ok) {
     throw new Error(`Failed to fetch ${url}: ${res.status} ${res.statusText}`);
   }
@@ -224,7 +227,9 @@ export function parsePricingFromJsx(
 export async function scrapePricing(): Promise<Map<string, ModelPriceInput[]>> {
   const url = "https://docs.sailresearch.com/pricing.md";
   log.info(`[docs-scraper] fetching ${url}`);
-  const res = await fetch(url);
+  const res = await fetch(url, {
+    signal: AbortSignal.timeout(config.research.scrapeTimeoutMs),
+  });
   if (!res.ok) {
     throw new Error(`Failed to fetch ${url}: ${res.status} ${res.statusText}`);
   }

@@ -480,7 +480,9 @@ describe("Mutation.researchAllModels", () => {
 
     expect(res.errors).toBeUndefined();
     expect(mockResearchAndUpsertMany).toHaveBeenCalledTimes(1);
-    expect(mockResearchAndUpsertMany).toHaveBeenCalledWith(["m1", "m2"]);
+    expect(mockResearchAndUpsertMany).toHaveBeenCalledWith(["m1", "m2"], {
+      pruneStale: true,
+    });
     const models = (res.data as any).researchAllModels;
     expect(models).toHaveLength(2);
     expect(models[0]).toEqual({

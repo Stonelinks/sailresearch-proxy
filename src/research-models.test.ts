@@ -5,8 +5,9 @@ import {
   smokeTestPresets,
   chatCompletionsUrlForWindow,
   smokeTestWindowCompatibility,
+  pickBestWindow,
 } from "./research-models.ts";
-import type { SamplingPresetInput } from "./types.ts";
+import type { CompletionWindow, SamplingPresetInput } from "./types.ts";
 
 // Set required env vars before any imports that use config
 beforeAll(() => {
@@ -406,6 +407,54 @@ describe("smokeTestPreset", () => {
     expect(result.ok).toBe(false);
     expect(result.error).toContain("empty response content");
   });
+
+  test("marks timedOut when fetch rejects with TimeoutError", async () => {
+    globalThis.fetch = mock(() =>
+      Promise.reject(
+        new DOMException("The operation timed out", "TimeoutError"),
+      ),
+    ) as any;
+
+    const result = await smokeTestPreset("test-model", {});
+    expect(result.ok).toBe(false);
+    expect(result.timedOut).toBe(true);
+    expect(result.error).toContain("timed out after");
+  });
+
+  test("does not mark timedOut on ordinary fetch errors", async () => {
+    globalThis.fetch = mock(() =>
+      Promise.reject(new Error("Connection refused")),
+    ) as any;
+
+    const result = await smokeTestPreset("test-model", {});
+    expect(result.ok).toBe(false);
+    expect(result.timedOut).toBe(false);
+  });
+
+  test("aborts a hung request via the timeout signal (regression: infinite hang)", async () => {
+    // Mock fetch that never resolves on its own — only rejects when the
+    // caller's AbortSignal fires. Before the timeout fix this hung forever.
+    globalThis.fetch = mock(
+      (_url: any, opts: any) =>
+        new Promise((_resolve, reject) => {
+          const signal: AbortSignal = opts.signal;
+          expect(signal).toBeDefined();
+          signal.addEventListener("abort", () =>
+            reject(new DOMException("The operation timed out", "TimeoutError")),
+          );
+        }),
+    ) as any;
+
+    const result = await smokeTestPreset(
+      "test-model",
+      {},
+      null,
+      "http://localhost:4000/v1/chat/completions",
+      10, // 10 ms timeout
+    );
+    expect(result.ok).toBe(false);
+    expect(result.timedOut).toBe(true);
+  });
 });
 
 describe("smokeTestPresets", () => {
@@ -427,11 +476,12 @@ describe("smokeTestPresets", () => {
   };
 
   test("filters out failing presets and keeps passing ones", async () => {
-    let callCount = 0;
-    globalThis.fetch = mock(() => {
-      callCount++;
-      // First preset passes, second fails
-      if (callCount === 1) {
+    // Key the mock off the request body, not call order — preset tests
+    // run concurrently, so arrival order is not guaranteed.
+    globalThis.fetch = mock((_url: any, opts: any) => {
+      const body = JSON.parse(opts.body);
+      // default preset (temperature 0.7) passes, coding (0.2) fails
+      if (body.temperature === 0.7) {
         return Promise.resolve(
           new Response(
             JSON.stringify({
@@ -465,11 +515,12 @@ describe("smokeTestPresets", () => {
   });
 
   test("removes thinking level from thinkingLevelMap when it fails but base params pass", async () => {
-    let callCount = 0;
-    globalThis.fetch = mock(() => {
-      callCount++;
-      // Base params (call 1) pass, thinking level (call 2) fails
-      if (callCount === 1) {
+    // Key the mock off reasoning_effort presence, not call order — preset
+    // tests run concurrently, so arrival order is not guaranteed.
+    globalThis.fetch = mock((_url: any, opts: any) => {
+      const body = JSON.parse(opts.body);
+      if (body.reasoning_effort === undefined) {
+        // Base params pass
         return Promise.resolve(
           new Response(
             JSON.stringify({
@@ -479,6 +530,7 @@ describe("smokeTestPresets", () => {
           ),
         );
       }
+      // Thinking level fails
       return Promise.resolve(
         new Response(
           JSON.stringify({
@@ -593,11 +645,12 @@ describe("smokeTestWindowCompatibility", () => {
       "http://localhost:4000/v1",
     );
 
-    expect(result.size).toBe(2);
-    expect(result.has("asap")).toBe(true);
-    expect(result.has("flex")).toBe(true);
-    expect(result.has("standard")).toBe(false);
-    expect(result.has("priority")).toBe(false);
+    expect(result.supported.size).toBe(2);
+    expect(result.supported.has("asap")).toBe(true);
+    expect(result.supported.has("flex")).toBe(true);
+    expect(result.supported.has("standard")).toBe(false);
+    expect(result.supported.has("priority")).toBe(false);
+    expect(result.timedOut.size).toBe(0);
   });
 
   test("returns all windows when all respond 200", async () => {
@@ -617,8 +670,8 @@ describe("smokeTestWindowCompatibility", () => {
       "http://localhost:4000/v1",
     );
 
-    expect(result.size).toBe(4);
-    expect([...result].sort()).toEqual([
+    expect(result.supported.size).toBe(4);
+    expect([...result.supported].sort()).toEqual([
       "asap",
       "flex",
       "priority",
@@ -643,6 +696,66 @@ describe("smokeTestWindowCompatibility", () => {
       "http://localhost:4000/v1",
     );
 
-    expect(result.size).toBe(0);
+    expect(result.supported.size).toBe(0);
+    expect(result.timedOut.size).toBe(0);
+  });
+
+  test("a window that times out lands in timedOut, not supported", async () => {
+    globalThis.fetch = mock((url: string, opts: any) => {
+      if (url.includes("/flex/")) {
+        // Hang until the caller's timeout signal aborts
+        return new Promise((_resolve, reject) => {
+          (opts.signal as AbortSignal).addEventListener("abort", () =>
+            reject(new DOMException("The operation timed out", "TimeoutError")),
+          );
+        });
+      }
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: "42" } }],
+          }),
+          { status: 200 },
+        ),
+      );
+    }) as any;
+
+    const result = await smokeTestWindowCompatibility(
+      "test-model",
+      "http://localhost:4000/v1",
+      10, // 10 ms timeout
+    );
+
+    expect(result.timedOut.size).toBe(1);
+    expect(result.timedOut.has("flex")).toBe(true);
+    expect(result.supported.has("flex")).toBe(false);
+    expect([...result.supported].sort()).toEqual([
+      "asap",
+      "priority",
+      "standard",
+    ]);
+  });
+});
+
+describe("pickBestWindow", () => {
+  const windows = (...ws: CompletionWindow[]) => new Set<CompletionWindow>(ws);
+
+  test("prefers asap when supported", () => {
+    expect(
+      pickBestWindow(windows("flex", "standard", "asap", "priority")),
+    ).toBe("asap");
+  });
+
+  test("falls back through priority > standard > flex", () => {
+    expect(pickBestWindow(windows("flex", "standard", "priority"))).toBe(
+      "priority",
+    );
+    expect(pickBestWindow(windows("flex", "standard"))).toBe("standard");
+    expect(pickBestWindow(windows("flex"))).toBe("flex");
+  });
+
+  test("returns the configured research window when compatibility is unknown", () => {
+    expect(pickBestWindow(null)).toBe("asap");
+    expect(pickBestWindow(windows())).toBe("asap");
   });
 });

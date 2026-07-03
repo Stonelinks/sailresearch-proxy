@@ -34,8 +34,17 @@ const DEFAULT_MODEL_ID = config.defaults.model;
 /**
  * Base URL for the local proxy's OpenAI-compatible endpoint.
  * The embedded pi SDK uses this as the provider's baseUrl.
+ *
+ * The window prefix (default "asap") routes research LLM calls through the
+ * proxy's passthrough path instead of the standard batch window — pricier
+ * per token, but research prompts are tiny and it turns up-to-30-minute
+ * batch waits into interactive-latency calls. The default model must
+ * support the configured window. "standard" gets no prefix (proxy default).
  */
-const LOCAL_PROXY_BASE_URL = `http://127.0.0.1:${config.server.port}/v1`;
+const LOCAL_PROXY_BASE_URL =
+  config.research.window === "standard"
+    ? `http://127.0.0.1:${config.server.port}/v1`
+    : `http://127.0.0.1:${config.server.port}/${config.research.window}/v1`;
 
 let _authStorage: ReturnType<typeof AuthStorage.create> | undefined;
 let _modelRegistry: ReturnType<typeof ModelRegistry.create> | undefined;

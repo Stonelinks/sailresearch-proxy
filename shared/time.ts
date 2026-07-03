@@ -18,6 +18,7 @@ export const DAY = 24 * HOUR;
 // ── Convenience constants (used in config) ──────────────────────────────
 
 export const FIVE_MINUTES = 5 * MINUTE;
+export const TEN_MINUTES = 10 * MINUTE;
 export const FIFTEEN_MINUTES = 15 * MINUTE;
 export const THIRTY_MINUTES = 30 * MINUTE;
 export const SIXTY_MINUTES = 60 * MINUTE;

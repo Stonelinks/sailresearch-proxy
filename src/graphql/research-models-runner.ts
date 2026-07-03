@@ -13,16 +13,13 @@ import {
   smokeTestPresets,
   smokeTestWindowCompatibility,
   chatCompletionsUrlForWindow,
+  pickBestWindow,
   type SmokeTestResult,
+  type WindowCompatResult,
 } from "../research-models.ts";
 import { scrapeModelCapabilities, scrapePricing } from "../docs-scraper.ts";
 import { log } from "../../shared/logger.ts";
-import type {
-  CompletionWindow,
-  ModelPriceInput,
-  SamplingPresetInput,
-} from "../types.ts";
-import { COMPLETION_WINDOWS } from "../completion-window.ts";
+import type { ModelPriceInput, SamplingPresetInput } from "../types.ts";
 import { config } from "../config.ts";
 import { mapSettledWithLimit } from "../concurrency.ts";
 import { researchTracker } from "./research-tracker.ts";
@@ -92,9 +89,15 @@ export async function researchAndUpsertOne(modelId: string): Promise<void> {
  *
  * Returns an array of errors for any models that failed. Models that
  * succeed are silently upserted.
+ *
+ * `opts.pruneStale` — when true, ModelMeta rows for models NOT in `modelIds`
+ * are deleted after the batch. Only pass this when `modelIds` is the full
+ * Sail model list; a partial run (e.g. the CLI with explicit IDs) must not
+ * wipe other models' metadata.
  */
 export async function researchAndUpsertMany(
   modelIds: string[],
+  opts: { pruneStale?: boolean } = {},
 ): Promise<Array<{ modelId: string; error: string }>> {
   researchTracker.startBatch(modelIds);
   const scraped = await scrapeDocs();
@@ -135,19 +138,21 @@ export async function researchAndUpsertMany(
   // Batch is auto-ended by completeModel/failModel when all are accounted for
 
   // Clean up stale ModelMeta rows for models no longer in Sail's API
-  const { prisma } = await import("../db.ts");
-  const stale = await prisma.modelMeta.findMany({
-    where: { modelId: { notIn: modelIds } },
-    select: { modelId: true },
-  });
-  if (stale.length > 0) {
-    const staleIds = stale.map((s) => s.modelId);
-    await prisma.modelMeta.deleteMany({
-      where: { modelId: { in: staleIds } },
+  if (opts.pruneStale) {
+    const { prisma } = await import("../db.ts");
+    const stale = await prisma.modelMeta.findMany({
+      where: { modelId: { notIn: modelIds } },
+      select: { modelId: true },
     });
-    log.info(
-      `[researchAllModels] removed ${staleIds.length} stale model(s): ${staleIds.join(", ")}`,
-    );
+    if (stale.length > 0) {
+      const staleIds = stale.map((s) => s.modelId);
+      await prisma.modelMeta.deleteMany({
+        where: { modelId: { in: staleIds } },
+      });
+      log.info(
+        `[researchAllModels] removed ${staleIds.length} stale model(s): ${staleIds.join(", ")}`,
+      );
+    }
   }
 
   return errors;
@@ -165,8 +170,14 @@ async function researchOneWithScrapedData(
   const { prisma } = await import("../db.ts");
   await prisma.modelMeta.deleteMany({ where: { modelId } });
 
-  // Run pi research for contextSize, samplingPresets, description, source
-  const result = await runPiResearch(modelId);
+  // Run pi research (contextSize, samplingPresets, description, source) and
+  // window compatibility concurrently — they are independent, and only the
+  // preset smoke tests below need both. runWindowCompatWithFallback never
+  // rejects; a pi research failure fails the model as before.
+  const [result, windowCompat] = await Promise.all([
+    runPiResearch(modelId),
+    runWindowCompatWithFallback(modelId),
+  ]);
 
   // Merge scraped data (authoritative)
   const scrapedPrices = scraped.prices.get(modelId);
@@ -184,18 +195,15 @@ async function researchOneWithScrapedData(
     result.reasoning = caps.reasoning;
   }
 
-  // Smoke test window compatibility FIRST — we need to know which windows
-  // the model supports before running preset smoke tests, because preset
-  // tests route through the proxy and the proxy's default window
-  // ("standard") may not be available for all models.
-  const windowCompat = await runWindowCompatWithFallback(modelId);
+  // Only confirmed windows are persisted — timed-out windows stay unknown
+  // until a later re-research confirms them.
   if (windowCompat !== null) {
-    result.supportedWindows = [...windowCompat];
+    result.supportedWindows = [...windowCompat.supported];
   }
 
-  // Pick the best available window for preset smoke tests.
-  // Prefer: standard > priority > flex > asap (cheapest batched first).
-  const bestWindow = pickBestWindow(windowCompat);
+  // Pick the best available window for preset smoke tests (fast first:
+  // asap > priority > standard > flex).
+  const bestWindow = pickBestWindow(windowCompat?.supported ?? null);
   const smokeTestUrl = chatCompletionsUrlForWindow(
     `http://127.0.0.1:${config.server.port}/v1`,
     bestWindow,
@@ -256,25 +264,6 @@ async function researchOneWithScrapedData(
 }
 
 /**
- * Pick the best completion window for smoke testing presets.
- * Prefers batched windows (cheaper) over asap (expensive passthrough).
- * Order: standard > priority > flex > asap.
- * Returns "standard" as fallback when compatibility is unknown.
- */
-function pickBestWindow(
-  supported: Set<CompletionWindow> | null,
-): CompletionWindow {
-  if (supported === null || supported.size === 0) {
-    // Unknown compatibility — fall back to standard (the proxy default)
-    return "standard";
-  }
-  for (const window of COMPLETION_WINDOWS) {
-    if (supported.has(window)) return window;
-  }
-  return "standard";
-}
-
-/**
  * Run smoke tests for presets, but skip gracefully if the proxy is
  * unreachable. Returns empty array (no failures) on connection error
  * so research can proceed — smoke tests are a validation step, not
@@ -307,7 +296,7 @@ async function runSmokeTestsWithFallback(
  */
 async function runWindowCompatWithFallback(
   modelId: string,
-): Promise<Set<import("../types.ts").CompletionWindow> | null> {
+): Promise<WindowCompatResult | null> {
   try {
     return await smokeTestWindowCompatibility(modelId);
   } catch (err) {

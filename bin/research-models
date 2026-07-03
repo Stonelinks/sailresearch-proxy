@@ -4,4 +4,4 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 source env.sh
 
-exec bun run src/research-models.ts "$@"
+exec bun run src/research-models-cli.ts "$@"
