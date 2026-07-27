@@ -5,4 +5,4 @@ cd $PROJECT_ROOT
 
 source env.sh
 
-bunx prisma db push
+bunx prisma migrate deploy

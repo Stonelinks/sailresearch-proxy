@@ -5,10 +5,7 @@
  * that yields published payloads and exits cleanly when the client
  * disconnects (the iterator's `return()` gets called by graphql-js).
  */
-import type { JobSummary } from "../services/job-shapes.ts";
-
 export type Events = {
-  jobUpdated: JobSummary;
   modelResearchUpdated: import("./research-tracker.ts").ModelResearchUpdatePayload;
 };
 

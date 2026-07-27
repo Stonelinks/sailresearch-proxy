@@ -1,36 +1,16 @@
 import { builder } from "./builder.ts";
-import {
-  JOB_SUMMARY_SELECT,
-  JOB_DETAIL_SELECT,
-  jobToSummary,
-  jobToDetail,
-} from "../services/job-shapes.ts";
 import { sail } from "../sail-client.ts";
 import {
   researchAndUpsertOne,
   researchAndUpsertMany,
 } from "./research-models-runner.ts";
 import { mergeModelMeta, type SailUpstreamModel } from "../models-meta.ts";
-import type { JobStatus } from "../types.ts";
 import { log } from "../../shared/logger.ts";
 import {
   researchTracker,
   type ModelResearchUpdatePayload,
   type BatchProgressWire,
 } from "./research-tracker.ts";
-
-const JOB_STATUS_VALUES = [
-  "pending",
-  "queued",
-  "running",
-  "completed",
-  "failed",
-  "cancelled",
-] as const satisfies readonly JobStatus[];
-
-const JobStatusEnum = builder.enumType("JobStatus", {
-  values: JOB_STATUS_VALUES,
-});
 
 const ResearchUpdateStatusEnum = builder.enumType("ResearchUpdateStatus", {
   values: ["started", "completed", "failed"] as const,
@@ -138,65 +118,6 @@ builder.objectType("Model", {
   }),
 });
 
-builder.objectType("Job", {
-  fields: (t) => ({
-    id: t.exposeID("id"),
-    sailResponseId: t.exposeString("sailResponseId"),
-    status: t.field({ type: JobStatusEnum, resolve: (j) => j.status }),
-    model: t.exposeString("model"),
-    completionWindow: t.exposeString("completionWindow"),
-    apiType: t.exposeString("apiType"),
-    createdAt: t.field({ type: "DateTime", resolve: (j) => j.createdAt }),
-    completedAt: t.field({
-      type: "DateTime",
-      nullable: true,
-      resolve: (j) => j.completedAt,
-    }),
-    durationMs: t.exposeInt("durationMs", { nullable: true }),
-    pollCount: t.int({ resolve: (j) => Number(j.pollCount) }),
-    hasError: t.exposeBoolean("hasError"),
-  }),
-});
-
-builder.objectType("JobDetail", {
-  fields: (t) => ({
-    id: t.exposeID("id"),
-    sailResponseId: t.exposeString("sailResponseId"),
-    status: t.field({ type: JobStatusEnum, resolve: (j) => j.status }),
-    model: t.exposeString("model"),
-    completionWindow: t.exposeString("completionWindow"),
-    apiType: t.exposeString("apiType"),
-    createdAt: t.field({ type: "DateTime", resolve: (j) => j.createdAt }),
-    completedAt: t.field({
-      type: "DateTime",
-      nullable: true,
-      resolve: (j) => j.completedAt,
-    }),
-    durationMs: t.exposeInt("durationMs", { nullable: true }),
-    pollCount: t.int({ resolve: (j) => Number(j.pollCount) }),
-    hasError: t.exposeBoolean("hasError"),
-    requestBody: t.exposeString("requestBody", { nullable: true }),
-    responseBody: t.exposeString("responseBody", { nullable: true }),
-    errorBody: t.exposeString("errorBody", { nullable: true }),
-  }),
-});
-
-const JobsResult = builder
-  .objectRef<{
-    jobs: ReturnType<typeof jobToSummary>[];
-    total: number;
-    limit: number;
-    offset: number;
-  }>("JobsResult")
-  .implement({
-    fields: (t) => ({
-      jobs: t.field({ type: ["Job"], resolve: (r) => r.jobs }),
-      total: t.exposeInt("total"),
-      limit: t.exposeInt("limit"),
-      offset: t.exposeInt("offset"),
-    }),
-  });
-
 async function loadModelWire(modelId: string, ctx: { prisma: any }) {
   const sailRes = await sail.listModels();
   if (sailRes.status !== 200) return null;
@@ -212,44 +133,6 @@ async function loadModelWire(modelId: string, ctx: { prisma: any }) {
 
 builder.queryType({
   fields: (t) => ({
-    jobs: t.field({
-      type: JobsResult,
-      args: {
-        limit: t.arg.int({ defaultValue: 50 }),
-        offset: t.arg.int({ defaultValue: 0 }),
-        status: t.arg({ type: JobStatusEnum, required: false }),
-      },
-      resolve: async (_root, args, ctx) => {
-        const limit = Math.min(Math.max(args.limit ?? 50, 1), 200);
-        const offset = Math.max(args.offset ?? 0, 0);
-        const where = args.status ? { status: args.status } : {};
-        const [jobs, total] = await Promise.all([
-          ctx.prisma.pendingJob.findMany({
-            where,
-            orderBy: { createdAt: "desc" },
-            take: limit,
-            skip: offset,
-            select: JOB_SUMMARY_SELECT,
-          }),
-          ctx.prisma.pendingJob.count({ where }),
-        ]);
-        return { jobs: jobs.map(jobToSummary), total, limit, offset };
-      },
-    }),
-
-    job: t.field({
-      type: "JobDetail",
-      nullable: true,
-      args: { id: t.arg.id({ required: true }) },
-      resolve: async (_root, { id }, ctx) => {
-        const row = await ctx.prisma.pendingJob.findUnique({
-          where: { id: String(id) },
-          select: JOB_DETAIL_SELECT,
-        });
-        return row ? jobToDetail(row) : null;
-      },
-    }),
-
     model: t.field({
       type: "Model",
       nullable: true,
@@ -341,19 +224,6 @@ builder.mutationType({
 
 builder.subscriptionType({
   fields: (t) => ({
-    jobUpdated: t.field({
-      type: "Job",
-      args: { id: t.arg.id({ required: false }) },
-      subscribe: async function* (_root, args, ctx) {
-        const wantedId = args.id ? String(args.id) : null;
-        for await (const job of ctx.pubsub.subscribe("jobUpdated")) {
-          if (wantedId && job.id !== wantedId) continue;
-          yield job;
-        }
-      },
-      resolve: (payload) => payload,
-    }),
-
     modelResearchUpdated: t.field({
       type: "ModelResearchUpdate",
       subscribe: async function* (_root, _args, ctx) {

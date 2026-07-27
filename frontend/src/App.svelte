@@ -1,15 +1,12 @@
 <script lang="ts">
   import Router from "svelte-spa-router";
-  import JobsPage from "./pages/JobsPage.svelte";
-  import JobDetailPage from "./pages/JobDetailPage.svelte";
   import ModelsPage from "./pages/ModelsPage.svelte";
   import ModelDetailPage from "./pages/ModelDetailPage.svelte";
   import Footer from "./components/Footer.svelte";
   import ThemeToggle from "./components/ThemeToggle.svelte";
 
   const routes = {
-    "/": JobsPage,
-    "/job/:id": JobDetailPage,
+    "/": ModelsPage,
     "/models": ModelsPage,
     "/models/:id": ModelDetailPage,
   };
@@ -26,7 +23,6 @@
       </a>
       <div class="flex items-center gap-3">
         <nav class="flex items-center gap-4 text-sm">
-          <a href="#/" class="text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 no-underline transition-colors">Jobs</a>
           <a href="#/models" class="text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 no-underline transition-colors">Models</a>
         </nav>
         <div class="border-l border-slate-200 dark:border-slate-700 pl-3">

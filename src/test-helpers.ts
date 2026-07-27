@@ -3,26 +3,10 @@
  * `mock.module(...)` calls have to happen at the top of each test file
  * (Bun loads them at import time), so we don't try to abstract those.
  *
- * Two cross-file duplications are worth sharing:
- *   - waiterFor: wrap a Promise into the {promise, cancel} shape that
- *     poller.registerWaiter returns.
  *   - swapConfig: save a nested config slice, replace it for a test, restore
- *     after — used by the two recovery tests that point a real Bun.serve at
- *     a fake-Sail.
+ *     after — used by tests that point a real Bun.serve at a fake-Sail.
  */
-import { mock } from "bun:test";
 import { config } from "./config.ts";
-
-/**
- * Wraps a Promise into the {promise, cancel} shape the real
- * Poller.registerWaiter returns. Cancel is a no-op mock.
- */
-export function waiterFor<T>(p: Promise<T>): {
-  promise: Promise<T>;
-  cancel: ReturnType<typeof mock>;
-} {
-  return { promise: p, cancel: mock() };
-}
 
 type DeepPartial<T> = {
   [K in keyof T]?: T[K] extends object ? DeepPartial<T[K]> : T[K];

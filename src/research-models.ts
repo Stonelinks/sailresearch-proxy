@@ -144,7 +144,11 @@ function validateThinkingLevelMap(
     if (val === null) {
       map[key] = null;
     } else if (typeof val === "string") {
-      map[key] = val;
+      // The research LLM sometimes invents provider-specific values
+      // ("enabled"/"disabled"), but Sail's reasoning_effort only accepts
+      // none|minimal|low|medium|high|xhigh. Keep only the supported/
+      // unsupported signal from research and normalize the wire value.
+      map[key] = key === "off" ? "none" : key;
     }
     // skip non-string non-null values
   }

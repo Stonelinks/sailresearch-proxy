@@ -38,81 +38,58 @@ exports[`parseCapabilitiesFromJsx snapshot: full realistic page produces stable 
 exports[`parsePricingFromJsx snapshot: full realistic pricing page produces stable output: full-page-pricing 1`] = `
 [
   {
-    "modelId": "moonshotai/Kimi-K2.5",
+    "modelId": "zai-org/GLM-5.2-FP8",
     "prices": [
       {
-        "cachedInputPerMTok": 0.1,
+        "cachedInputPerMTok": 0.12,
         "completionWindow": "standard",
-        "inputPerMTok": 0.2,
-        "outputPerMTok": 1.2,
+        "inputPerMTok": 0.5,
+        "outputPerMTok": 2.5,
       },
       {
-        "cachedInputPerMTok": 0.15,
+        "cachedInputPerMTok": 0.18,
         "completionWindow": "priority",
-        "inputPerMTok": 0.25,
+        "inputPerMTok": 0.7,
+        "outputPerMTok": 3,
+      },
+      {
+        "cachedInputPerMTok": 0.08,
+        "completionWindow": "flex",
+        "inputPerMTok": 0.4,
         "outputPerMTok": 1.8,
       },
       {
-        "cachedInputPerMTok": 0.05,
-        "completionWindow": "flex",
-        "inputPerMTok": 0.16,
-        "outputPerMTok": 0.8,
-      },
-      {
-        "cachedInputPerMTok": 0.1,
+        "cachedInputPerMTok": 0.26,
         "completionWindow": "asap",
-        "inputPerMTok": 0.6,
-        "outputPerMTok": 3,
+        "inputPerMTok": 1.4,
+        "outputPerMTok": 4.4,
       },
     ],
   },
   {
-    "modelId": "deepseek-ai/DeepSeek-V3.2",
+    "modelId": "openai/gpt-oss-120b",
     "prices": [
       {
-        "cachedInputPerMTok": 0.01,
-        "completionWindow": "flex",
+        "cachedInputPerMTok": 0.02,
+        "completionWindow": "priority",
         "inputPerMTok": 0.04,
-        "outputPerMTok": 0.25,
+        "outputPerMTok": 0.3,
       },
       {
-        "cachedInputPerMTok": 0.28,
+        "cachedInputPerMTok": 0.03,
         "completionWindow": "asap",
-        "inputPerMTok": 0.56,
-        "outputPerMTok": 1.68,
+        "inputPerMTok": 0.06,
+        "outputPerMTok": 0.4,
       },
     ],
   },
   {
-    "modelId": "MiniMaxAI/MiniMax-M2.7",
+    "modelId": "Qwen/Qwen3.6-35B-A3B",
     "prices": [
       {
         "cachedInputPerMTok": 0.015,
         "completionWindow": "flex",
-        "inputPerMTok": 0.06,
-        "outputPerMTok": 0.3,
-      },
-      {
-        "cachedInputPerMTok": 0.06,
-        "completionWindow": "asap",
-        "inputPerMTok": 0.3,
-        "outputPerMTok": 1.2,
-      },
-    ],
-  },
-  {
-    "modelId": "google/gemma-4-31B-it",
-    "prices": [
-      {
-        "cachedInputPerMTok": 0.02,
-        "completionWindow": "flex",
-        "inputPerMTok": 0.06,
-        "outputPerMTok": 0.3,
-      },
-      {
-        "cachedInputPerMTok": 0.07,
-        "completionWindow": "asap",
-        "inputPerMTok": 0.14,
+        "inputPerMTok": 0.05,
         "outputPerMTok": 0.4,
       },
     ],

@@ -1,6 +1,5 @@
 import SchemaBuilder from "@pothos/core";
 import type { PrismaClient } from "@prisma/client";
-import type { JobSummary, JobDetail } from "../services/job-shapes.ts";
 import type { ModelWire, PresetWire, PriceWire } from "../models-meta.ts";
 import type { pubsub } from "./pubsub.ts";
 import type {
@@ -31,8 +30,6 @@ export const builder = new SchemaBuilder<{
   Context: Context;
   DefaultFieldNullability: false;
   Objects: {
-    Job: JobSummary;
-    JobDetail: JobDetail;
     Model: ModelWire;
     SamplingPreset: PresetWire;
     ModelPrice: PriceWire;

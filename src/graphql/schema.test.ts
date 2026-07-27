@@ -6,7 +6,7 @@
  * or WS plumbing involved.
  */
 import { describe, test, expect, mock, beforeEach, beforeAll } from "bun:test";
-import { execute, parse, subscribe } from "graphql";
+import { execute, parse } from "graphql";
 
 beforeAll(() => {
   if (!process.env.SAIL_API_KEY) {
@@ -27,18 +27,10 @@ mock.module("./research-models-runner.ts", () => ({
   researchAndUpsertMany: mockResearchAndUpsertMany,
 }));
 
-const mockPendingJobFindMany = mock();
-const mockPendingJobCount = mock();
-const mockPendingJobFindUnique = mock();
 const mockModelMetaFindMany = mock();
 const mockModelMetaFindUnique = mock();
 
 const mockPrisma = {
-  pendingJob: {
-    findMany: mockPendingJobFindMany,
-    count: mockPendingJobCount,
-    findUnique: mockPendingJobFindUnique,
-  },
   modelMeta: {
     findMany: mockModelMetaFindMany,
     findUnique: mockModelMetaFindUnique,
@@ -59,195 +51,6 @@ async function run(query: string, variableValues?: Record<string, unknown>) {
     variableValues,
   });
 }
-
-describe("Query.jobs", () => {
-  beforeEach(() => {
-    mockPendingJobFindMany.mockReset();
-    mockPendingJobCount.mockReset();
-  });
-
-  test("returns paginated list with hasError + durationMs", async () => {
-    mockPendingJobFindMany.mockResolvedValueOnce([
-      {
-        id: "job1",
-        sailResponseId: "resp1",
-        status: "completed",
-        model: "test-model",
-        completionWindow: "standard",
-        apiType: "chat-completions",
-        createdAt: new Date("2025-01-01T00:00:00Z"),
-        completedAt: new Date("2025-01-01T00:01:00Z"),
-        pollCount: 5,
-        errorBody: null,
-      },
-    ]);
-    mockPendingJobCount.mockResolvedValueOnce(1);
-
-    const res = await run(`
-      { jobs(limit: 50, offset: 0) {
-          total limit offset
-          jobs { id status hasError durationMs }
-        } }
-    `);
-
-    expect(res.errors).toBeUndefined();
-    expect(res.data?.jobs).toEqual({
-      total: 1,
-      limit: 50,
-      offset: 0,
-      jobs: [
-        {
-          id: "job1",
-          status: "completed",
-          hasError: false,
-          durationMs: 60_000,
-        },
-      ],
-    });
-  });
-
-  test("filters by status", async () => {
-    mockPendingJobFindMany.mockResolvedValueOnce([]);
-    mockPendingJobCount.mockResolvedValueOnce(0);
-
-    await run(`{ jobs(status: failed) { total } }`);
-
-    expect(mockPendingJobFindMany).toHaveBeenCalledTimes(1);
-    expect(mockPendingJobFindMany.mock.calls[0]![0].where).toEqual({
-      status: "failed",
-    });
-  });
-
-  test("clamps limit to 1–200", async () => {
-    mockPendingJobFindMany.mockResolvedValueOnce([]);
-    mockPendingJobCount.mockResolvedValueOnce(0);
-
-    await run(`{ jobs(limit: 999) { total } }`);
-
-    expect(mockPendingJobFindMany.mock.calls[0]![0].take).toBe(200);
-  });
-
-  test("maps in_progress status to running", async () => {
-    mockPendingJobFindMany.mockResolvedValueOnce([
-      {
-        id: "job-ip",
-        sailResponseId: "resp-ip",
-        status: "in_progress",
-        model: "test-model",
-        completionWindow: "flex",
-        apiType: "responses",
-        createdAt: new Date("2025-01-01T00:00:00Z"),
-        completedAt: null,
-        pollCount: 2,
-        errorBody: null,
-      },
-    ]);
-    mockPendingJobCount.mockResolvedValueOnce(1);
-
-    const res = await run(`
-      { jobs { jobs { id status } } }
-    `);
-
-    expect(res.errors).toBeUndefined();
-    expect((res.data?.jobs as any).jobs[0].status).toBe("running");
-  });
-
-  test("maps in_progress status to running on job detail", async () => {
-    mockPendingJobFindUnique.mockResolvedValueOnce({
-      id: "job-ip",
-      sailResponseId: "resp-ip",
-      status: "in_progress",
-      model: "test-model",
-      completionWindow: "flex",
-      apiType: "responses",
-      createdAt: new Date("2025-01-01T00:00:00Z"),
-      completedAt: null,
-      pollCount: 2,
-      errorBody: null,
-      requestBody: null,
-      responseBody: null,
-    });
-
-    const res = await run(`query Q($id: ID!) { job(id: $id) { id status } }`, {
-      id: "job-ip",
-    });
-
-    expect(res.errors).toBeUndefined();
-    expect((res.data as any)?.job?.status).toBe("running");
-  });
-
-  test("marks hasError true when errorBody is not null", async () => {
-    mockPendingJobFindMany.mockResolvedValueOnce([
-      {
-        id: "job2",
-        sailResponseId: "resp2",
-        status: "failed",
-        model: "test-model",
-        completionWindow: "flex",
-        apiType: "responses",
-        createdAt: new Date("2025-01-01T00:00:00Z"),
-        completedAt: new Date("2025-01-01T00:02:00Z"),
-        pollCount: 10,
-        errorBody: '{"error":{"message":"timeout"}}',
-      },
-    ]);
-    mockPendingJobCount.mockResolvedValueOnce(1);
-
-    const res = await run(`{ jobs { jobs { hasError } } }`);
-    expect((res.data?.jobs as any).jobs[0].hasError).toBe(true);
-  });
-});
-
-describe("Query.job", () => {
-  beforeEach(() => {
-    mockPendingJobFindUnique.mockReset();
-  });
-
-  test("returns detail with request/response/error bodies", async () => {
-    mockPendingJobFindUnique.mockResolvedValueOnce({
-      id: "job1",
-      sailResponseId: "resp1",
-      status: "completed",
-      model: "test-model",
-      completionWindow: "standard",
-      apiType: "chat-completions",
-      createdAt: new Date("2025-01-01T00:00:00Z"),
-      completedAt: new Date("2025-01-01T00:01:00Z"),
-      pollCount: 5,
-      errorBody: null,
-      requestBody: '{"model":"test-model","messages":[]}',
-      responseBody: '{"id":"resp1","output":[]}',
-    });
-
-    const res = await run(
-      `
-      query Q($id: ID!) {
-        job(id: $id) { id requestBody responseBody errorBody }
-      }
-    `,
-      { id: "job1" },
-    );
-
-    expect(res.errors).toBeUndefined();
-    expect(res.data?.job).toEqual({
-      id: "job1",
-      requestBody: '{"model":"test-model","messages":[]}',
-      responseBody: '{"id":"resp1","output":[]}',
-      errorBody: null,
-    });
-  });
-
-  test("returns null for unknown id", async () => {
-    mockPendingJobFindUnique.mockResolvedValueOnce(null);
-
-    const res = await run(`query Q($id: ID!) { job(id: $id) { id } }`, {
-      id: "nonexistent",
-    });
-
-    expect(res.errors).toBeUndefined();
-    expect(res.data?.job).toBeNull();
-  });
-});
 
 describe("Query.models", () => {
   beforeEach(() => {
@@ -558,45 +361,5 @@ describe("Mutation.researchAllModels", () => {
     expect(res.errors).toBeDefined();
     expect(res.errors?.[0]?.message).toMatch(/Sail upstream returned 500/);
     expect(mockResearchAndUpsertMany).not.toHaveBeenCalled();
-  });
-});
-
-describe("Subscription.jobUpdated", () => {
-  test("delivers payloads published to pubsub, filtered by id", async () => {
-    const result = await subscribe({
-      schema,
-      document: parse(`subscription S($id: ID) {
-        jobUpdated(id: $id) { id status }
-      }`),
-      contextValue: ctx,
-      variableValues: { id: "want" },
-    });
-
-    if (!("next" in (result as any))) {
-      throw new Error("expected an async iterator from subscribe()");
-    }
-    const iter = result as AsyncIterableIterator<any>;
-
-    // Poke the iterator to register the handler before publishing.
-    const first = iter.next();
-    // Yield to the subscribe() machinery so its addEventListener runs.
-    await new Promise((r) => setTimeout(r, 0));
-
-    pubsub.publish("jobUpdated", {
-      id: "skip",
-      status: "queued",
-    } as any);
-    pubsub.publish("jobUpdated", {
-      id: "want",
-      status: "completed",
-    } as any);
-
-    const payload = await first;
-    expect(payload.value.data.jobUpdated).toEqual({
-      id: "want",
-      status: "completed",
-    });
-
-    await iter.return?.();
   });
 });

@@ -7,8 +7,7 @@
  * `data-cap` attributes.
  *
  * The pricing scraper parses `/pricing.md` for per-window token costs
- * from the `price-amount` spans with `data-window` and `data-axis`
- * attributes.
+ * from each pricing row's `aria-label` summary string.
  */
 import { log } from "../shared/logger.ts";
 import { type ModelPriceInput, type CompletionWindow } from "./types.ts";
@@ -98,122 +97,68 @@ export async function scrapeModelCapabilities(): Promise<
 
 /**
  * Deterministically parse the pricing table from the Sail docs
- * `/pricing.md` page. The page contains JSX-rendered HTML with rows like:
+ * `/pricing.md` page. Each (model, window) pair is one table row whose
+ * `aria-label` carries the full price summary; the model cell spans its
+ * window rows via `rowSpan`:
  *
- *   <tr className="pricing-row">
- *     <td className="pricing-cell-model" …>
- *       <span className="cap-slug-text" title="org/model-id">…</span>
+ *   <tr className="pricing-row pricing-row-window pricing-row-model-first"
+ *       aria-label="Kimi-K2.6 Priority pricing: input $0.45, cached $0.20,
+ *                   output $3.00 per 1M tokens.">
+ *     <td className="pricing-cell pricing-cell-model" rowSpan={2} …>
+ *       … <code>moonshotai/Kimi-K2.6</code> …
  *     </td>
- *     <td className="pricing-cell-price" data-axis="Input">
- *       <span className="price-amount" data-window="standard">$0.20</span>
- *       <span className="price-amount" data-window="flex">$0.16</span>
- *     </td>
- *     <td className="pricing-cell-price" data-axis="Cached">…</td>
- *     <td className="pricing-cell-price" data-axis="Output">…</td>
+ *     …
  *   </tr>
+ *   <tr className="pricing-row pricing-row-window"
+ *       aria-label="Kimi-K2.6 ASAP pricing: …">…</tr>
  *
- * A single row may contain multiple models (each with their own 3 price
- * cells). We extract the slug from `title="…"`, the axis from
- * `data-axis="…"`, the window from `data-window="…"`, and the dollar
- * amount from the text following the `$` currency span.
+ * We track the current model from the `<code>slug</code>` in model cells
+ * and read window + prices from each row's aria-label.
  */
+const PRICE_LABEL_RE =
+  /aria-label="[^"]*?\b(ASAP|Priority|Standard|Flex) pricing: input \$([0-9.]+), (?:cached \$([0-9.]+), )?output \$([0-9.]+)/;
+
 export function parsePricingFromJsx(
   markdown: string,
 ): Map<string, ModelPriceInput[]> {
   const map = new Map<string, ModelPriceInput[]>();
 
-  const rows = markdown.split(/<tr className="pricing-row">/);
+  const rows = markdown.split(/<tr className="pricing-row[\s"]/);
+  let currentModel: string | null = null;
 
   for (const row of rows.slice(1)) {
-    // Find all model IDs in this row (title attr in cap-slug-text spans)
-    const titles = [...row.matchAll(/title="([^"]+)"/g)].map((m) => m[1]!);
-    if (titles.length === 0) continue;
+    // A model cell (rowSpan over its window rows) starts a new model group.
+    if (row.includes("pricing-cell-model")) {
+      const codeMatch = row.match(/<code>([^<]+)<\/code>/);
+      currentModel = codeMatch?.[1]?.trim() || null;
+    }
+    if (!currentModel) continue;
 
-    // Find all price cells, each with a data-axis and one or more
-    // price-amount spans containing data-window + dollar value.
-    const cells = row.split(/className="pricing-cell pricing-cell-price"/);
+    const label = row.match(PRICE_LABEL_RE);
+    if (!label) continue;
 
-    const axisGroups: Array<{
-      axis: string;
-      amounts: Array<{ window: string; value: number }>;
-    }> = [];
-
-    for (const cell of cells.slice(1)) {
-      const axisMatch = cell.match(/data-axis="([^"]+)"/);
-      if (!axisMatch) continue;
-      const axis = axisMatch[1]!;
-
-      const amounts: Array<{ window: string; value: number }> = [];
-      // Match: data-window="standard"> ... <span className="price-currency…">$</span> 0.20
-      const priceMatches = cell.matchAll(
-        /data-window="([^"]+)">[\s\S]*?<span className="price-currency[^"]*"[^>]*>[\s\S]*?<\/span>\s*([0-9.]+)/g,
+    const window = label[1]!.toLowerCase();
+    if (!isValidCompletionWindow(window)) {
+      log.warn(
+        `[docs-scraper] skipping price with invalid completionWindow "${window}" for ${currentModel}`,
       );
-      for (const pm of priceMatches) {
-        const value = parseFloat(pm[2]!);
-        if (!Number.isNaN(value)) {
-          amounts.push({ window: pm[1]!, value });
-        }
-      }
-
-      axisGroups.push({ axis, amounts });
+      continue;
     }
 
-    // Chunk axis groups into triples (Input, Cached, Output) and assign
-    // one triple per model title, in order.
-    const modelsInRow = titles.length;
-    const groupsPerModel = 3; // Input, Cached, Output
+    const input = parseFloat(label[2]!);
+    const cached = label[3] !== undefined ? parseFloat(label[3]!) : null;
+    const output = parseFloat(label[4]!);
+    if (Number.isNaN(input) || Number.isNaN(output)) continue;
 
-    for (let m = 0; m < modelsInRow; m++) {
-      const modelId = titles[m]!;
-      if (modelId.trim() === "") continue;
-
-      const start = m * groupsPerModel;
-      const group = axisGroups.slice(start, start + groupsPerModel);
-      if (group.length < groupsPerModel) {
-        log.warn(
-          `[docs-scraper] incomplete price cells for ${modelId}: expected ${groupsPerModel}, got ${group.length}`,
-        );
-        continue;
-      }
-
-      // Build per-window price entries
-      const windowPrices = new Map<
-        string,
-        { input?: number; cached?: number; output?: number }
-      >();
-
-      for (const { axis, amounts } of group) {
-        for (const { window, value } of amounts) {
-          if (!windowPrices.has(window)) {
-            windowPrices.set(window, {});
-          }
-          const wp = windowPrices.get(window)!;
-          if (axis === "Input") wp.input = value;
-          else if (axis === "Cached") wp.cached = value;
-          else if (axis === "Output") wp.output = value;
-        }
-      }
-
-      const prices: ModelPriceInput[] = [];
-      for (const [window, wp] of windowPrices) {
-        if (!isValidCompletionWindow(window)) {
-          log.warn(
-            `[docs-scraper] skipping price with invalid completionWindow "${window}" for ${modelId}`,
-          );
-          continue;
-        }
-        // Input and output are required
-        if (wp.input === undefined || wp.output === undefined) continue;
-        prices.push({
-          completionWindow: window as CompletionWindow,
-          inputPerMTok: wp.input,
-          cachedInputPerMTok: wp.cached ?? null,
-          outputPerMTok: wp.output,
-        });
-      }
-
-      map.set(modelId, prices);
-    }
+    const prices = map.get(currentModel) ?? [];
+    prices.push({
+      completionWindow: window as CompletionWindow,
+      inputPerMTok: input,
+      cachedInputPerMTok:
+        cached !== null && Number.isNaN(cached) ? null : cached,
+      outputPerMTok: output,
+    });
+    map.set(currentModel, prices);
   }
 
   return map;

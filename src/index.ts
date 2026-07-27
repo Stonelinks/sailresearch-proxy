@@ -1,5 +1,4 @@
 import { PrismaClient } from "@prisma/client";
-import { TERMINAL_STATUSES } from "./constants.ts";
 import { log, initFileLogging, closeFileLogging } from "../shared/logger.ts";
 import { createApp } from "./app.ts";
 import { config } from "./config.ts";
@@ -9,28 +8,20 @@ import fs from "node:fs";
 fs.mkdirSync(config.logging.dir, { recursive: true });
 initFileLogging(config.logging.dir);
 
-// Run migrations / ensure DB schema
-const migrateResult = Bun.spawnSync(
-  ["bunx", "prisma", "db", "push", "--skip-generate"],
-  { env: process.env, cwd: import.meta.dir + "/.." },
-);
+// Apply committed migrations
+const migrateResult = Bun.spawnSync(["bunx", "prisma", "migrate", "deploy"], {
+  env: process.env,
+  cwd: import.meta.dir + "/..",
+});
 if (migrateResult.exitCode !== 0) {
   log.error(
-    "[startup] prisma db push failed:",
+    "[startup] prisma migrate deploy failed:",
     migrateResult.stderr.toString(),
   );
   process.exit(1);
 }
 
 const prisma = new PrismaClient();
-
-// Check for in-flight jobs from previous run
-const resumed = await prisma.pendingJob.count({
-  where: { status: { notIn: [...TERMINAL_STATUSES] } },
-});
-if (resumed > 0) {
-  log.info(`[startup] resuming ${resumed} in-flight job(s)`);
-}
 
 const app = createApp(prisma);
 

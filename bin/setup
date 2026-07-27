@@ -8,4 +8,4 @@ source env.sh
 bun install
 cd frontend && bun install && bun run build && cd ..
 bunx prisma generate
-bunx prisma db push --skip-generate
+bunx prisma migrate deploy

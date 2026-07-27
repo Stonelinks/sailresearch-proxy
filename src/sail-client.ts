@@ -151,50 +151,14 @@ async function request(
 }
 
 export const sail = {
-  /** Synchronous chat completion — full generation time. */
-  chatCompletions(body: any) {
-    return request("/chat/completions", {
-      method: "POST",
-      body: JSON.stringify(body),
-      timeoutMs: config.sail.inferenceTimeoutMs,
-    });
-  },
-
   /**
-   * Create a Responses-API request. Called from two paths:
-   *  - batched submit (`background: true`) — Sail returns the job id quickly;
-   *    use `pollTimeoutMs`.
-   *  - asap passthrough — Sail runs inference inline; use `inferenceTimeoutMs`.
-   * Caller picks via `opts.timeoutMs`.
+   * Models list — fast, idempotent metadata fetch; the retry loop above is
+   * safe here. Inference requests do NOT go through this client: they are
+   * forwarded verbatim (streaming, no retries) by services/forward.ts.
    */
-  createResponse(body: any, opts: { timeoutMs: number }) {
-    return request("/responses", {
-      method: "POST",
-      body: JSON.stringify(body),
-      timeoutMs: opts.timeoutMs,
-    });
-  },
-
-  /** Poll job status — should be sub-second. */
-  getResponse(responseId: string) {
-    return request(`/responses/${responseId}`, {
-      timeoutMs: config.sail.pollTimeoutMs,
-    });
-  },
-
-  /** Models list — fast metadata fetch. */
   listModels() {
     return request("/models", {
       timeoutMs: config.sail.pollTimeoutMs,
-    });
-  },
-
-  /** Synchronous Anthropic-format message — full generation time. */
-  createMessage(body: any) {
-    return request("/messages", {
-      method: "POST",
-      body: JSON.stringify(body),
-      timeoutMs: config.sail.inferenceTimeoutMs,
     });
   },
 };

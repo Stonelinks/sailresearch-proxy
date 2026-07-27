@@ -1,6 +1,16 @@
 # sailresearch-proxy
 
-OpenAI-compatible proxy for [Sail Research](https://docs.sailresearch.com/). Translates standard `/v1/chat/completions`, `/v1/messages`, and `/v1/responses` requests into Sail's async completion window API, letting any OpenAI, Anthropic, or Sail-native client use Sail without modification.
+A thin completion-window injector for [Sail Research](https://docs.sailresearch.com/), plus a model-research pipeline and a `models.json` generator for the [pi coding agent](https://pi.dev/).
+
+> **Status: downscoped.** This project used to be a full translation/batching proxy: it converted OpenAI-shaped requests into Sail's async batch API, polled for results, and simulated SSE streaming. Sail now supports all of that natively — `/v1/chat/completions`, `/v1/messages`, and `/v1/responses` accept `metadata.completion_window` directly and stream real SSE on every window. If your client can set a request-body field, **you don't need this proxy**; point it straight at `https://api.sailresearch.com/v1`.
+>
+> The proxy remains for one reason: pi's `models.json` cannot inject custom request-body fields (verified through pi 0.82.x — providers support custom headers only, and Sail reads the window from the body). So this proxy keeps the window-prefixed routes (`/flex/v1/...`) that pi providers can target via `baseUrl`, injects `metadata.completion_window`, and forwards everything else to Sail verbatim.
+
+What it does today:
+
+1. **Window injection** — `/{asap|priority|standard|flex}/v1/{chat/completions,messages,responses}` sets `metadata.completion_window` and forwards to Sail unchanged (streaming included, no retries, no persistence).
+2. **Model research** — scrapes Sail's docs for capabilities/pricing, uses an embedded pi session to research sampling presets/context sizes, smoke-tests presets and window support, and stores the results in SQLite (browse/refresh via the dashboard).
+3. **`generate-models-json`** — emits a pi `models.json` with one provider per completion window, enriched with researched pricing, presets, context windows, and thinking-level maps.
 
 ## Setup
 
@@ -29,15 +39,14 @@ from openai import OpenAI
 
 client = OpenAI(base_url="http://localhost:4000/v1", api_key="anything")
 
-# Synchronous
 response = client.chat.completions.create(
-    model="deepseek-ai/DeepSeek-V3.2",
+    model="openai/gpt-oss-120b",
     messages=[{"role": "user", "content": "Hello!"}],
 )
 
-# Streaming
+# Streaming (forwarded verbatim from Sail's native SSE)
 stream = client.chat.completions.create(
-    model="deepseek-ai/DeepSeek-V3.2",
+    model="openai/gpt-oss-120b",
     messages=[{"role": "user", "content": "Hello!"}],
     stream=True,
 )
@@ -52,341 +61,107 @@ from anthropic import Anthropic
 
 client = Anthropic(
     auth_token="your-sail-api-key",  # Use auth_token, not api_key
-    base_url="http://localhost:4000",
+    base_url="http://localhost:4000/asap",
 )
 
 response = client.messages.create(
-    model="deepseek-ai/DeepSeek-V3.2",
+    model="openai/gpt-oss-120b",
     max_tokens=1024,
     messages=[{"role": "user", "content": "Hello!"}],
-)
-```
-
-Or call the Sail Responses API directly:
-
-```python
-import requests
-
-response = requests.post(
-    "http://localhost:4000/v1/responses",
-    headers={
-        "Authorization": "Bearer your-sail-api-key",
-        "Content-Type": "application/json",
-    },
-    json={
-        "model": "deepseek-ai/DeepSeek-V3.2",
-        "input": "Hello!",
-    },
 )
 ```
 
 ## Completion Windows
 
-Control the latency/cost tradeoff via `metadata.completion_window` in the request body, or the `X-Completion-Window` header. See https://docs.sailresearch.com/completion-windows for tier details.
+Sail schedules each request according to `metadata.completion_window`; cheaper windows may take minutes to serve. See https://docs.sailresearch.com/completion-windows for tiers and pricing. **Window support varies per model** — Sail returns a structured 400 naming the supported windows when a model doesn't offer the requested one. `GET /v1/models` on this proxy includes researched `x_supported_windows` per model.
 
-| Window | Mode | Behavior | Default timeout |
-|--------|------|----------|----------------|
-| `asap` | Passthrough | Forwards to Sail synchronously on latency-optimized hardware. Premium pricing. | N/A (sync) |
-| `priority` | Batching | Scheduled, ~1–2 min target. For agent loops where latency compounds. | 5 min |
-| `standard` | Batching | Scheduled, ~5 min target. **Default.** | 15 min |
-| `flex` | Batching | Best-effort, off-peak. Cheapest, no SLO. | 2 hours |
-
-```python
-# Fast (passthrough)
-client.chat.completions.create(
-    model="deepseek-ai/DeepSeek-V3.2",
-    messages=[...],
-    extra_body={"metadata": {"completion_window": "asap"}},
-)
-
-# Cheap (batching)
-client.chat.completions.create(
-    model="deepseek-ai/DeepSeek-V3.2",
-    messages=[...],
-    extra_body={"metadata": {"completion_window": "flex"}},
-)
-```
-
-Streaming is supported for chat completions in all modes. Since Sail does not support server-sent events natively, the proxy receives the complete response and emits simulated SSE chunks. For batched windows (`priority`/`standard`/`flex`), SSE heartbeats (`: heartbeat` comment lines) are sent every 15 seconds while waiting for the job to complete — this keeps the connection alive through reverse proxies and load balancers.
-
-**For long-running jobs, always use `stream: true`.** Non-streaming batched requests block the HTTP connection with no data until the result is ready, which may exceed timeout limits of reverse proxies (see [Reverse Proxy Configuration](#reverse-proxy-configuration)).
-
-You can also use [window-prefixed routes](#window-prefixed-routes) to pin a client to a specific window via the base URL.
-
-## Window-Prefixed Routes
-
-Every `/v1/*` endpoint is also available under a window prefix, so you can pin a client to a specific completion window without modifying request bodies or headers:
-
-```
-/asap/v1/chat/completions
-/priority/v1/chat/completions
-/standard/v1/chat/completions
-/flex/v1/chat/completions
-/asap/v1/messages
-/flex/v1/messages
-/asap/v1/responses
-/flex/v1/responses
-/asap/v1/models
-/flex/v1/models
-...etc
-```
-
-The easiest way to use this is to point your client at the prefixed base URL:
-
-```python
-from openai import OpenAI
-
-# All requests use the flex window automatically — no extra config needed
-client = OpenAI(base_url="http://localhost:4000/flex/v1", api_key="anything")
-
-response = client.chat.completions.create(
-    model="deepseek-ai/DeepSeek-V3.2",
-    messages=[{"role": "user", "content": "Hello!"}],
-)
-```
-
-```python
-from anthropic import Anthropic
-
-# All Anthropic requests use the flex window
-client = Anthropic(
-    auth_token="your-sail-api-key",
-    base_url="http://localhost:4000/flex",
-)
-
-response = client.messages.create(
-    model="deepseek-ai/DeepSeek-V3.2",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "Hello!"}],
-)
-```
-
-**Resolution order** (highest priority first):
+The proxy resolves the window in this order (highest priority first):
 
 1. URL prefix (e.g. `/flex/v1/...`)
 2. `X-Completion-Window` header
 3. `metadata.completion_window` in the request body
 4. `DEFAULT_COMPLETION_WINDOW` config (defaults to `standard`)
 
+The resolved window is always written into `metadata.completion_window` before forwarding.
+
+### Window-prefixed routes
+
+Every `/v1/*` endpoint is also available under a window prefix, so a client that can only set a base URL (like pi) can still pin a window:
+
+```
+/asap/v1/chat/completions
+/priority/v1/messages
+/flex/v1/responses
+/asap/v1/models        # filters the model list to that window
+...etc
+```
+
+```python
+# All requests use the flex window automatically — no extra config needed
+client = OpenAI(base_url="http://localhost:4000/flex/v1", api_key="anything")
+```
+
 ## API Compatibility
 
-**Endpoints:**
+| Endpoint | Behavior |
+|----------|----------|
+| `POST /v1/chat/completions` | Forwarded verbatim (+ window injection) |
+| `POST /v1/messages` | Forwarded verbatim (+ window injection, small field strip) |
+| `POST /v1/responses` | Forwarded verbatim (+ window injection) |
+| `GET /v1/models` | Sail's list enriched with researched metadata from the local DB |
+| `GET /health`, `GET /api/version` | Local |
+| `POST /graphql` (+ WS) | Dashboard API (models + research) |
 
-| Endpoint | Description | Maturity |
-|----------|-------------|----------|
-| `POST /v1/chat/completions` | OpenAI Chat Completions (sync and streaming) | Full support |
-| `POST /v1/messages` | Anthropic Messages API | Full support (passthrough + batching) |
-| `POST /v1/responses` | Sail Responses API (native) | Full support (passthrough + batching) |
-| `GET /v1/models` | List available models | Full support |
-| `GET /health` | Health check | — |
+Bodies, streams, status codes, and error payloads pass through unmodified, with two small normalizations for fields Sail still rejects (verified against the live API, 2026-07):
 
-All endpoints also support window-prefixed variants (e.g. `/flex/v1/chat/completions`).
+- chat completions: `store: false` is dropped (Sail always stores; `store: true` passes through)
+- messages: `top_k`, `stop_sequences`, `service_tier`, `inference_geo` are dropped
 
-**Field remapping:**
+Everything else — `system`, `tools`, `thinking`, `stream`, `stream_options`, `max_tokens`, `prompt_cache_key`, image content parts — is now supported natively by Sail and forwarded untouched.
 
-- `max_tokens` is automatically remapped to `max_completion_tokens` for chat completions (Sail does not accept the deprecated field)
-- `stream` is handled by the proxy — Sail receives a non-streaming request regardless
-- In batching mode, chat completions and messages are transformed to Sail's Responses API format and the result is transformed back
+**Auth:** the proxy accepts both `Authorization: Bearer <key>` and `x-api-key: <key>` when `PROXY_API_KEY` is set, and always uses its own `SAIL_API_KEY` upstream.
 
-**Supported features:** temperature, top_p, tools/tool_choice, response_format (json_schema, json_object), reasoning_effort, user, **image input**.
+**Timeouts:** the proxy applies no timeout of its own to forwarded requests; the client's disconnect aborts the upstream call. Bun's HTTP server caps *idle* time at 255 s, so use `stream: true` for batched windows — Sail's SSE (including `ping` events on `/v1/messages`) keeps the connection non-idle. A non-streaming request that sits silent past 255 s will be cut.
 
-### Chat Completions
+## Model Research
 
-Full OpenAI Chat Completions compatibility. Supports all completion windows, streaming, tools, structured outputs, and image input.
+The research pipeline populates the SQLite DB behind `/v1/models` enrichment and `generate-models-json`:
 
-### Anthropic Messages
+- `src/docs-scraper.ts` — deterministic scrapers for `docs.sailresearch.com/models.md` (capabilities) and `/pricing.md` (per-window pricing)
+- `src/research-models.ts` + `src/graphql/research-models-runner.ts` — pi-driven research (context size, sampling presets, thinking levels), preset smoke tests, and window-compatibility smoke tests (now exercising Sail's native windows through the injector)
+- `bin/research-models` — CLI (requires the proxy running); also available from the dashboard via **Refetch** / **Research All**
 
-The proxy accepts Anthropic Messages API requests at `POST /v1/messages`. This works with the official Anthropic SDK:
+## Pi models.json Generation
 
-- **`asap` window:** Forwards directly to Sail's native `/v1/messages` endpoint. No format transformation needed.
-- **Batched windows** (`priority`/`standard`/`flex`): Transforms the request to Sail's Responses API format, submits with `background: true`, polls until complete, then transforms the result back to Anthropic Messages format. Jobs appear on the dashboard with `apiType: "messages"`.
-
-**Auth:** The proxy accepts both `Authorization: Bearer <key>` and `x-api-key: <key>` headers. Use `auth_token` (not `api_key`) when initializing the Anthropic SDK:
-
-```python
-client = Anthropic(
-    auth_token="your-sail-api-key",  # sends Authorization: Bearer
-    base_url="http://localhost:4000",
-)
+```bash
+source env.sh
+generate-models-json                 # reads the proxy's enriched /v1/models
+generate-models-json --smoke-test    # additionally validates presets via live requests
 ```
 
-**Unsupported fields stripped automatically:** `system`, `thinking`, `tools`, `tool_choice`, `stop_sequences`, `top_k`, `stream`, `service_tier`, `inference_geo`. These are not supported by Sail's Messages API (Alpha) and will be removed from the request before forwarding.
+Emits providers `sail-asap` / `sail-priority` / `sail-standard` / `sail-flex` (plus a `sail` alias for standard), each pointing at the corresponding window-prefixed proxy URL, with per-window pricing and per-model presets. Output follows pi's models.json spec: https://pi.dev/docs/latest/models
 
-### Responses API
+## Dashboard
 
-The proxy supports Sail's native Responses API at `POST /v1/responses`. This is Sail's primary/stable API surface.
-
-- **`asap` window:** Forwards directly to Sail's `/v1/responses`.
-- **Batched windows:** Submits with `background: true`, creates a `pendingJob` with `apiType: "responses"`, polls until complete, returns the Responses API result as-is. No format transformation needed.
-
-**Streaming:** When `stream: true` is set on a batched request, the proxy returns an SSE stream with heartbeats during the wait, then emits Responses API streaming events (`response.created`, `response.output_item.added`, `response.output_text.delta`, `response.completed`) when the result is ready. This is recommended for long-running jobs.
-
-## Image Input
-
-Send images to multimodal models via the OpenAI `image_url` content part or the Anthropic `image` content block. Images are accepted as HTTP(S) URLs or base64 data URIs.
-
-**Supported models:** See [Sail's supported models](https://docs.sailresearch.com/supported-models) for multimodal capability flags. Currently `moonshotai/Kimi-K2.5`.
-
-**Limits:** Max 20 images per request, max 20 MB per image. Formats: JPEG, PNG, WebP, GIF.
-
-### OpenAI format (chat completions)
-
-```python
-from openai import OpenAI
-
-client = OpenAI(base_url="http://localhost:4000/v1", api_key="anything")
-
-response = client.chat.completions.create(
-    model="moonshotai/Kimi-K2.5",
-    messages=[
-        {
-            "role": "user",
-            "content": [
-                {"type": "text", "text": "What's in this image?"},
-                {
-                    "type": "image_url",
-                    "image_url": {
-                        "url": "https://example.com/cat.jpg",
-                        "detail": "auto",  # optional: "auto" | "low" | "high"
-                    },
-                },
-            ],
-        }
-    ],
-)
-```
-
-Data URIs are also accepted:
-
-```python
-import base64
-
-b64 = base64.b64encode(open("cat.jpg", "rb").read()).decode()
-response = client.chat.completions.create(
-    model="moonshotai/Kimi-K2.5",
-    messages=[
-        {
-            "role": "user",
-            "content": [
-                {"type": "text", "text": "Describe this image"},
-                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
-            ],
-        }
-    ],
-)
-```
-
-### Anthropic format (messages)
-
-```python
-import anthropic
-
-client = anthropic.Anthropic(
-    auth_token="your-sail-api-key",  # Use auth_token, not api_key
-    base_url="http://localhost:4000",
-)
-
-# URL source
-response = client.messages.create(
-    model="moonshotai/Kimi-K2.5",
-    max_tokens=1024,
-    messages=[
-        {
-            "role": "user",
-            "content": [
-                {"type": "image", "source": {"type": "url", "url": "https://example.com/cat.jpg"}},
-                {"type": "text", "text": "What's in this image?"},
-            ],
-        }
-    ],
-)
-
-# Base64 source
-response = client.messages.create(
-    model="moonshotai/Kimi-K2.5",
-    max_tokens=1024,
-    messages=[
-        {
-            "role": "user",
-            "content": [
-                {
-                    "type": "image",
-                    "source": {"type": "base64", "media_type": "image/jpeg", "data": b64},
-                },
-                {"type": "text", "text": "What's in this image?"},
-            ],
-        }
-    ],
-)
-```
-
-**How it works:** In passthrough mode (`asap`), image content parts are forwarded to Sail's native API as-is. In batching mode (`priority`/`standard`/`flex`), the proxy transforms OpenAI `image_url` and Anthropic `image` blocks into Sail's `input_image` format for the Responses API.
+`http://localhost:4000/` serves the Models dashboard: researched metadata, per-window pricing, sampling presets, and research controls with live progress (GraphQL subscriptions over WebSocket).
 
 ## Reverse Proxy Configuration
 
-When deploying behind a reverse proxy (nginx, Caddy, etc.), you **must** configure timeouts that exceed your longest expected job duration. The proxy sends SSE heartbeats every 15 seconds on streaming batched requests, which keeps the connection alive — but the reverse proxy still needs to allow connections that last long enough.
-
-### nginx
-
-The default `proxy_read_timeout` is only 60 seconds, which will kill any batched request. Use this configuration:
+When deploying behind a reverse proxy (nginx, Caddy, etc.), allow long-lived connections — batched windows can take minutes to start returning bytes:
 
 ```nginx
 location / {
     proxy_pass http://127.0.0.1:4000;
     proxy_http_version 1.1;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-
-    # Timeouts must exceed the longest expected job duration.
-    # Flex jobs can take up to 2 hours.
-    proxy_read_timeout 7200s;    # 2 hours — matches flex window timeout
-    proxy_send_timeout 60s;
-    proxy_connect_timeout 60s;
-
-    # Disable buffering so SSE heartbeats reach the client immediately
-    proxy_buffering off;
+    proxy_read_timeout 7200s;    # ≥ your slowest expected flex job
+    proxy_buffering off;         # SSE chunks reach the client immediately
     proxy_cache off;
-
-    # For SSE streaming responses
     proxy_set_header Connection '';
     chunked_transfer_encoding off;
 }
 ```
 
-### Caddy
-
-Caddy has a generous default stream timeout, but you may need to increase it for very long jobs:
-
-```
-reverse_proxy localhost:4000 {
-    transport http {
-        read_timeout 7200s
-        write_timeout 60s
-    }
-    flush_interval -1
-}
-```
-
-### Key points
-
-- **Always use `stream: true`** for batched requests when behind a reverse proxy. The SSE heartbeats keep the connection alive.
-- Non-streaming batched requests have **no keep-alive data** — they will time out at the reverse proxy's `proxy_read_timeout` (typically 60s) unless configured otherwise.
-- Set `proxy_buffering off` (nginx) or `flush_interval -1` (Caddy) so heartbeats and SSE chunks reach the client immediately, not buffered.
-- The `proxy_read_timeout` should match or exceed the window timeout: 5 min (priority), 15 min (standard), or 2 hours (flex).
-
-## Dashboard
-
-The built-in dashboard at `http://localhost:4000/dashboard` shows all batched jobs with their status, model, completion window, and timing. Each job's `apiType` field indicates which API surface was used:
-
-| `apiType` | API Surface |
-|-----------|-------------|
-| `chat-completions` | OpenAI Chat Completions (`/v1/chat/completions`) |
-| `messages` | Anthropic Messages (`/v1/messages`) |
-| `responses` | Sail Responses API (`/v1/responses`) |
-
-The dashboard API is available at `GET /api/dashboard/jobs`.
+Use `stream: true` for batched requests behind a reverse proxy so Sail's SSE traffic keeps the connection alive.
 
 ## Scripts
 
@@ -394,30 +169,23 @@ All scripts are in `bin/` and available on `PATH` after `source env.sh`.
 
 | Script | Description |
 |--------|-------------|
-| `setup` | Install dependencies, generate Prisma client, push DB schema |
-| `dev` | Start proxy in watch mode |
-| `run` | Start proxy |
-| `check` | Run format + typecheck + test |
-| `format` | Run all formatters (format-ts + format-shell) |
-| `format-ts` | Prettier on TypeScript files |
-| `format-shell` | shfmt on all bash scripts |
+| `setup` | Install dependencies, generate Prisma client, apply migrations |
+| `dev` / `run` | Start proxy (watch / production) |
+| `check` | codegen + format + typecheck + tests (backend + frontend) |
+| `format`, `format-ts`, `format-shell` | Formatters |
 | `typecheck` | `tsc --noEmit` |
-| `test` | Backend tests (`bun test`); live integration tests run automatically when a real `SAIL_API_KEY` is sourced |
-| `db-push` | Push Prisma schema to SQLite |
+| `test` | Backend tests; live integration tests run when a real `SAIL_API_KEY` is sourced |
+| `research-models` | Run model research against a running proxy |
+| `generate-models-json` | Emit pi models.json from the proxy's enriched `/v1/models` |
+| `pi-setup` | Write a local pi provider config pointing at the proxy |
 | `db-studio` | Open Prisma Studio |
 | `publish` | Build and push Docker image to registry |
 
 ## Docker Deployment
 
-The proxy runs as a single Docker image with an embedded SQLite database. The container self-initializes its database on first start.
-
-### Standalone Docker
+The proxy runs as a single Docker image with an embedded SQLite database. The container applies committed Prisma migrations on start.
 
 ```bash
-# Pull from registry
-docker pull containers.cricket.routers.stonelinks.org/sailresearch-proxy:latest
-
-# Run with a Sail API key
 docker run -d \
   --name sailresearch-proxy \
   -p 4000:4000 \
@@ -425,112 +193,42 @@ docker run -d \
   -v sailresearch-proxy-data:/app/data \
   --restart unless-stopped \
   containers.cricket.routers.stonelinks.org/sailresearch-proxy:latest
-
-# Optional: protect the proxy with a shared key
-docker run -d \
-  --name sailresearch-proxy \
-  -p 4000:4000 \
-  -e SAIL_API_KEY=sk-sail-... \
-  -e PROXY_API_KEY=your-proxy-key \
-  -v sailresearch-proxy-data:/app/data \
-  --restart unless-stopped \
-  containers.cricket.routers.stonelinks.org/sailresearch-proxy:latest
 ```
 
-The proxy will be available at `http://localhost:4000`. Data is persisted in the `/app/data` volume.
-
-### Docker Compose
-
-A `docker-compose.yaml` is included in the repo. Copy the env template and fill in your API key:
-
-```bash
-cp .env.docker .env
-# Edit .env and add your SAIL_API_KEY
-```
-
-Then start:
-
-```bash
-docker compose up -d
-```
-
-### Dockge / TrueNAS Scale / Portainer
-
-To add the proxy as a custom app in a Docker management platform, use these settings:
-
-| Setting | Value |
-|---------|-------|
-| **Image** | `containers.cricket.routers.stonelinks.org/sailresearch-proxy:latest` |
-| **Port** | `4000` (HTTP) |
-| **Volume** | Mount a persistent volume at `/app/data` (stores the SQLite DB) |
-| **Environment** | `SAIL_API_KEY=sk-sail-...` (required), `PROXY_API_KEY=` (optional) |
-| **Restart policy** | Unless stopped |
-
-The container has no dependencies — no external database or Redis required.
-
-### Publishing a New Version
-
-From a development machine with access to the repo:
-
-```bash
-source env.sh
-publish                       # tags with git SHA + :latest
-publish --version v1.0.0      # explicit version tag + :latest
-```
-
-The script builds the image, tags it with the version and `latest`, pushes both to the registry, and verifies the published tags.
+Optional: set `PROXY_API_KEY` to require client auth. A `docker-compose.yaml` is included (`cp .env.docker .env`, add your key, `docker compose up -d`). Publish a new image with `publish [--version vX.Y.Z]`.
 
 ## Configuration
 
-**`secrets.sh`** (gitignored, created from `secrets.sh.example`):
-
-- `SAIL_API_KEY` — Sail Research API key (required)
-- `PROXY_API_KEY` — optional key to protect the proxy itself
-- `CONTAINER_REG_URL` — Docker registry hostname
-- `CONTAINER_REG_USERNAME` — Docker registry username
-- `CONTAINER_REG_PASSWORD` — Docker registry password
-
-**Environment variables** (set in `env.sh` or override via shell):
+**`secrets.sh`** (gitignored, created from `secrets.sh.example`): `SAIL_API_KEY` (required), `PROXY_API_KEY` (optional), `CONTAINER_REG_*` (for `publish`).
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `SAIL_BASE_URL` | `https://api.sailresearch.com/v1` | Sail API base URL |
-| `PORT` | `4000` | Proxy listen port |
-| `HOST` | `0.0.0.0` | Proxy listen host |
-| `DEFAULT_COMPLETION_WINDOW` | `standard` | Default window when not specified by client |
-| `TIMEOUT_PRIORITY_MS` | `300000` | Max wait for `priority` jobs (5 min) |
-| `TIMEOUT_STANDARD_MS` | `900000` | Max wait for `standard` jobs (15 min) |
-| `TIMEOUT_FLEX_MS` | `7200000` | Max wait for `flex` jobs (2 hours) |
-| `HEARTBEAT_INTERVAL_MS` | `15000` | SSE heartbeat interval for batched streaming requests |
-| `POLL_INTERVAL_MS` | `1000` | Poller tick interval |
-| `MAX_CONCURRENT_POLLS` | `10` | Max concurrent poll requests to Sail |
-| `STREAM_CHUNK_SIZE` | `20` | Approximate characters per simulated SSE chunk |
-| `LOG_LEVEL` | `info` | Verbosity: `debug` / `info` / `warn` / `error` |
+| `PORT` / `HOST` | `4000` / `0.0.0.0` | Listen address |
+| `DEFAULT_COMPLETION_WINDOW` | `standard` | Window when the client specifies none |
+| `TIMEOUT_PRIORITY_MS` / `TIMEOUT_STANDARD_MS` / `TIMEOUT_FLEX_MS` | 5 min / 30 min / 2 h | Client-side caps for research window smoke tests |
+| `RESEARCH_WINDOW` | `asap` | Window used for research LLM calls |
+| `MAX_CONCURRENT_RESEARCH` | `5` | Parallel model-research bound |
+| `LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
 | `DATABASE_URL` | `file:$PROJECT_ROOT/data/proxy.db` | SQLite database path |
 
 ## Testing
 
 ```bash
 source env.sh
-check                # format + typecheck + tests (incl. live integration when SAIL_API_KEY is real)
-bun test:slow        # also runs slow batched-window integration tests
+check                # codegen + format + typecheck + tests
+SAIL_SLOW_INTEGRATION=1 bin/test   # also test batched windows (minutes each)
 ```
 
-`src/integration.test.ts` starts an isolated proxy on a random port with a temp SQLite DB and covers passthrough, streaming, the Python `openai` and `anthropic` clients (via `uvx`), the Responses API, image input, and the local `/health` and `/v1/models` handlers. The suite skips automatically when `SAIL_API_KEY` is unset or the placeholder `test`.
-
-Set `SAIL_SLOW_INTEGRATION=1` (or run `bun test:slow`) to also test batched windows (priority/standard/flex), which wait for Sail to process and can take several minutes each.
+`src/integration.test.ts` starts an isolated proxy on a random port with a temp SQLite DB and covers all three API surfaces, streaming, the Python `openai`/`anthropic` SDKs (via `uvx`), a pi CLI smoke test, and image input. Batched-window tests discover a model supporting each window at runtime (support varies) and skip windows no model currently offers. The suite skips automatically when `SAIL_API_KEY` is unset or the placeholder `test`.
 
 ## Architecture
 
-The proxy supports three API surfaces, all with both passthrough and batching modes:
+Single Bun process, no frameworks:
 
-- **Passthrough** (`asap`): Forwards directly to the corresponding Sail endpoint (`/v1/chat/completions`, `/v1/messages`, or `/v1/responses`). Synchronous round-trip. Image content parts are forwarded as-is.
-- **Batching** (`priority` / `standard` / `flex`): Submits to Sail's `/v1/responses` API with `background: true`, persists the job handle to SQLite via Prisma, and polls with exponential backoff until the result is ready. When `stream: true` is set, the proxy opens an SSE stream immediately, sends comment heartbeats every 15 seconds while the job is in progress, then emits the API-specific streaming events once the result is available. Non-streaming requests block the HTTP connection until completion or timeout. Each window has its own timeout (5 min / 15 min / 2 hours by default), so the proxy returns a 504 quickly for latency-sensitive windows while giving flex jobs ample time.
-
-For chat completions and messages, the proxy transforms the request to Sail's Responses API format and transforms the result back. For the Responses API, no transformation is needed — the body is submitted as-is.
-
-OpenAI `image_url` and Anthropic `image` content blocks are transformed to Sail's `input_image` format when going through the batching path.
-
-SQLite persistence means in-flight jobs survive proxy restarts. On startup, the poller resumes polling any incomplete jobs from the previous run. Jobs that exceed their window-specific timeout are automatically expired by the poller, even if they were orphaned by a restart.
-
-Built with Bun, TypeScript, and Prisma. No frameworks.
+- `src/app.ts` — `Bun.serve` routing: window-prefix rewrite → forwarder routes, `/v1/models`, GraphQL (HTTP + WS), static dashboard
+- `src/services/forward.ts` — the thin forwarder: normalize body, inject window, `fetch` Sail, stream the response back verbatim
+- `src/models-meta.ts` + Prisma (`ModelMeta`/`ModelPrice`/`SamplingPreset`) — researched enrichment for `/v1/models`
+- `src/research-models*.ts`, `src/docs-scraper.ts`, `src/pi-session.ts` — the research pipeline
+- `src/generate-models-json.ts` — pi models.json emitter
+- `frontend/` — Svelte 5 + Houdini dashboard (Models pages)

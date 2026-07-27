@@ -8,6 +8,7 @@ CREATE TABLE "ModelMeta" (
     "supportsImage" BOOLEAN NOT NULL DEFAULT false,
     "reasoning" BOOLEAN NOT NULL DEFAULT false,
     "thinkingLevelMap" TEXT,
+    "supportedWindows" TEXT,
     "researchedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL
 );
@@ -38,25 +39,6 @@ CREATE TABLE "SamplingPreset" (
     CONSTRAINT "SamplingPreset_modelMetaId_fkey" FOREIGN KEY ("modelMetaId") REFERENCES "ModelMeta" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
--- CreateTable
-CREATE TABLE "PendingJob" (
-    "id" TEXT NOT NULL PRIMARY KEY,
-    "sailResponseId" TEXT NOT NULL,
-    "status" TEXT NOT NULL DEFAULT 'pending',
-    "requestBody" TEXT NOT NULL,
-    "model" TEXT NOT NULL,
-    "apiType" TEXT NOT NULL DEFAULT 'chat-completions',
-    "completionWindow" TEXT NOT NULL,
-    "responseBody" TEXT,
-    "errorBody" TEXT,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL,
-    "sailBodyHash" TEXT,
-    "completedAt" DATETIME,
-    "pollCount" INTEGER NOT NULL DEFAULT 0,
-    "nextPollAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
 -- CreateIndex
 CREATE UNIQUE INDEX "ModelMeta_modelId_key" ON "ModelMeta"("modelId");
 
@@ -69,14 +51,3 @@ CREATE UNIQUE INDEX "ModelPrice_modelMetaId_completionWindow_key" ON "ModelPrice
 -- CreateIndex
 CREATE INDEX "SamplingPreset_modelMetaId_idx" ON "SamplingPreset"("modelMetaId");
 
--- CreateIndex
-CREATE UNIQUE INDEX "PendingJob_sailResponseId_key" ON "PendingJob"("sailResponseId");
-
--- CreateIndex
-CREATE INDEX "PendingJob_status_nextPollAt_idx" ON "PendingJob"("status", "nextPollAt");
-
--- CreateIndex
-CREATE INDEX "PendingJob_sailBodyHash_idx" ON "PendingJob"("sailBodyHash");
-
--- CreateIndex
-CREATE INDEX "PendingJob_createdAt_idx" ON "PendingJob"("createdAt");

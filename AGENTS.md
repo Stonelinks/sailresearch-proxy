@@ -61,7 +61,7 @@ Use real Prisma migrations, not `db push`, whenever you change `prisma/schema.pr
 
 ### Workflow
 
-This project has an initial Prisma migration already (`20260506060620_init`). To change the schema:
+The migration history was squashed to a single baseline (`20260726120000_thin_proxy_baseline`) when the batching machinery (and its `PendingJob` table) was removed — an earlier misdated migration folder broke shadow-DB replay for both `migrate dev` and fresh-DB `migrate deploy`. Databases provisioned before the squash need a one-time `bunx prisma migrate resolve --applied 20260726120000_thin_proxy_baseline` (and, for `migrate dev` to work, deletion of the pre-squash rows from `_prisma_migrations`). To change the schema:
 
 1. Edit `prisma/schema.prisma`.
 2. Generate and apply a migration locally:
@@ -135,13 +135,13 @@ The frontend is a Svelte SPA in `frontend/` built with Vite + Tailwind. `svelte-
 
 ### Real-time Updates
 
-- WebSocket endpoint at `/ws/dashboard` for live job updates
-- Poller broadcasts job status changes to all connected WS clients
-- Frontend `connectJobUpdates()` in `api.ts` handles auto-reconnection
+- GraphQL subscriptions over WebSocket at `/graphql` (graphql-ws)
+- `modelResearchUpdated` streams research progress to the Models pages
+- Houdini generates the typed client from `shared/schema.graphql` (`bun run codegen:client`)
 
 ### Conventions
 
 - Svelte 5 with runes (`$state`, `$derived`, `$props`)
 - Tailwind v4 with `@theme` for font tokens
 - Components in `frontend/src/components/`, pages in `frontend/src/pages/`
-- API helpers in `frontend/src/api.ts`
+- GraphQL documents live in the Svelte pages; Houdini artifacts in `frontend/$houdini`

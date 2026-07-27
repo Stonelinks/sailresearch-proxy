@@ -14,53 +14,6 @@ scalar DateTime
 
 scalar JSON
 
-type Job {
-  apiType: String!
-  completedAt: DateTime
-  completionWindow: String!
-  createdAt: DateTime!
-  durationMs: Int
-  hasError: Boolean!
-  id: ID!
-  model: String!
-  pollCount: Int!
-  sailResponseId: String!
-  status: JobStatus!
-}
-
-type JobDetail {
-  apiType: String!
-  completedAt: DateTime
-  completionWindow: String!
-  createdAt: DateTime!
-  durationMs: Int
-  errorBody: String
-  hasError: Boolean!
-  id: ID!
-  model: String!
-  pollCount: Int!
-  requestBody: String
-  responseBody: String
-  sailResponseId: String!
-  status: JobStatus!
-}
-
-enum JobStatus {
-  cancelled
-  completed
-  failed
-  pending
-  queued
-  running
-}
-
-type JobsResult {
-  jobs: [Job!]!
-  limit: Int!
-  offset: Int!
-  total: Int!
-}
-
 type Model {
   contextSize: Int
   created: Int!
@@ -100,8 +53,6 @@ type Mutation {
 
 type Query {
   activeResearch: ActiveResearch!
-  job(id: ID!): JobDetail
-  jobs(limit: Int = 50, offset: Int = 0, status: JobStatus): JobsResult!
   model(id: ID!): Model
   models: [Model!]!
 }
@@ -119,6 +70,5 @@ type SamplingPreset {
 }
 
 type Subscription {
-  jobUpdated(id: ID): Job!
   modelResearchUpdated: ModelResearchUpdate!
 }

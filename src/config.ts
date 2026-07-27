@@ -4,10 +4,8 @@ import {
   MINUTE,
   FIVE_MINUTES,
   THIRTY_MINUTES,
-  SIXTY_MINUTES,
   TWO_HOURS,
 } from "../shared/time.ts";
-import { HEARTBEAT_INTERVAL_MS } from "./constants.ts";
 
 function env(key: string, fallback: string): string {
   return process.env[key] || fallback;
@@ -53,10 +51,6 @@ export const config = {
     standard: intEnv("TIMEOUT_STANDARD_MS", THIRTY_MINUTES),
     flex: intEnv("TIMEOUT_FLEX_MS", TWO_HOURS),
   },
-  polling: {
-    intervalMs: intEnv("POLL_INTERVAL_MS", SECOND),
-    maxConcurrent: intEnv("MAX_CONCURRENT_POLLS", 10),
-  },
   research: {
     // Max models researched / smoke tested in parallel. Bounds the load
     // placed on the proxy (and Sail upstream) during batch research and
@@ -77,14 +71,6 @@ export const config = {
     presetConcurrency: intEnv("RESEARCH_PRESET_CONCURRENCY", 3),
     // Cap on docs-scraper page fetches.
     scrapeTimeoutMs: intEnv("SCRAPE_TIMEOUT_MS", 30 * SECOND),
-  },
-  streaming: {
-    chunkSize: intEnv("STREAM_CHUNK_SIZE", 20),
-    heartbeatIntervalMs: intEnv("HEARTBEAT_INTERVAL_MS", HEARTBEAT_INTERVAL_MS),
-  },
-  prune: {
-    retentionDays: intEnv("PRUNE_RETENTION_DAYS", 180),
-    intervalMs: intEnv("PRUNE_INTERVAL_MS", SIXTY_MINUTES),
   },
   logging: {
     level: env("LOG_LEVEL", "info"),

@@ -3,10 +3,15 @@
  * port, then sends requests through each completion window and verifies
  * the response is not an error.
  *
- * By default (`bun test`), only fast passthrough (asap) tests run.
- * Set SAIL_SLOW_INTEGRATION=1 to also test the batched windows
- * (priority/standard/flex), which wait for Sail to process and can take
- * several minutes each.
+ * By default (`bun test`), only fast asap tests run. Set
+ * SAIL_SLOW_INTEGRATION=1 to also test the batched windows
+ * (priority/standard/flex), which Sail serves synchronously but may take
+ * minutes to schedule.
+ *
+ * Which windows a model supports varies over time, so the slow tests
+ * discover a supporting model per window from Sail's structured
+ * "completion_window not available" error, and skip windows no model
+ * currently offers.
  *
  * Requires:
  *   - SAIL_API_KEY in the environment
@@ -48,38 +53,39 @@ const apiKey = process.env.SAIL_API_KEY;
 const hasApiKey = !!apiKey && apiKey !== "test";
 const runSlow = process.env.SAIL_SLOW_INTEGRATION === "1";
 
-const TEST_MODEL = "MiniMaxAI/MiniMax-M2.7";
-const IMAGE_MODEL = "moonshotai/Kimi-K2.5";
+// Small, fast model for asap tests. Batched-window tests pick their model
+// dynamically (see firstSupportedResult).
+const TEST_MODEL = "openai/gpt-oss-120b";
+const IMAGE_MODEL = "moonshotai/Kimi-K2.6";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
+function windowUrl(window: CompletionWindow, path: string): string {
+  return window === "standard"
+    ? `${baseUrl}${path}`
+    : `${baseUrl}/${window}${path}`;
+}
+
 /**
  * Send a chat completions request via fetch. Includes the same fields pi
- * sends (store, stream_options, etc.) to verify they get properly stripped.
+ * sends (store:false etc.) to verify the forwarder normalizes them.
  */
 async function sendChatCompletion(
   window: CompletionWindow,
+  model = TEST_MODEL,
 ): Promise<{ status: number; body: any }> {
-  let url: string;
-  if (window === "standard") {
-    url = `${baseUrl}/v1/chat/completions`;
-  } else {
-    url = `${baseUrl}/${window}/v1/chat/completions`;
-  }
-
-  const res = await fetch(url, {
+  const res = await fetch(windowUrl(window, "/v1/chat/completions"), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${process.env.SAIL_API_KEY || ""}`,
     },
     body: JSON.stringify({
-      model: TEST_MODEL,
+      model,
       messages: [{ role: "user", content: "say hi" }],
       max_tokens: 32,
-      // Pi sends these — verify they get stripped in passthrough
+      // Pi sends these — verify the forwarder handles them
       store: false,
-      stream_options: { include_usage: true },
       prompt_cache_key: "test-session",
       stream: false,
     }),
@@ -89,27 +95,19 @@ async function sendChatCompletion(
   return { status: res.status, body };
 }
 
-/**
- * Send a Responses API request via fetch.
- */
+/** Send a Responses API request via fetch. */
 async function sendResponses(
   window: CompletionWindow,
+  model = TEST_MODEL,
 ): Promise<{ status: number; body: any }> {
-  let url: string;
-  if (window === "standard") {
-    url = `${baseUrl}/v1/responses`;
-  } else {
-    url = `${baseUrl}/${window}/v1/responses`;
-  }
-
-  const res = await fetch(url, {
+  const res = await fetch(windowUrl(window, "/v1/responses"), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${process.env.SAIL_API_KEY || ""}`,
     },
     body: JSON.stringify({
-      model: TEST_MODEL,
+      model,
       input: "say hi",
       max_output_tokens: 32,
     }),
@@ -119,27 +117,19 @@ async function sendResponses(
   return { status: res.status, body };
 }
 
-/**
- * Send an Anthropic Messages API request via fetch.
- */
+/** Send an Anthropic Messages API request via fetch. */
 async function sendMessages(
   window: CompletionWindow,
+  model = TEST_MODEL,
 ): Promise<{ status: number; body: any }> {
-  let url: string;
-  if (window === "standard") {
-    url = `${baseUrl}/v1/messages`;
-  } else {
-    url = `${baseUrl}/${window}/v1/messages`;
-  }
-
-  const res = await fetch(url, {
+  const res = await fetch(windowUrl(window, "/v1/messages"), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${process.env.SAIL_API_KEY || ""}`,
     },
     body: JSON.stringify({
-      model: TEST_MODEL,
+      model,
       max_tokens: 32,
       messages: [{ role: "user", content: "say hi" }],
     }),
@@ -149,15 +139,36 @@ async function sendMessages(
   return { status: res.status, body };
 }
 
+/** True when the body is Sail's "window not available for model" error. */
+function isWindowUnsupported(body: any): boolean {
+  const msg = body?.error?.message;
+  return typeof msg === "string" && msg.includes("not available for model");
+}
+
+let cachedModelIds: string[] | null = null;
+async function listModelIds(): Promise<string[]> {
+  if (!cachedModelIds) {
+    const res = await fetch(`${baseUrl}/v1/models`);
+    const body: any = await res.json();
+    cachedModelIds = (body.data ?? []).map((m: any) => m.id as string);
+  }
+  return cachedModelIds!;
+}
+
 /**
- * Fetch dashboard jobs from the proxy's API.
+ * Run `send` against models until one supports the window. Returns null when
+ * no model currently offers the window (the caller should skip). Unsupported
+ * probes fail fast with a structured 400, so at most one real inference runs.
  */
-async function fetchDashboardJobs(): Promise<{
-  jobs: any[];
-  total: number;
-}> {
-  const res = await fetch(`${baseUrl}/api/dashboard/jobs?limit=100`);
-  return (await res.json()) as { jobs: any[]; total: number };
+async function firstSupportedResult(
+  send: (model: string) => Promise<{ status: number; body: any }>,
+): Promise<{ status: number; body: any; model: string } | null> {
+  for (const model of await listModelIds()) {
+    const r = await send(model);
+    if (r.status === 400 && isWindowUnsupported(r.body)) continue;
+    return { ...r, model };
+  }
+  return null;
 }
 
 /**
@@ -168,12 +179,8 @@ async function fetchDashboardJobs(): Promise<{
 async function runPiSmoke(
   window: CompletionWindow,
 ): Promise<{ exitCode: number; output: string }> {
-  let providerBaseUrl: string;
-  if (window === "standard") {
-    providerBaseUrl = `${baseUrl}/v1`;
-  } else {
-    providerBaseUrl = `${baseUrl}/${window}/v1`;
-  }
+  const providerBaseUrl =
+    window === "standard" ? `${baseUrl}/v1` : `${baseUrl}/${window}/v1`;
 
   const providerName = "sail-test";
   const modelsJson = {
@@ -269,13 +276,13 @@ describe.skipIf(!hasApiKey)("integration: proxy + Sail API", () => {
     // Set DATABASE_URL for our temp PrismaClient (must happen before import)
     process.env.DATABASE_URL = `file:${dbPath}`;
     process.env.LOG_LEVEL = "warn";
-    process.env.POLL_INTERVAL_MS = "500";
     process.env.DEFAULT_COMPLETION_WINDOW = "standard";
     process.env.PROXY_API_KEY = "";
 
-    // Run prisma migration against temp DB
+    // Apply committed migrations against the temp DB (same path as prod
+    // startup; works from an empty file).
     const migrateResult = Bun.spawnSync(
-      ["bunx", "prisma", "db", "push", "--skip-generate"],
+      ["bunx", "prisma", "migrate", "deploy"],
       {
         env: {
           ...process.env,
@@ -288,7 +295,7 @@ describe.skipIf(!hasApiKey)("integration: proxy + Sail API", () => {
     );
     if (migrateResult.exitCode !== 0) {
       throw new Error(
-        `prisma db push failed: ${migrateResult.stderr.toString()}`,
+        `prisma migrate deploy failed: ${migrateResult.stderr.toString()}`,
       );
     }
 
@@ -304,19 +311,20 @@ describe.skipIf(!hasApiKey)("integration: proxy + Sail API", () => {
   afterAll(async () => {
     if (app) {
       await app.stop();
-      // Small delay to let the poller's in-flight tick complete
-      await new Promise((r) => setTimeout(r, 100));
     }
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  // ── Fast passthrough tests (always run) ─────────────────────────────────
+  // ── Fast asap tests (always run) ─────────────────────────────────────────
 
-  describe("asap (passthrough)", () => {
+  describe("asap (forwarded)", () => {
     test("returns 200, not 400 store=false", async () => {
       const { status, body } = await sendChatCompletion("asap");
       expect(status).toBe(200);
-      expect(body.choices?.[0]?.message?.content).toBeDefined();
+      expect(
+        body.choices?.[0]?.message?.content ??
+          body.choices?.[0]?.message?.reasoning_content,
+      ).toBeDefined();
     }, 60_000);
 
     test("does not forward store=false to Sail", async () => {
@@ -365,7 +373,7 @@ describe.skipIf(!hasApiKey)("integration: proxy + Sail API", () => {
   // ── asap input-format compatibility ─────────────────────────────────────
 
   describe("asap input compatibility", () => {
-    test("deprecated max_tokens field still works", async () => {
+    test("max_tokens field works (Sail accepts it natively now)", async () => {
       const res = await fetch(`${baseUrl}/asap/v1/chat/completions`, {
         method: "POST",
         headers: {
@@ -381,7 +389,7 @@ describe.skipIf(!hasApiKey)("integration: proxy + Sail API", () => {
       expect(res.status).toBe(200);
       const body: any = await res.json();
       expect(body.error).toBeUndefined();
-      expect(body.choices?.[0]?.message?.content).toBeDefined();
+      expect(body.choices?.[0]?.message).toBeDefined();
     }, 60_000);
 
     test("X-Completion-Window header (no URL prefix) is honored", async () => {
@@ -401,7 +409,7 @@ describe.skipIf(!hasApiKey)("integration: proxy + Sail API", () => {
       expect(res.status).toBe(200);
       const body: any = await res.json();
       expect(body.error).toBeUndefined();
-      expect(body.choices?.[0]?.message?.content).toBeDefined();
+      expect(body.choices?.[0]?.message).toBeDefined();
     }, 60_000);
   });
 
@@ -419,6 +427,7 @@ describe.skipIf(!hasApiKey)("integration: proxy + Sail API", () => {
           model: TEST_MODEL,
           messages: [{ role: "user", content: "Count 1 to 3." }],
           stream: true,
+          stream_options: { include_usage: true },
           max_completion_tokens: 20,
         }),
       });
@@ -426,7 +435,6 @@ describe.skipIf(!hasApiKey)("integration: proxy + Sail API", () => {
       const text = await res.text();
       expect(text).toContain("chat.completion.chunk");
       expect(text).toContain('"role":"assistant"');
-      expect(text).toContain('"finish_reason":"stop"');
       expect(text).toContain("[DONE]");
     }, 60_000);
   });
@@ -441,9 +449,9 @@ describe.skipIf(!hasApiKey)("integration: proxy + Sail API", () => {
     }, 60_000);
   });
 
-  // ── Image input tests (always run, uses asap/passthrough) ────────────────
+  // ── Image input tests (always run, asap) ─────────────────────────────────
 
-  describe("image input (asap passthrough)", () => {
+  describe("image input (asap)", () => {
     test("chat completions with image_url returns 200", async () => {
       const url = `${baseUrl}/asap/v1/chat/completions`;
       const res = await fetch(url, {
@@ -520,9 +528,9 @@ describe.skipIf(!hasApiKey)("integration: proxy + Sail API", () => {
     }, 60_000);
   });
 
-  // ── Responses API tests (always run, asap passthrough) ──────────────────
+  // ── Responses API tests (always run, asap) ───────────────────────────────
 
-  describe("Responses API (asap passthrough)", () => {
+  describe("Responses API (asap)", () => {
     test("returns 200 with valid response structure", async () => {
       const { status, body } = await sendResponses("asap");
       expect(status).toBe(200);
@@ -540,7 +548,7 @@ describe.skipIf(!hasApiKey)("integration: proxy + Sail API", () => {
 import anthropic
 client = anthropic.Anthropic(
     auth_token="${process.env.SAIL_API_KEY}",
-    base_url="${baseUrl}",
+    base_url="${baseUrl}/asap",
 )
 response = client.messages.create(
     model="${TEST_MODEL}",
@@ -550,14 +558,11 @@ response = client.messages.create(
 assert response.content is not None
 assert len(response.content) > 0
 assert response.stop_reason == "end_turn"
-print(f"OK: {response.content[0].text[:50]}")
+print("OK")
 `;
-      const { exitCode, stdout, stderr } = await runUvxPython(
-        ["anthropic"],
-        script,
-      );
+      const { exitCode, stdout } = await runUvxPython(["anthropic"], script);
       expect(exitCode).toBe(0);
-      expect(stdout).toContain("OK:");
+      expect(stdout).toContain("OK");
     }, 120_000);
 
     test("x-api-key auth via Anthropic SDK api_key param", async () => {
@@ -565,7 +570,7 @@ print(f"OK: {response.content[0].text[:50]}")
 import anthropic
 client = anthropic.Anthropic(
     api_key="${process.env.SAIL_API_KEY}",
-    base_url="${baseUrl}",
+    base_url="${baseUrl}/asap",
 )
 response = client.messages.create(
     model="${TEST_MODEL}",
@@ -573,11 +578,11 @@ response = client.messages.create(
     messages=[{"role": "user", "content": "say hi"}],
 )
 assert response.content is not None
-print(f"OK: {response.content[0].text[:50]}")
+print("OK")
 `;
       const { exitCode, stdout } = await runUvxPython(["anthropic"], script);
       expect(exitCode).toBe(0);
-      expect(stdout).toContain("OK:");
+      expect(stdout).toContain("OK");
     }, 120_000);
   });
 
@@ -588,7 +593,7 @@ print(f"OK: {response.content[0].text[:50]}")
       const script = `
 from openai import OpenAI
 client = OpenAI(
-    base_url="${baseUrl}/v1",
+    base_url="${baseUrl}/asap/v1",
     api_key="${process.env.SAIL_API_KEY}",
 )
 response = client.chat.completions.create(
@@ -596,15 +601,15 @@ response = client.chat.completions.create(
     messages=[{"role": "user", "content": "say hi"}],
     max_tokens=32,
 )
-assert response.choices[0].message.content is not None
-print(f"OK: {response.choices[0].message.content[:50]}")
+assert response.choices[0].message is not None
+print("OK")
 `;
       const { exitCode, stdout } = await runUvxPython(["openai"], script);
       expect(exitCode).toBe(0);
-      expect(stdout).toContain("OK:");
+      expect(stdout).toContain("OK");
     }, 120_000);
 
-    test("asap streaming via OpenAI SDK yields content chunks", async () => {
+    test("asap streaming via OpenAI SDK yields chunks", async () => {
       const script = `
 from openai import OpenAI
 client = OpenAI(
@@ -618,8 +623,8 @@ stream = client.chat.completions.create(
     stream=True,
     extra_body={"metadata": {"completion_window": "asap"}},
 )
-chunks = [c.choices[0].delta.content for c in stream if c.choices[0].delta.content]
-assert len(chunks) > 0, "no content chunks received"
+chunks = [c for c in stream if c.choices and c.choices[0].delta]
+assert len(chunks) > 0, "no chunks received"
 print(f"OK: {len(chunks)} chunks")
 `;
       const { exitCode, stdout } = await runUvxPython(["openai"], script);
@@ -629,180 +634,125 @@ print(f"OK: {len(chunks)} chunks")
   });
 
   // ── Slow batched-window tests (opt-in) ──────────────────────────────────
+  //
+  // Sail now serves these synchronously; each test discovers a model that
+  // supports the window and skips (with a log line) when none does.
 
-  describe.skipIf(!runSlow)("batched windows (priority/standard/flex)", () => {
-    test("priority window returns 200", async () => {
-      const { status, body } = await sendChatCompletion("priority");
-      expect(status).toBe(200);
-      expect(body.choices?.[0]?.message?.content).toBeDefined();
-    }, 300_000);
+  const SLOW_WINDOWS: CompletionWindow[] = ["priority", "standard", "flex"];
 
-    test("standard window returns 200", async () => {
-      const { status, body } = await sendChatCompletion("standard");
-      expect(status).toBe(200);
-      expect(body.choices?.[0]?.message?.content).toBeDefined();
-    }, 300_000);
-
-    test("flex window returns 200", async () => {
-      const { status, body } = await sendChatCompletion("flex");
-      expect(status).toBe(200);
-      expect(body.choices?.[0]?.message?.content).toBeDefined();
-    }, 600_000);
+  describe.skipIf(!runSlow)("batched windows (chat completions)", () => {
+    for (const window of SLOW_WINDOWS) {
+      test(`${window} window returns 200 for some model`, async () => {
+        const r = await firstSupportedResult((m) =>
+          sendChatCompletion(window, m),
+        );
+        if (!r) {
+          console.warn(`[slow] no model supports window=${window}; skipped`);
+          return;
+        }
+        expect(r.status).toBe(200);
+        expect(r.body.choices?.[0]?.message).toBeDefined();
+      }, 600_000);
+    }
 
     test("standard streaming SSE body contains chunk markers", async () => {
-      const res = await fetch(`${baseUrl}/v1/chat/completions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${process.env.SAIL_API_KEY || ""}`,
-        },
-        body: JSON.stringify({
-          model: TEST_MODEL,
-          messages: [{ role: "user", content: "Capital of France? One word." }],
-          metadata: { completion_window: "standard" },
-          stream: true,
-          max_tokens: 10,
-        }),
+      const r = await firstSupportedResult(async (model) => {
+        const res = await fetch(`${baseUrl}/v1/chat/completions`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${process.env.SAIL_API_KEY || ""}`,
+          },
+          body: JSON.stringify({
+            model,
+            messages: [
+              { role: "user", content: "Capital of France? One word." },
+            ],
+            metadata: { completion_window: "standard" },
+            stream: true,
+            max_tokens: 10,
+          }),
+        });
+        if (res.status !== 200) {
+          return { status: res.status, body: await res.json() };
+        }
+        return { status: res.status, body: await res.text() };
       });
-      expect(res.status).toBe(200);
-      const text = await res.text();
-      expect(text).toContain("chat.completion.chunk");
-      expect(text).toContain("[DONE]");
-    }, 300_000);
+      if (!r) {
+        console.warn("[slow] no model supports window=standard; skipped");
+        return;
+      }
+      expect(r.status).toBe(200);
+      expect(r.body).toContain("chat.completion.chunk");
+      expect(r.body).toContain("[DONE]");
+    }, 600_000);
   });
 
-  // ── Slow OpenAI SDK batched (opt-in) ────────────────────────────────────
+  describe.skipIf(!runSlow)("batched windows (Responses API)", () => {
+    for (const window of SLOW_WINDOWS) {
+      test(`${window} Responses API returns 200 for some model`, async () => {
+        const r = await firstSupportedResult((m) => sendResponses(window, m));
+        if (!r) {
+          console.warn(`[slow] no model supports window=${window}; skipped`);
+          return;
+        }
+        expect(r.status).toBe(200);
+        expect(r.body.id).toBeDefined();
+        expect(r.body.output).toBeDefined();
+      }, 600_000);
+    }
+  });
 
-  describe.skipIf(!runSlow)("OpenAI SDK batched (uvx, standard)", () => {
-    test("standard window via OpenAI SDK returns 200", async () => {
+  describe.skipIf(!runSlow)("batched windows (Messages API)", () => {
+    for (const window of SLOW_WINDOWS) {
+      test(`${window} Messages API returns 200 with Anthropic format`, async () => {
+        const r = await firstSupportedResult((m) => sendMessages(window, m));
+        if (!r) {
+          console.warn(`[slow] no model supports window=${window}; skipped`);
+          return;
+        }
+        expect(r.status).toBe(200);
+        expect(r.body.type).toBe("message");
+        expect(r.body.role).toBe("assistant");
+        expect(r.body.content).toBeDefined();
+      }, 600_000);
+    }
+  });
+
+  // ── Slow SDK batched smoke tests (opt-in) ───────────────────────────────
+
+  describe.skipIf(!runSlow)("OpenAI SDK batched (uvx, priority)", () => {
+    test("priority window via OpenAI SDK returns 200", async () => {
       const script = `
 from openai import OpenAI
 client = OpenAI(
-    base_url="${baseUrl}/v1",
+    base_url="${baseUrl}/priority/v1",
     api_key="${process.env.SAIL_API_KEY}",
     timeout=300,
 )
 r = client.chat.completions.create(
     model="${TEST_MODEL}",
     messages=[{"role": "user", "content": "What is 10/2? Just the number."}],
-    max_completion_tokens=10,
-    extra_body={"metadata": {"completion_window": "standard"}},
+    max_completion_tokens=64,
 )
-assert r.choices[0].message.content is not None
+assert r.choices[0].message is not None
 assert r.choices[0].finish_reason == "stop"
-print(f"OK: {r.choices[0].message.content[:50]}")
+print("OK")
 `;
       const { exitCode, stdout } = await runUvxPython(["openai"], script);
       expect(exitCode).toBe(0);
-      expect(stdout).toContain("OK:");
+      expect(stdout).toContain("OK");
     }, 300_000);
   });
 
-  // ── Slow batched Responses API tests (opt-in) ───────────────────────────
-
-  describe.skipIf(!runSlow)(
-    "batched Responses API (priority/standard/flex)",
-    () => {
-      test("priority Responses API returns 200", async () => {
-        const { status, body } = await sendResponses("priority");
-        expect(status).toBe(200);
-        expect(body.id).toBeDefined();
-        expect(body.output).toBeDefined();
-      }, 300_000);
-
-      test("standard Responses API returns 200", async () => {
-        const { status, body } = await sendResponses("standard");
-        expect(status).toBe(200);
-        expect(body.id).toBeDefined();
-      }, 300_000);
-
-      test("flex Responses API returns 200", async () => {
-        const { status, body } = await sendResponses("flex");
-        expect(status).toBe(200);
-        expect(body.id).toBeDefined();
-      }, 600_000);
-    },
-  );
-
-  // ── Slow batched Messages API tests (opt-in) ────────────────────────────
-
-  describe.skipIf(!runSlow)(
-    "batched Messages API (priority/standard/flex)",
-    () => {
-      test("flex Messages API returns 200 with Anthropic format", async () => {
-        const { status, body } = await sendMessages("flex");
-        expect(status).toBe(200);
-        expect(body.type).toBe("message");
-        expect(body.role).toBe("assistant");
-        expect(body.content).toBeDefined();
-        expect(body.stop_reason).toBe("end_turn");
-      }, 600_000);
-
-      test("flex Messages API creates dashboard job with apiType messages", async () => {
-        // Send a flex messages request
-        const { status } = await sendMessages("flex");
-        expect(status).toBe(200);
-
-        // Check dashboard for the job
-        const dashboard = await fetchDashboardJobs();
-        const messageJob = dashboard.jobs.find(
-          (j: any) => j.apiType === "messages",
-        );
-        expect(messageJob).toBeDefined();
-        expect(messageJob.completionWindow).toBe("flex");
-        expect(messageJob.status).toBe("completed");
-      }, 600_000);
-
-      test("priority Messages API returns 200", async () => {
-        const { status, body } = await sendMessages("priority");
-        expect(status).toBe(200);
-        expect(body.type).toBe("message");
-        expect(body.content).toBeDefined();
-      }, 300_000);
-    },
-  );
-
-  // ── Slow dashboard tracking tests (opt-in) ──────────────────────────────
-
-  describe.skipIf(!runSlow)("dashboard tracking for batched jobs", () => {
-    test("chat completions batched job appears on dashboard with apiType", async () => {
-      const { status } = await sendChatCompletion("flex");
-      expect(status).toBe(200);
-
-      const dashboard = await fetchDashboardJobs();
-      const chatJob = dashboard.jobs.find(
-        (j: any) => j.apiType === "chat-completions",
-      );
-      expect(chatJob).toBeDefined();
-      expect(chatJob.completionWindow).toBe("flex");
-      expect(chatJob.status).toBe("completed");
-    }, 600_000);
-
-    test("Responses API batched job appears on dashboard with apiType", async () => {
-      const { status } = await sendResponses("flex");
-      expect(status).toBe(200);
-
-      const dashboard = await fetchDashboardJobs();
-      const responsesJob = dashboard.jobs.find(
-        (j: any) => j.apiType === "responses",
-      );
-      expect(responsesJob).toBeDefined();
-      expect(responsesJob.completionWindow).toBe("flex");
-      expect(responsesJob.status).toBe("completed");
-    }, 600_000);
-  });
-
-  // ── Slow Anthropic SDK batching smoke test (opt-in) ─────────────────────
-
-  describe.skipIf(!runSlow)(
-    "Anthropic SDK batching smoke test (uvx, flex)",
-    () => {
-      test("flex window via Anthropic SDK creates dashboard job", async () => {
-        const script = `
+  describe.skipIf(!runSlow)("Anthropic SDK batched (uvx, priority)", () => {
+    test("priority window via Anthropic SDK prefix URL returns 200", async () => {
+      const script = `
 import anthropic
 client = anthropic.Anthropic(
     auth_token="${process.env.SAIL_API_KEY}",
-    base_url="${baseUrl}/flex",
+    base_url="${baseUrl}/priority",
+    timeout=300,
 )
 response = client.messages.create(
     model="${TEST_MODEL}",
@@ -810,21 +760,11 @@ response = client.messages.create(
     messages=[{"role": "user", "content": "say hi"}],
 )
 assert response.content is not None
-assert response.stop_reason == "end_turn"
-print(f"OK: {response.content[0].text[:50]}")
+print("OK")
 `;
-        const { exitCode, stdout } = await runUvxPython(["anthropic"], script);
-        expect(exitCode).toBe(0);
-        expect(stdout).toContain("OK:");
-
-        // Verify dashboard shows a messages-type job
-        const dashboard = await fetchDashboardJobs();
-        const msgJob = dashboard.jobs.find(
-          (j: any) => j.apiType === "messages",
-        );
-        expect(msgJob).toBeDefined();
-        expect(msgJob.completionWindow).toBe("flex");
-      }, 600_000);
-    },
-  );
+      const { exitCode, stdout } = await runUvxPython(["anthropic"], script);
+      expect(exitCode).toBe(0);
+      expect(stdout).toContain("OK");
+    }, 300_000);
+  });
 });

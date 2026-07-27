@@ -1,11 +1,11 @@
 import { config } from "./config.ts";
 import { log } from "../shared/logger.ts";
-import { Poller } from "./services/poller.ts";
-import { Pruner } from "./services/pruner.ts";
-import { handleChatCompletions } from "./routes/chat-completions.ts";
+import {
+  handleChatCompletions,
+  handleMessages,
+  handleResponses,
+} from "./routes/api-forward.ts";
 import { handleModels } from "./routes/models.ts";
-import { handleMessages } from "./routes/messages.ts";
-import { handleResponses } from "./routes/responses.ts";
 import { handleVersion } from "./routes/version.ts";
 import { wrapRouteLogging } from "./routes/parse-request.ts";
 import { openAIError } from "./errors.ts";
@@ -87,19 +87,11 @@ function serveSPA(req: Request): Response {
 
 export interface AppServer {
   server: ReturnType<typeof Bun.serve>;
-  poller: Poller;
-  pruner: Pruner;
   prisma: PrismaClient;
   stop: () => Promise<void>;
 }
 
 export function createApp(prisma: PrismaClient, port?: number): AppServer {
-  const poller = new Poller(prisma);
-  poller.start();
-
-  const pruner = new Pruner(prisma);
-  pruner.start();
-
   const yoga = createGraphQLYoga(prisma);
   const wsHandler = makeHandler({
     schema: gqlSchema,
@@ -109,13 +101,13 @@ export function createApp(prisma: PrismaClient, port?: number): AppServer {
   // Pre-build per-route logging wrappers once; allocating new wrappers per
   // request would defeat the point of the wrapper closure.
   const chatRoute = wrapRouteLogging("/v1/chat/completions", (req) =>
-    handleChatCompletions(req, poller),
+    handleChatCompletions(req),
   );
   const messagesRoute = wrapRouteLogging("/v1/messages", (req) =>
-    handleMessages(req, poller),
+    handleMessages(req),
   );
   const responsesRoute = wrapRouteLogging("/v1/responses", (req) =>
-    handleResponses(req, poller),
+    handleResponses(req),
   );
 
   function dispatch(
@@ -136,11 +128,10 @@ export function createApp(prisma: PrismaClient, port?: number): AppServer {
   const server = Bun.serve({
     port: port ?? config.server.port,
     hostname: config.server.host,
-    // Bun's max idle timeout is 255 seconds. This is fine because SSE
-    // heartbeats are sent every 15 seconds on batched streaming requests,
-    // so the connection is never truly idle. For non-streaming batched
-    // requests, the connection may time out after 255s of silence; clients
-    // should use `stream: true` for long-running jobs.
+    // Bun's max idle timeout is 255 seconds. Streaming requests stay alive
+    // as long as Sail emits bytes (its /messages SSE includes pings); a
+    // non-streaming request on a batched window that sits silent past 255s
+    // will be cut — clients should use `stream: true` for long waits.
     idleTimeout: 255,
 
     websocket: wsHandler,
@@ -200,13 +191,9 @@ export function createApp(prisma: PrismaClient, port?: number): AppServer {
 
   return {
     server,
-    poller,
-    pruner,
     prisma,
     async stop() {
       log.info("[shutdown] stopping...");
-      poller.stop();
-      pruner.stop();
       await prisma.$disconnect();
       server.stop();
     },
