@@ -7,7 +7,9 @@
 # a sail-standard provider, this script is a no-op.
 #
 # Environment variables:
-#   PI_SAIL_BASE_URL  — base URL for the Sail provider (default: http://localhost:4000/v1)
+#   PI_SAIL_BASE_URL  — base URL for the Sail provider
+#                       (default: the deployed proxy; use http://localhost:4000/v1
+#                       to target a locally running instance)
 #   PI_SAIL_API_KEY   — API key for the Sail provider (default: from SAIL_API_KEY env)
 
 set -euo pipefail
@@ -16,7 +18,7 @@ PI_DIR="${PI_DIR:-$HOME/.pi/agent}"
 PI_MODELS="${PI_DIR}/models.json"
 PI_AUTH="${PI_DIR}/auth.json"
 
-BASE_URL="${PI_SAIL_BASE_URL:-http://localhost:4000/v1}"
+BASE_URL="${PI_SAIL_BASE_URL:-https://llm3.cricket.routers.stonelinks.org/v1}"
 API_KEY="${PI_SAIL_API_KEY:-${SAIL_API_KEY:-}}"
 
 mkdir -p "$PI_DIR"
