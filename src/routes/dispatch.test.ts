@@ -1,8 +1,8 @@
 import { describe, test, expect } from "bun:test";
 import { rewriteForWindowPrefix } from "./dispatch.ts";
-import type { CompletionWindow } from "../types.ts";
+import { COMPLETION_WINDOWS } from "../completion-window.ts";
 
-const windows: CompletionWindow[] = ["asap", "priority", "standard", "flex"];
+const windows = [...COMPLETION_WINDOWS];
 
 describe("rewriteForWindowPrefix", () => {
   test("returns null for non-prefixed /v1/ paths", () => {
@@ -67,6 +67,23 @@ describe("rewriteForWindowPrefix", () => {
     expect(result).not.toBeNull();
     expect(result!.pathname).toBe("/v1/models");
     expect(result!.req.method).toBe("GET");
+  });
+
+  test.each([
+    ["priority", "balanced"],
+    ["standard", "balanced"],
+  ] as const)("aliases retired /%s prefix to %s", (legacy, current) => {
+    const req = new Request(`http://localhost/${legacy}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "test", messages: [] }),
+    });
+    const result = rewriteForWindowPrefix(req);
+    expect(result).not.toBeNull();
+    expect(result!.prefix).toBe(current);
+    expect(result!.pathname).toBe("/v1/chat/completions");
+    expect(result!.req.headers.get("x-completion-window")).toBe(current);
+    expect(new URL(result!.req.url).pathname).toBe("/v1/chat/completions");
   });
 
   test("injected x-completion-window overrides any existing value", () => {

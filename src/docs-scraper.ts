@@ -102,21 +102,31 @@ export async function scrapeModelCapabilities(): Promise<
  * window rows via `rowSpan`:
  *
  *   <tr className="pricing-row pricing-row-window pricing-row-model-first"
- *       aria-label="Kimi-K2.6 Priority pricing: input $0.45, cached $0.20,
- *                   output $3.00 per 1M tokens.">
- *     <td className="pricing-cell pricing-cell-model" rowSpan={2} …>
+ *       aria-label="Kimi-K2.6 Default (ASAP) pricing: input $1.00, cached $0.20,
+ *                   output $4.00 per 1M tokens.">
+ *     <td className="pricing-cell pricing-cell-model" rowSpan={3} …>
  *       … <code>moonshotai/Kimi-K2.6</code> …
  *     </td>
  *     …
  *   </tr>
  *   <tr className="pricing-row pricing-row-window"
- *       aria-label="Kimi-K2.6 ASAP pricing: …">…</tr>
+ *       aria-label="Kimi-K2.6 Balanced pricing: …">…</tr>
+ *   <tr className="pricing-row pricing-row-window"
+ *       aria-label="Kimi-K2.6 Flex pricing: …">…</tr>
  *
  * We track the current model from the `<code>slug</code>` in model cells
- * and read window + prices from each row's aria-label.
+ * and read window + prices from each row's aria-label. The default window
+ * is labelled "Default (ASAP)" (shape as of 2026-09); a bare "ASAP" label
+ * is still accepted.
  */
 const PRICE_LABEL_RE =
-  /aria-label="[^"]*?\b(ASAP|Priority|Standard|Flex) pricing: input \$([0-9.]+), (?:cached \$([0-9.]+), )?output \$([0-9.]+)/;
+  /aria-label="[^"]*?\b(Default \(ASAP\)|ASAP|Balanced|Flex) pricing: input \$([0-9.]+), (?:cached \$([0-9.]+), )?output \$([0-9.]+)/;
+
+/** Map a pricing-row label token to a completion window name. */
+function windowFromPriceLabel(label: string): CompletionWindow | null {
+  const name = label === "Default (ASAP)" ? "asap" : label.toLowerCase();
+  return isValidCompletionWindow(name) ? name : null;
+}
 
 export function parsePricingFromJsx(
   markdown: string,
@@ -137,10 +147,10 @@ export function parsePricingFromJsx(
     const label = row.match(PRICE_LABEL_RE);
     if (!label) continue;
 
-    const window = label[1]!.toLowerCase();
-    if (!isValidCompletionWindow(window)) {
+    const window = windowFromPriceLabel(label[1]!);
+    if (!window) {
       log.warn(
-        `[docs-scraper] skipping price with invalid completionWindow "${window}" for ${currentModel}`,
+        `[docs-scraper] skipping price with invalid completionWindow "${label[1]}" for ${currentModel}`,
       );
       continue;
     }
@@ -152,7 +162,7 @@ export function parsePricingFromJsx(
 
     const prices = map.get(currentModel) ?? [];
     prices.push({
-      completionWindow: window as CompletionWindow,
+      completionWindow: window,
       inputPerMTok: input,
       cachedInputPerMTok:
         cached !== null && Number.isNaN(cached) ? null : cached,

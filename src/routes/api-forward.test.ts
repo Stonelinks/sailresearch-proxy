@@ -62,7 +62,7 @@ describe("handleChatCompletions", () => {
     );
     expect(res.status).toBe(200);
     expect(upstream.url).toContain("/chat/completions");
-    expect(upstream.body.metadata.completion_window).toBe("standard");
+    expect(upstream.body.metadata.completion_window).toBe("balanced");
   });
 
   test("URL prefix overrides body metadata window", async () => {
@@ -71,7 +71,7 @@ describe("handleChatCompletions", () => {
       makeRequest("/v1/chat/completions", {
         model: "m",
         messages: [{ role: "user", content: "hi" }],
-        metadata: { completion_window: "standard" },
+        metadata: { completion_window: "balanced" },
       }),
       "flex",
     );
@@ -84,10 +84,10 @@ describe("handleChatCompletions", () => {
       makeRequest(
         "/v1/chat/completions",
         { model: "m", messages: [{ role: "user", content: "hi" }] },
-        { "x-completion-window": "priority" },
+        { "x-completion-window": "balanced" },
       ),
     );
-    expect(upstream.body.metadata.completion_window).toBe("priority");
+    expect(upstream.body.metadata.completion_window).toBe("balanced");
   });
 
   test("client body metadata window is respected when unprefixed", async () => {
@@ -185,10 +185,10 @@ describe("handleResponses", () => {
     const upstream = mockUpstream();
     const res = await handleResponses(
       makeRequest("/v1/responses", { model: "m", input: "hi" }, {}),
-      "priority",
+      "balanced",
     );
     expect(res.status).toBe(200);
     expect(upstream.url).toContain("/responses");
-    expect(upstream.body.metadata.completion_window).toBe("priority");
+    expect(upstream.body.metadata.completion_window).toBe("balanced");
   });
 });

@@ -25,12 +25,12 @@ describe("parseRequest", () => {
     const req = makeRequest({ model: "m" });
     const result = await parseRequest(req, {
       routeName: "test",
-      urlPrefix: "priority",
+      urlPrefix: "balanced",
     });
     expect("ok" in result).toBe(true);
     if (!("ok" in result)) return;
     expect(result.ok.body.model).toBe("m");
-    expect(result.ok.completionWindow).toBe("priority");
+    expect(result.ok.completionWindow).toBe("balanced");
   });
 
   test("rejects when authorization is missing and proxyApiKey is set", async () => {

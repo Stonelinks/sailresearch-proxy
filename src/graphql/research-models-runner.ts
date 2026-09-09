@@ -203,7 +203,7 @@ async function researchOneWithScrapedData(
   }
 
   // Pick the best available window for preset smoke tests (fast first:
-  // asap > priority > standard > flex).
+  // asap > balanced > flex).
   const bestWindow = pickBestWindow(windowCompat?.supported ?? null);
   const smokeTestUrl = chatCompletionsUrlForWindow(
     `http://127.0.0.1:${config.server.port}/v1`,

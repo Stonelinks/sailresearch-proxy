@@ -4,8 +4,8 @@
  * the response is not an error.
  *
  * By default (`bun test`), only fast asap tests run. Set
- * SAIL_SLOW_INTEGRATION=1 to also test the batched windows
- * (priority/standard/flex), which Sail serves synchronously but may take
+ * SAIL_SLOW_INTEGRATION=1 to also test the scheduled windows
+ * (balanced/flex), which Sail serves synchronously but may take
  * minutes to schedule.
  *
  * Which windows a model supports varies over time, so the slow tests
@@ -61,9 +61,7 @@ const IMAGE_MODEL = "moonshotai/Kimi-K2.6";
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 function windowUrl(window: CompletionWindow, path: string): string {
-  return window === "standard"
-    ? `${baseUrl}${path}`
-    : `${baseUrl}/${window}${path}`;
+  return `${baseUrl}/${window}${path}`;
 }
 
 /**
@@ -179,8 +177,7 @@ async function firstSupportedResult(
 async function runPiSmoke(
   window: CompletionWindow,
 ): Promise<{ exitCode: number; output: string }> {
-  const providerBaseUrl =
-    window === "standard" ? `${baseUrl}/v1` : `${baseUrl}/${window}/v1`;
+  const providerBaseUrl = `${baseUrl}/${window}/v1`;
 
   const providerName = "sail-test";
   const modelsJson = {
@@ -276,7 +273,7 @@ describe.skipIf(!hasApiKey)("integration: proxy + Sail API", () => {
     // Set DATABASE_URL for our temp PrismaClient (must happen before import)
     process.env.DATABASE_URL = `file:${dbPath}`;
     process.env.LOG_LEVEL = "warn";
-    process.env.DEFAULT_COMPLETION_WINDOW = "standard";
+    process.env.DEFAULT_COMPLETION_WINDOW = "balanced";
     process.env.PROXY_API_KEY = "";
 
     // Apply committed migrations against the temp DB (same path as prod
@@ -449,11 +446,15 @@ describe.skipIf(!hasApiKey)("integration: proxy + Sail API", () => {
     }, 60_000);
   });
 
-  // ── Image input tests (always run, asap) ─────────────────────────────────
+  // ── Image input tests (always run, balanced) ─────────────────────────────
+  //
+  // Sail rejects image input on asap (`unsupported_asap_request`, observed
+  // 2026-09), so these go through balanced. It still answers in seconds for
+  // this model, hence the tests stay in the fast suite with a wider cap.
 
-  describe("image input (asap)", () => {
+  describe("image input (balanced)", () => {
     test("chat completions with image_url returns 200", async () => {
-      const url = `${baseUrl}/asap/v1/chat/completions`;
+      const url = `${baseUrl}/balanced/v1/chat/completions`;
       const res = await fetch(url, {
         method: "POST",
         headers: {
@@ -487,10 +488,10 @@ describe.skipIf(!hasApiKey)("integration: proxy + Sail API", () => {
       expect(res.status).toBe(200);
       const body: any = await res.json();
       expect(body.choices?.[0]?.message?.content).toBeDefined();
-    }, 60_000);
+    }, 180_000);
 
     test("Anthropic messages with image returns 200", async () => {
-      const url = `${baseUrl}/asap/v1/messages`;
+      const url = `${baseUrl}/balanced/v1/messages`;
       const res = await fetch(url, {
         method: "POST",
         headers: {
@@ -525,7 +526,7 @@ describe.skipIf(!hasApiKey)("integration: proxy + Sail API", () => {
       const body: any = await res.json();
       expect(body.content).toBeDefined();
       expect(body.content.length).toBeGreaterThan(0);
-    }, 60_000);
+    }, 180_000);
   });
 
   // ── Responses API tests (always run, asap) ───────────────────────────────
@@ -550,9 +551,11 @@ client = anthropic.Anthropic(
     auth_token="${process.env.SAIL_API_KEY}",
     base_url="${baseUrl}/asap",
 )
+# gpt-oss-120b emits a thinking block first; a tight cap can end the turn on
+# max_tokens before any text, which would make the stop_reason assert flaky.
 response = client.messages.create(
     model="${TEST_MODEL}",
-    max_tokens=32,
+    max_tokens=256,
     messages=[{"role": "user", "content": "say hi"}],
 )
 assert response.content is not None
@@ -633,14 +636,14 @@ print(f"OK: {len(chunks)} chunks")
     }, 120_000);
   });
 
-  // ── Slow batched-window tests (opt-in) ──────────────────────────────────
+  // ── Slow scheduled-window tests (opt-in) ────────────────────────────────
   //
   // Sail now serves these synchronously; each test discovers a model that
   // supports the window and skips (with a log line) when none does.
 
-  const SLOW_WINDOWS: CompletionWindow[] = ["priority", "standard", "flex"];
+  const SLOW_WINDOWS: CompletionWindow[] = ["balanced", "flex"];
 
-  describe.skipIf(!runSlow)("batched windows (chat completions)", () => {
+  describe.skipIf(!runSlow)("scheduled windows (chat completions)", () => {
     for (const window of SLOW_WINDOWS) {
       test(`${window} window returns 200 for some model`, async () => {
         const r = await firstSupportedResult((m) =>
@@ -655,7 +658,7 @@ print(f"OK: {len(chunks)} chunks")
       }, 600_000);
     }
 
-    test("standard streaming SSE body contains chunk markers", async () => {
+    test("balanced streaming SSE body contains chunk markers", async () => {
       const r = await firstSupportedResult(async (model) => {
         const res = await fetch(`${baseUrl}/v1/chat/completions`, {
           method: "POST",
@@ -668,7 +671,7 @@ print(f"OK: {len(chunks)} chunks")
             messages: [
               { role: "user", content: "Capital of France? One word." },
             ],
-            metadata: { completion_window: "standard" },
+            metadata: { completion_window: "balanced" },
             stream: true,
             max_tokens: 10,
           }),
@@ -679,7 +682,7 @@ print(f"OK: {len(chunks)} chunks")
         return { status: res.status, body: await res.text() };
       });
       if (!r) {
-        console.warn("[slow] no model supports window=standard; skipped");
+        console.warn("[slow] no model supports window=balanced; skipped");
         return;
       }
       expect(r.status).toBe(200);
@@ -688,7 +691,7 @@ print(f"OK: {len(chunks)} chunks")
     }, 600_000);
   });
 
-  describe.skipIf(!runSlow)("batched windows (Responses API)", () => {
+  describe.skipIf(!runSlow)("scheduled windows (Responses API)", () => {
     for (const window of SLOW_WINDOWS) {
       test(`${window} Responses API returns 200 for some model`, async () => {
         const r = await firstSupportedResult((m) => sendResponses(window, m));
@@ -703,7 +706,7 @@ print(f"OK: {len(chunks)} chunks")
     }
   });
 
-  describe.skipIf(!runSlow)("batched windows (Messages API)", () => {
+  describe.skipIf(!runSlow)("scheduled windows (Messages API)", () => {
     for (const window of SLOW_WINDOWS) {
       test(`${window} Messages API returns 200 with Anthropic format`, async () => {
         const r = await firstSupportedResult((m) => sendMessages(window, m));
@@ -719,14 +722,14 @@ print(f"OK: {len(chunks)} chunks")
     }
   });
 
-  // ── Slow SDK batched smoke tests (opt-in) ───────────────────────────────
+  // ── Slow SDK scheduled-window smoke tests (opt-in) ──────────────────────
 
-  describe.skipIf(!runSlow)("OpenAI SDK batched (uvx, priority)", () => {
-    test("priority window via OpenAI SDK returns 200", async () => {
+  describe.skipIf(!runSlow)("OpenAI SDK scheduled (uvx, balanced)", () => {
+    test("balanced window via OpenAI SDK returns 200", async () => {
       const script = `
 from openai import OpenAI
 client = OpenAI(
-    base_url="${baseUrl}/priority/v1",
+    base_url="${baseUrl}/balanced/v1",
     api_key="${process.env.SAIL_API_KEY}",
     timeout=300,
 )
@@ -745,13 +748,13 @@ print("OK")
     }, 300_000);
   });
 
-  describe.skipIf(!runSlow)("Anthropic SDK batched (uvx, priority)", () => {
-    test("priority window via Anthropic SDK prefix URL returns 200", async () => {
+  describe.skipIf(!runSlow)("Anthropic SDK scheduled (uvx, balanced)", () => {
+    test("balanced window via Anthropic SDK prefix URL returns 200", async () => {
       const script = `
 import anthropic
 client = anthropic.Anthropic(
     auth_token="${process.env.SAIL_API_KEY}",
-    base_url="${baseUrl}/priority",
+    base_url="${baseUrl}/balanced",
     timeout=300,
 )
 response = client.messages.create(

@@ -130,7 +130,7 @@ export function createApp(prisma: PrismaClient, port?: number): AppServer {
     hostname: config.server.host,
     // Bun's max idle timeout is 255 seconds. Streaming requests stay alive
     // as long as Sail emits bytes (its /messages SSE includes pings); a
-    // non-streaming request on a batched window that sits silent past 255s
+    // non-streaming request on a scheduled window that sits silent past 255s
     // will be cut — clients should use `stream: true` for long waits.
     idleTimeout: 255,
 

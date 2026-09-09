@@ -19,7 +19,7 @@ function makeModelData(overrides: Partial<ModelData> = {}): ModelData {
     supportsImage: false,
     reasoning: false,
     thinkingLevelMap: null,
-    supportedWindows: new Set(["asap", "priority", "standard", "flex"]),
+    supportedWindows: new Set(["asap", "balanced", "flex"]),
     samplingPresets: [
       {
         name: "default",
@@ -29,9 +29,9 @@ function makeModelData(overrides: Partial<ModelData> = {}): ModelData {
     ],
     pricesByWindow: new Map([
       [
-        "standard",
+        "balanced",
         {
-          completionWindow: "standard",
+          completionWindow: "balanced",
           inputPerMTok: 0.2,
           cachedInputPerMTok: 0.1,
           outputPerMTok: 1.2,
@@ -45,7 +45,7 @@ function makeModelData(overrides: Partial<ModelData> = {}): ModelData {
 
 function makePrice(overrides: Partial<PriceWire> = {}): PriceWire {
   return {
-    completionWindow: "standard",
+    completionWindow: "balanced",
     inputPerMTok: 0.2,
     cachedInputPerMTok: 0.1,
     outputPerMTok: 1.2,
@@ -301,24 +301,43 @@ describe("buildPiModelEntry", () => {
 // ─── buildProvider ──────────────────────────────────────────────────────────
 
 describe("buildProvider", () => {
-  test("builds standard provider with no URL prefix", () => {
+  test("builds balanced provider with /balanced/v1 prefix", () => {
     const modelsData = new Map([
       ["org/model", makeModelData({ modelId: "org/model" })],
     ]);
 
     const provider = buildProvider(
-      "standard",
+      "balanced",
       modelsData,
       "http://localhost:4000/v1",
     );
 
     expect(provider).not.toBeNull();
-    expect(provider!.baseUrl).toBe("http://localhost:4000/v1");
+    expect(provider!.baseUrl).toBe("http://localhost:4000/balanced/v1");
     expect(provider!.api).toBe("openai-completions");
     expect(provider!.models).toHaveLength(1);
   });
 
-  test("appends /v1 to standard provider when base URL has no /v1", () => {
+  test("bare option targets the unprefixed /v1 route", () => {
+    const modelsData = new Map([
+      ["org/model", makeModelData({ modelId: "org/model" })],
+    ]);
+
+    const provider = buildProvider(
+      "balanced",
+      modelsData,
+      "http://localhost:4000/v1",
+      { bare: true },
+    );
+
+    expect(provider).not.toBeNull();
+    expect(provider!.baseUrl).toBe("http://localhost:4000/v1");
+    expect(provider!.models).toHaveLength(1);
+    // Pricing still comes from the requested window.
+    expect(provider!.models[0]!.cost).toBeDefined();
+  });
+
+  test("appends /v1 to bare provider when base URL has no /v1", () => {
     // Regression: `generate-models-json --base-url https://host` (no /v1)
     // must still produce a /v1 path, otherwise pi POSTs to {host}/chat/completions
     // and the proxy returns 404.
@@ -327,9 +346,10 @@ describe("buildProvider", () => {
     ]);
 
     const provider = buildProvider(
-      "standard",
+      "balanced",
       modelsData,
       "https://llm3.cricket.routers.stonelinks.org",
+      { bare: true },
     );
 
     expect(provider).not.toBeNull();
@@ -395,7 +415,7 @@ describe("buildProvider", () => {
   });
 
   test("includes models without pricing for that window (no cost field)", () => {
-    // Model only has standard pricing, not asap
+    // Model only has balanced pricing, not asap
     const data = makeModelData({ modelId: "org/model" });
     const modelsData = new Map([["org/model", data]]);
 
@@ -418,7 +438,7 @@ describe("buildProvider", () => {
     const modelsData = new Map([["org/no-price-model", data]]);
 
     const provider = buildProvider(
-      "standard",
+      "balanced",
       modelsData,
       "http://localhost:4000/v1",
     );
@@ -448,7 +468,7 @@ describe("buildProvider", () => {
     const modelsData = new Map([["org/model", data]]);
 
     const provider = buildProvider(
-      "standard",
+      "balanced",
       modelsData,
       "http://localhost:4000/v1",
     );
@@ -460,7 +480,7 @@ describe("buildProvider", () => {
 
   test("creates default preset entry for model with no presets", () => {
     const provider = buildProvider(
-      "standard",
+      "balanced",
       new Map([["no-presets", makeModelData({ samplingPresets: [] })]]),
       "http://localhost:4000/v1",
     );
@@ -470,7 +490,7 @@ describe("buildProvider", () => {
 
   test("excludes models that don't support the target window", () => {
     const provider = buildProvider(
-      "standard",
+      "balanced",
       new Map([
         [
           "asap-only",
@@ -483,7 +503,7 @@ describe("buildProvider", () => {
           "all-windows",
           makeModelData({
             modelId: "all-windows",
-            supportedWindows: new Set(["asap", "priority", "standard", "flex"]),
+            supportedWindows: new Set(["asap", "balanced", "flex"]),
           }),
         ],
       ]),
@@ -497,7 +517,7 @@ describe("buildProvider", () => {
 
   test("includes models with empty supportedWindows (not yet tested)", () => {
     const provider = buildProvider(
-      "standard",
+      "balanced",
       new Map([
         [
           "untested",
@@ -514,20 +534,20 @@ describe("buildProvider", () => {
   });
 
   test("handles base URL without /v1 suffix", () => {
-    const price = makePrice({ completionWindow: "priority" });
+    const price = makePrice({ completionWindow: "balanced" });
     const data = makeModelData({
       modelId: "org/model",
-      pricesByWindow: new Map([["priority", price]]),
+      pricesByWindow: new Map([["balanced", price]]),
     });
     const modelsData = new Map([["org/model", data]]);
 
     const provider = buildProvider(
-      "priority",
+      "balanced",
       modelsData,
       "http://localhost:4000",
     );
 
-    expect(provider!.baseUrl).toBe("http://localhost:4000/priority/v1");
+    expect(provider!.baseUrl).toBe("http://localhost:4000/balanced/v1");
   });
 });
 
@@ -560,7 +580,7 @@ describe("restShapeToModelData", () => {
       ],
       x_pricing_by_completion_window: [
         {
-          completion_window: "standard",
+          completion_window: "balanced",
           input_per_mtok: 0.2,
           cached_input_per_mtok: 0.1,
           output_per_mtok: 1.2,
@@ -591,7 +611,7 @@ describe("restShapeToModelData", () => {
     expect(data.samplingPresets[0]!.name).toBe("default");
     expect(data.samplingPresets[1]!.name).toBe("creative");
     expect(data.pricesByWindow.size).toBe(2);
-    expect(data.pricesByWindow.get("standard")!.inputPerMTok).toBe(0.2);
+    expect(data.pricesByWindow.get("balanced")!.inputPerMTok).toBe(0.2);
     expect(data.pricesByWindow.get("flex")!.inputPerMTok).toBe(0.16);
     expect(data.pricesByWindow.get("flex")!.cachedInputPerMTok).toBeNull();
   });
@@ -648,7 +668,7 @@ describe("restShapeToModelData", () => {
           currency: "USD",
         },
         {
-          completion_window: "standard",
+          completion_window: "balanced",
           input_per_mtok: 0.2,
           output_per_mtok: 1.2,
           currency: "USD",
@@ -658,7 +678,7 @@ describe("restShapeToModelData", () => {
 
     const data = restShapeToModelData(entry);
     expect(data.pricesByWindow.size).toBe(1);
-    expect(data.pricesByWindow.get("standard")).toBeDefined();
+    expect(data.pricesByWindow.get("balanced")).toBeDefined();
   });
 
   test("handles camelCase completionWindow in pricing", () => {
@@ -691,11 +711,30 @@ describe("restShapeToModelData", () => {
   test("ignores invalid values in x_supported_windows", () => {
     const entry = {
       id: "org/model",
-      x_supported_windows: ["asap", "bogus", "standard", 42],
+      x_supported_windows: ["asap", "bogus", "flex", 42],
     };
 
     const data = restShapeToModelData(entry);
-    expect(data.supportedWindows).toEqual(new Set(["asap", "standard"]));
+    expect(data.supportedWindows).toEqual(new Set(["asap", "flex"]));
+  });
+
+  test("aliases retired window names from an older proxy's response", () => {
+    const entry = {
+      id: "org/model",
+      x_supported_windows: ["asap", "priority", "standard"],
+      x_pricing_by_completion_window: [
+        {
+          completion_window: "priority",
+          input_per_mtok: 0.2,
+          output_per_mtok: 1.2,
+          currency: "USD",
+        },
+      ],
+    };
+
+    const data = restShapeToModelData(entry);
+    expect(data.supportedWindows).toEqual(new Set(["asap", "balanced"]));
+    expect(data.pricesByWindow.get("balanced")!.inputPerMTok).toBe(0.2);
   });
 
   test("defaults to empty set when x_supported_windows is absent", () => {

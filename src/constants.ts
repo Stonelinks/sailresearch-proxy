@@ -12,17 +12,17 @@ import type { CompletionWindow } from "./types.ts";
 /** Maps each completion window to its pi models.json provider name. */
 export const WINDOW_PROVIDER_NAMES: Record<CompletionWindow, string> = {
   asap: "sail-asap",
-  priority: "sail-priority",
-  standard: "sail-standard",
+  balanced: "sail-balanced",
   flex: "sail-flex",
 };
+
+/**
+ * Convenience provider that targets the proxy's bare `/v1` route, i.e.
+ * whatever `DEFAULT_COMPLETION_WINDOW` resolves to (balanced by default).
+ */
+export const DEFAULT_PROVIDER = "sail";
 
 // ── Token pricing ───────────────────────────────────────────────────────
 
 /** Number of tokens in one "per-MTok" pricing unit. */
 export const PER_MTOKEN = 1_000_000;
-
-// ── Pi SDK defaults ─────────────────────────────────────────────────────
-
-/** Default provider name for the pi SDK session. */
-export const DEFAULT_PROVIDER = "sail-standard";

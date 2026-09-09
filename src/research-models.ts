@@ -87,7 +87,7 @@ function validatePriceEntry(raw: unknown, index: number): ModelPriceInput {
     !isValidCompletionWindow(obj.completionWindow)
   ) {
     throw new Error(
-      `prices[${index}]: "completionWindow" must be one of asap|priority|standard|flex, got ${JSON.stringify(obj.completionWindow)}`,
+      `prices[${index}]: "completionWindow" must be one of ${COMPLETION_WINDOWS.join("|")}, got ${JSON.stringify(obj.completionWindow)}`,
     );
   }
   if (typeof obj.inputPerMTok !== "number") {
@@ -547,16 +547,14 @@ export async function smokeTestPresets(
  *         window: "asap"
  * Output: http://host:4000/asap/v1/chat/completions
  *
- * For "standard" (the default), no prefix is injected.
+ * Every window gets an explicit prefix so the test exercises exactly the
+ * route pi would use; the bare /v1 route is only "the default window".
  */
 export function chatCompletionsUrlForWindow(
   baseUrl: string,
   window: CompletionWindow,
 ): string {
   const stripped = baseUrl.replace(/\/v1\/?$/, "").replace(/\/+$/, "");
-  if (window === "standard") {
-    return `${stripped}/v1/chat/completions`;
-  }
   return `${stripped}/${window}/v1/chat/completions`;
 }
 
@@ -625,22 +623,16 @@ export async function smokeTestWindowCompatibility(
 /**
  * Pick the best completion window for smoke testing presets. Prefers fast
  * windows so preset validation doesn't wait on batch scheduling.
- * Order: asap > priority > standard > flex.
+ * Order: asap > balanced > flex (COMPLETION_WINDOWS is fastest-first).
  * Falls back to `config.research.window` when compatibility is unknown.
  */
 export function pickBestWindow(
   supported: Set<CompletionWindow> | null,
 ): CompletionWindow {
-  const preference: readonly CompletionWindow[] = [
-    "asap",
-    "priority",
-    "standard",
-    "flex",
-  ];
   if (supported === null || supported.size === 0) {
     return config.research.window;
   }
-  for (const window of preference) {
+  for (const window of COMPLETION_WINDOWS) {
     if (supported.has(window)) return window;
   }
   return config.research.window;

@@ -1,4 +1,7 @@
-import { extractWindowPrefix } from "../completion-window.ts";
+import {
+  normalizeCompletionWindow,
+  rawWindowPrefix,
+} from "../completion-window.ts";
 import { log } from "../../shared/logger.ts";
 import type { CompletionWindow } from "../types.ts";
 
@@ -7,24 +10,27 @@ export interface RewriteResult {
   pathname: string;
   /** Request with the prefix removed and X-Completion-Window injected. */
   req: Request;
-  /** The detected window prefix. */
+  /** The detected window prefix (legacy names already aliased). */
   prefix: CompletionWindow;
 }
 
 /**
  * If `req` targets a window-prefixed route (e.g. /flex/v1/chat/completions),
- * rewrite the URL to drop the prefix and inject `X-Completion-Window`. Returns
- * null if the path is not a valid window-prefixed route — caller should
- * dispatch the request unchanged.
+ * rewrite the URL to drop the prefix and inject `X-Completion-Window`. Retired
+ * prefixes (/priority, /standard) are accepted and aliased to their current
+ * window. Returns null if the path is not a valid window-prefixed route —
+ * caller should dispatch the request unchanged.
  */
 export function rewriteForWindowPrefix(req: Request): RewriteResult | null {
   const url = new URL(req.url);
   const pathname = url.pathname;
 
-  const prefix = extractWindowPrefix(pathname);
+  const segment = rawWindowPrefix(pathname);
+  if (!segment) return null;
+  const prefix = normalizeCompletionWindow(segment);
   if (!prefix) return null;
 
-  const stripped = pathname.replace(`/${prefix}`, "");
+  const stripped = pathname.slice(`/${segment}`.length);
   log.info(
     `[req] ${req.method} ${pathname} -> window=${prefix} rewrite=${stripped}`,
   );

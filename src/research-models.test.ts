@@ -123,7 +123,7 @@ describe("parseAndValidatePiOutput", () => {
       JSON.stringify({
         prices: [
           {
-            completionWindow: "standard",
+            completionWindow: "balanced",
             inputPerMTok: 0.2,
             cachedInputPerMTok: 0.1,
             outputPerMTok: 1.2,
@@ -140,7 +140,7 @@ describe("parseAndValidatePiOutput", () => {
 
     expect(result.prices).toHaveLength(2);
     expect(result.prices[0]).toEqual({
-      completionWindow: "standard",
+      completionWindow: "balanced",
       inputPerMTok: 0.2,
       cachedInputPerMTok: 0.1,
       outputPerMTok: 1.2,
@@ -161,7 +161,7 @@ describe("parseAndValidatePiOutput", () => {
           ],
         }),
       ),
-    ).toThrow('"completionWindow" must be one of asap|priority|standard|flex');
+    ).toThrow('"completionWindow" must be one of asap|balanced|flex');
   });
 
   test("rejects price entry with non-numeric input price", () => {
@@ -596,12 +596,12 @@ describe("chatCompletionsUrlForWindow", () => {
     expect(url).toBe("http://localhost:4000/flex/v1/chat/completions");
   });
 
-  test("no prefix for standard", () => {
+  test("builds /balanced/v1/chat/completions for balanced (no bare-route special case)", () => {
     const url = chatCompletionsUrlForWindow(
       "http://localhost:4000/v1",
-      "standard",
+      "balanced",
     );
-    expect(url).toBe("http://localhost:4000/v1/chat/completions");
+    expect(url).toBe("http://localhost:4000/balanced/v1/chat/completions");
   });
 
   test("handles base URL without /v1", () => {
@@ -621,7 +621,7 @@ describe("smokeTestWindowCompatibility", () => {
     const urls: string[] = [];
     globalThis.fetch = mock((url: string) => {
       urls.push(url);
-      // asap and flex return 200, priority and standard return 400
+      // asap and flex return 200, balanced returns 400
       if (url.includes("/asap/") || url.includes("/flex/")) {
         return Promise.resolve(
           new Response(
@@ -650,8 +650,7 @@ describe("smokeTestWindowCompatibility", () => {
     expect(result.supported.size).toBe(2);
     expect(result.supported.has("asap")).toBe(true);
     expect(result.supported.has("flex")).toBe(true);
-    expect(result.supported.has("standard")).toBe(false);
-    expect(result.supported.has("priority")).toBe(false);
+    expect(result.supported.has("balanced")).toBe(false);
     expect(result.timedOut.size).toBe(0);
   });
 
@@ -672,13 +671,8 @@ describe("smokeTestWindowCompatibility", () => {
       "http://localhost:4000/v1",
     );
 
-    expect(result.supported.size).toBe(4);
-    expect([...result.supported].sort()).toEqual([
-      "asap",
-      "flex",
-      "priority",
-      "standard",
-    ]);
+    expect(result.supported.size).toBe(3);
+    expect([...result.supported].sort()).toEqual(["asap", "balanced", "flex"]);
   });
 
   test("returns empty set when all windows fail", async () => {
@@ -731,11 +725,7 @@ describe("smokeTestWindowCompatibility", () => {
     expect(result.timedOut.size).toBe(1);
     expect(result.timedOut.has("flex")).toBe(true);
     expect(result.supported.has("flex")).toBe(false);
-    expect([...result.supported].sort()).toEqual([
-      "asap",
-      "priority",
-      "standard",
-    ]);
+    expect([...result.supported].sort()).toEqual(["asap", "balanced"]);
   });
 });
 
@@ -743,16 +733,11 @@ describe("pickBestWindow", () => {
   const windows = (...ws: CompletionWindow[]) => new Set<CompletionWindow>(ws);
 
   test("prefers asap when supported", () => {
-    expect(
-      pickBestWindow(windows("flex", "standard", "asap", "priority")),
-    ).toBe("asap");
+    expect(pickBestWindow(windows("flex", "balanced", "asap"))).toBe("asap");
   });
 
-  test("falls back through priority > standard > flex", () => {
-    expect(pickBestWindow(windows("flex", "standard", "priority"))).toBe(
-      "priority",
-    );
-    expect(pickBestWindow(windows("flex", "standard"))).toBe("standard");
+  test("falls back through balanced > flex", () => {
+    expect(pickBestWindow(windows("flex", "balanced"))).toBe("balanced");
     expect(pickBestWindow(windows("flex"))).toBe("flex");
   });
 
@@ -768,11 +753,8 @@ describe("smokeTimeoutForWindow", () => {
     expect(smokeTimeoutForWindow("asap")).toBe(
       config.sail.inferenceTimeoutMs + slack,
     );
-    expect(smokeTimeoutForWindow("priority")).toBe(
-      config.windowTimeouts.priority + slack,
-    );
-    expect(smokeTimeoutForWindow("standard")).toBe(
-      config.windowTimeouts.standard + slack,
+    expect(smokeTimeoutForWindow("balanced")).toBe(
+      config.windowTimeouts.balanced + slack,
     );
     expect(smokeTimeoutForWindow("flex")).toBe(
       config.windowTimeouts.flex + slack,

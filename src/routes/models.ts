@@ -1,7 +1,7 @@
 import { sail } from "../sail-client.ts";
 import { mapSailError } from "../errors.ts";
 import { config } from "../config.ts";
-import { isValidCompletionWindow } from "../completion-window.ts";
+import { normalizeCompletionWindow } from "../completion-window.ts";
 import type { CompletionWindow } from "../types.ts";
 import {
   mergeModelMeta,
@@ -29,10 +29,11 @@ export async function handleModels(req: Request): Promise<Response> {
   // The dispatch layer injects x-completion-window when a window prefix
   // is present in the URL (e.g. /flex/v1/models).
   const headerWindow = req.headers.get("x-completion-window");
+  const requestedWindow: CompletionWindow | null = headerWindow
+    ? normalizeCompletionWindow(headerWindow)
+    : null;
   const effectiveWindow: CompletionWindow =
-    headerWindow && isValidCompletionWindow(headerWindow)
-      ? headerWindow
-      : config.defaults.completionWindow;
+    requestedWindow ?? config.defaults.completionWindow;
 
   const { status, data } = await sail.listModels();
   if (status !== 200) return mapSailError(status, data);
@@ -50,8 +51,8 @@ export async function handleModels(req: Request): Promise<Response> {
   // The header is set by the dispatch layer for prefixed routes
   // (e.g. /asap/v1/models, /flex/v1/models).
   // Unprefixed /v1/models returns all models with the x_supported_windows field.
-  if (headerWindow && isValidCompletionWindow(headerWindow)) {
-    wires = filterByWindow(wires, headerWindow);
+  if (requestedWindow) {
+    wires = filterByWindow(wires, requestedWindow);
   }
 
   const enriched = wires.map((m) => toRestShape(m, effectiveWindow));

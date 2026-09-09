@@ -59,7 +59,7 @@ describe("handleModels", () => {
         description: "Big model",
         source: "https://hf.co/org-a/model-a",
         researchedAt: new Date("2025-06-01T00:00:00Z"),
-        supportedWindows: '["asap","priority","standard","flex"]',
+        supportedWindows: '["asap","balanced","flex"]',
         samplingPresets: [
           {
             name: "default",
@@ -74,7 +74,7 @@ describe("handleModels", () => {
         ],
         prices: [
           {
-            completionWindow: "standard",
+            completionWindow: "balanced",
             inputPerMTok: 0.2,
             cachedInputPerMTok: 0.1,
             outputPerMTok: 1.2,
@@ -120,7 +120,7 @@ describe("handleModels", () => {
     });
     expect(m.x_source).toBe("https://hf.co/org-a/model-a");
     expect(m.x_researched_at).toBe("2025-06-01T00:00:00.000Z");
-    // Default unprefixed window is "standard" → mirror standard pricing.
+    // Default unprefixed window is "balanced" → mirror balanced pricing.
     // Prices are USD per token as fixed-decimal strings (OpenRouter convention).
     expect(m.pricing).toEqual({
       prompt: "0.0000002",
@@ -130,7 +130,7 @@ describe("handleModels", () => {
     expect(m.x_billing_window).toBeUndefined();
     expect(m.x_pricing_by_completion_window).toEqual([
       {
-        completion_window: "standard",
+        completion_window: "balanced",
         input_per_mtok: 0.2,
         cached_input_per_mtok: 0.1,
         output_per_mtok: 1.2,
@@ -145,12 +145,7 @@ describe("handleModels", () => {
       },
     ]);
     // supportedWindows is surfaced as x_supported_windows
-    expect(m.x_supported_windows).toEqual([
-      "asap",
-      "priority",
-      "standard",
-      "flex",
-    ]);
+    expect(m.x_supported_windows).toEqual(["asap", "balanced", "flex"]);
   });
 
   test("omits enrichment fields entirely for un-researched models", async () => {
@@ -276,7 +271,7 @@ describe("handleModels", () => {
         samplingPresets: [],
         prices: [
           {
-            completionWindow: "standard",
+            completionWindow: "balanced",
             inputPerMTok: 1,
             cachedInputPerMTok: null,
             outputPerMTok: 5,
@@ -330,8 +325,8 @@ describe("handleModels", () => {
       },
     ]);
 
-    // Ask for "priority" — model only publishes flex.
-    const res = await handleModels(reqWithWindow("priority"));
+    // Ask for "asap" — model only publishes flex.
+    const res = await handleModels(reqWithWindow("asap"));
     const body: any = await res.json();
     expect(body.data[0].pricing).toEqual({
       prompt: "0.00000004",
@@ -369,7 +364,7 @@ describe("handleModels", () => {
       },
     ]);
 
-    const res = await handleModels(reqWithWindow("standard"));
+    const res = await handleModels(reqWithWindow("balanced"));
     const body: any = await res.json();
     expect(body.data[0].pricing).toBeUndefined();
     expect(body.data[0].x_billing_window).toBeUndefined();
@@ -402,7 +397,7 @@ describe("handleModels", () => {
         samplingPresets: [],
         prices: [
           {
-            completionWindow: "standard",
+            completionWindow: "balanced",
             inputPerMTok: 1,
             cachedInputPerMTok: null,
             outputPerMTok: 5,
@@ -414,7 +409,7 @@ describe("handleModels", () => {
 
     const res = await handleModels(reqWithWindow("garbage"));
     const body: any = await res.json();
-    // Default DEFAULT_COMPLETION_WINDOW is "standard".
+    // Default DEFAULT_COMPLETION_WINDOW is "balanced".
     expect(body.data[0].pricing).toEqual({
       prompt: "0.000001",
       completion: "0.000005",
@@ -449,7 +444,7 @@ describe("handleModels", () => {
         description: null,
         source: null,
         researchedAt: new Date(),
-        supportedWindows: '["asap","priority","standard","flex"]',
+        supportedWindows: '["asap","balanced","flex"]',
         samplingPresets: [],
         prices: [],
       },
@@ -490,14 +485,14 @@ describe("handleModels", () => {
         description: null,
         source: null,
         researchedAt: new Date(),
-        supportedWindows: '["asap","priority","standard","flex"]',
+        supportedWindows: '["asap","balanced","flex"]',
         samplingPresets: [],
         prices: [],
       },
     ]);
 
-    // /standard/v1/models should exclude model-a (only asap+flex)
-    const res = await handleModels(reqWithWindow("standard"));
+    // /balanced/v1/models should exclude model-a (only asap+flex)
+    const res = await handleModels(reqWithWindow("balanced"));
     const body: any = await res.json();
     const ids = body.data.map((m: any) => m.id);
     expect(ids).toEqual(["model-b"]);

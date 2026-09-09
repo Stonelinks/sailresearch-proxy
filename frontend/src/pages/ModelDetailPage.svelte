@@ -12,18 +12,16 @@
 
   import JsonBlock from "../components/JsonBlock.svelte";
 
-  const WINDOW_ORDER = ["standard", "priority", "flex", "asap"] as const;
+  const WINDOW_ORDER = ["asap", "balanced", "flex"] as const;
   const WINDOW_LABELS: Record<(typeof WINDOW_ORDER)[number], string> = {
-    standard: "Standard",
-    priority: "Priority",
-    flex: "Flex",
     asap: "ASAP",
+    balanced: "Balanced",
+    flex: "Flex",
   };
 
   const WINDOW_COLORS: Record<string, string> = {
     asap: "bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/25",
-    priority: "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/25",
-    standard: "bg-slate-500/15 text-slate-600 dark:text-slate-400 border-slate-500/25",
+    balanced: "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/25",
     flex: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/25",
   };
 

@@ -8,7 +8,7 @@
  *
  * Two modes:
  *   - `runPiPrompt(prompt)` — one-shot call using the default model
- *     (sail-standard / zai-org/GLM-5.1-FP8)
+ *     (sail / DEFAULT_MODEL, routed via RESEARCH_WINDOW)
  *   - `runPiChat(provider, modelId, prompt)` — one-shot call targeting a
  *     specific provider/model (used by smoke tests)
  */
@@ -36,15 +36,12 @@ const DEFAULT_MODEL_ID = config.defaults.model;
  * The embedded pi SDK uses this as the provider's baseUrl.
  *
  * The window prefix (default "asap") routes research LLM calls through the
- * proxy's passthrough path instead of the standard batch window — pricier
- * per token, but research prompts are tiny and it turns up-to-30-minute
- * batch waits into interactive-latency calls. The default model must
- * support the configured window. "standard" gets no prefix (proxy default).
+ * proxy's low-latency window instead of a cheaper scheduled one — pricier
+ * per token, but research prompts are tiny and it turns minutes-long
+ * scheduling waits into interactive-latency calls. The default model must
+ * support the configured window.
  */
-const LOCAL_PROXY_BASE_URL =
-  config.research.window === "standard"
-    ? `http://127.0.0.1:${config.server.port}/v1`
-    : `http://127.0.0.1:${config.server.port}/${config.research.window}/v1`;
+const LOCAL_PROXY_BASE_URL = `http://127.0.0.1:${config.server.port}/${config.research.window}/v1`;
 
 let _authStorage: ReturnType<typeof AuthStorage.create> | undefined;
 let _modelRegistry: ReturnType<typeof ModelRegistry.create> | undefined;
@@ -60,10 +57,10 @@ function getModelRegistry() {
   if (!_modelRegistry) {
     _modelRegistry = ModelRegistry.create(getAuthStorage());
 
-    // Register the sail-standard provider with the default model pointing at
-    // the local proxy. This works even when ~/.pi/agent/models.json has no
-    // sail-standard entry (e.g. on a fresh deploy) because we include the
-    // model definition directly in the provider config.
+    // Register the default provider with the default model pointing at the
+    // local proxy. This works even when ~/.pi/agent/models.json has no such
+    // entry (e.g. on a fresh deploy) because we include the model definition
+    // directly in the provider config.
     //
     // The pi SDK requires apiKey or oauth when models are provided. When the
     // proxy requires an API key (PROXY_API_KEY is set), we pass it through so
@@ -119,7 +116,7 @@ function makeResourceLoader(systemPrompt = SYSTEM_PROMPT) {
 
 /**
  * Send a one-shot prompt to the default pi model and return the raw text
- * response. Uses `sail-standard/zai-org/GLM-5.1-FP8` by default.
+ * response. Uses `DEFAULT_PROVIDER/DEFAULT_MODEL` by default.
  *
  * No tools, no extensions, no session persistence — just a single LLM call.
  */
@@ -186,7 +183,7 @@ export async function runPiPrompt(prompt: string): Promise<string> {
  * Send a one-shot prompt to a specific provider/model and return the raw text
  * response. Used by smoke tests that need to hit a particular provider+model.
  *
- * @param provider  Provider name (e.g. "sail-standard", "sail-flex")
+ * @param provider  Provider name (e.g. "sail-balanced", "sail-flex")
  * @param modelId   Model ID within that provider (e.g. "zai-org/GLM-5.1-FP8")
  * @param prompt    The prompt text
  */

@@ -92,7 +92,7 @@ describe("Query.models", () => {
         ],
         description: "A large language model",
         source: "https://huggingface.co/org-a/model-a",
-        supportedWindows: '["asap","priority","standard","flex"]',
+        supportedWindows: '["asap","balanced","flex"]',
         researchedAt: new Date("2025-06-01T00:00:00Z"),
       },
     ]);
@@ -114,7 +114,7 @@ describe("Query.models", () => {
       contextSize: 131072,
       description: "A large language model",
       source: "https://huggingface.co/org-a/model-a",
-      supportedWindows: ["asap", "priority", "standard", "flex"],
+      supportedWindows: ["asap", "balanced", "flex"],
       researchedAt: "2025-06-01T00:00:00.000Z",
       samplingPresets: [
         {
@@ -202,7 +202,7 @@ describe("Mutation.refetchModel", () => {
       samplingPresets: [],
       description: "fresh",
       source: "https://example.com/m1",
-      supportedWindows: '["asap","standard"]',
+      supportedWindows: '["asap","balanced"]',
       researchedAt: new Date("2025-06-02T00:00:00Z"),
     });
 
@@ -263,7 +263,7 @@ describe("Mutation.researchAllModels", () => {
         samplingPresets: [],
         description: "researched",
         source: "https://example.com/m1",
-        supportedWindows: '["asap","standard"]',
+        supportedWindows: '["asap","balanced"]',
         researchedAt: new Date("2025-06-02T00:00:00Z"),
       },
       {
@@ -324,7 +324,7 @@ describe("Mutation.researchAllModels", () => {
         samplingPresets: [],
         description: "ok",
         source: null,
-        supportedWindows: '["asap","standard"]',
+        supportedWindows: '["asap","balanced"]',
         researchedAt: new Date("2025-06-02T00:00:00Z"),
       },
       {

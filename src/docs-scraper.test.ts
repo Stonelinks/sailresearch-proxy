@@ -280,55 +280,52 @@ describe("parseCapabilitiesFromJsx", () => {
 
 // ─── Realistic JSX snippets from docs.sailresearch.com/pricing.md ──────────
 
-/** A model group with all 4 windows (real snippet shape, 2026-07). */
-const PRICING_GROUP_FULL = `<tr className="pricing-row pricing-row-window pricing-row-model-first" aria-label="GLM-5.2 Standard pricing: input $0.50, cached $0.12, output $2.50 per 1M tokens.">
-          <td className="pricing-cell pricing-cell-model" rowSpan={4} style={{ width: "18.0rem", minWidth: "18.0rem" }}>
+/** A model group with all 3 windows (real snippet shape, 2026-09). */
+const PRICING_GROUP_FULL = `<tr className="pricing-row pricing-row-window pricing-row-model-first" aria-label="GLM-5.3 Default (ASAP) pricing: input $0.98, cached $0.182, output $3.08 per 1M tokens.">
+          <td className="pricing-cell pricing-cell-model" rowSpan={3} style={{ width: "18.0rem", minWidth: "18.0rem" }}>
             <div className="pricing-cell-model-inner">
-              <span className="cap-logo" data-org="zai" role="img" aria-label="Z.ai" />
+              <span className="cap-logo" data-org="zhipu" role="img" aria-label="Z.ai" />
               <div className="pricing-model-meta">
-                <div className="cap-model-name">GLM-5.2</div>
+                <div className="cap-model-name">GLM-5.3</div>
                 <div className="cap-slug-actions">
-                  <span className="cap-slug-text" title="zai-org/GLM-5.2-FP8">
-                    <code>zai-org/GLM-5.2-FP8</code>
+                  <span className="cap-slug-text" title="zai-org/GLM-5.3">
+                    <code>zai-org/GLM-5.3</code>
                   </span>
-                  <button type="button" className="cap-copy-btn" aria-label="Copy zai-org/GLM-5.2-FP8">…</button>
+                  <button type="button" className="cap-copy-btn" aria-label="Copy zai-org/GLM-5.3">…</button>
                 </div>
               </div>
             </div>
           </td>
-          <td className="pricing-cell pricing-cell-window">Standard</td>
-          <td className="pricing-cell pricing-cell-price">$0.50</td>
-          <td className="pricing-cell pricing-cell-price">$0.12</td>
-          <td className="pricing-cell pricing-cell-price">$2.50</td>
+          <td className="pricing-cell pricing-cell-window">Default (ASAP)</td>
+          <td className="pricing-cell pricing-cell-price">$0.98</td>
+          <td className="pricing-cell pricing-cell-price">$0.182</td>
+          <td className="pricing-cell pricing-cell-price">$3.08</td>
         </tr>
-        <tr className="pricing-row pricing-row-window" aria-label="GLM-5.2 Priority pricing: input $0.70, cached $0.18, output $3.00 per 1M tokens.">
-          <td className="pricing-cell pricing-cell-window">Priority</td>
+        <tr className="pricing-row pricing-row-window" aria-label="GLM-5.3 Balanced pricing: input $0.50, cached $0.12, output $2.50 per 1M tokens.">
+          <td className="pricing-cell pricing-cell-window">Balanced</td>
         </tr>
-        <tr className="pricing-row pricing-row-window" aria-label="GLM-5.2 Flex pricing: input $0.40, cached $0.08, output $1.80 per 1M tokens.">
+        <tr className="pricing-row pricing-row-window pricing-row-model-last" aria-label="GLM-5.3 Flex pricing: input $0.40, cached $0.08, output $1.80 per 1M tokens.">
           <td className="pricing-cell pricing-cell-window">Flex</td>
-        </tr>
-        <tr className="pricing-row pricing-row-window pricing-row-model-last" aria-label="GLM-5.2 ASAP pricing: input $1.40, cached $0.26, output $4.40 per 1M tokens.">
-          <td className="pricing-cell pricing-cell-window">ASAP</td>
         </tr>`;
 
-/** A model group with 2 windows (priority, asap). */
-const PRICING_GROUP_PARTIAL = `<tr className="pricing-row pricing-row-window pricing-row-model-first" aria-label="gpt-oss-120b Priority pricing: input $0.04, cached $0.02, output $0.30 per 1M tokens.">
+/** A model group with 2 windows (asap, flex). */
+const PRICING_GROUP_PARTIAL = `<tr className="pricing-row pricing-row-window pricing-row-model-first" aria-label="DeepSeek V4 Pro 0813 Default (ASAP) pricing: input $1.32, cached $0.044, output $3.96 per 1M tokens.">
           <td className="pricing-cell pricing-cell-model" rowSpan={2}>
             <div className="pricing-cell-model-inner">
               <div className="pricing-model-meta">
-                <div className="cap-model-name">gpt-oss-120b</div>
+                <div className="cap-model-name">DeepSeek V4 Pro 0813</div>
                 <div className="cap-slug-actions">
-                  <span className="cap-slug-text" title="openai/gpt-oss-120b">
-                    <code>openai/gpt-oss-120b</code>
+                  <span className="cap-slug-text" title="deepseek-ai/DeepSeek-V4-Pro-0813">
+                    <code>deepseek-ai/DeepSeek-V4-Pro-0813</code>
                   </span>
                 </div>
               </div>
             </div>
           </td>
-          <td className="pricing-cell pricing-cell-window">Priority</td>
+          <td className="pricing-cell pricing-cell-window">Default (ASAP)</td>
         </tr>
-        <tr className="pricing-row pricing-row-window pricing-row-model-last" aria-label="gpt-oss-120b ASAP pricing: input $0.06, cached $0.03, output $0.40 per 1M tokens.">
-          <td className="pricing-cell pricing-cell-window">ASAP</td>
+        <tr className="pricing-row pricing-row-window pricing-row-model-last" aria-label="DeepSeek V4 Pro 0813 Flex pricing: input $0.66, cached $0.022, output $1.98 per 1M tokens.">
+          <td className="pricing-cell pricing-cell-window">Flex</td>
         </tr>`;
 
 /** A model group with a single window and a decimal-heavy cached price. */
@@ -375,43 +372,75 @@ ${PRICING_GROUP_SINGLE}
 // ─── Pricing parser tests ─────────────────────────────────────────────────
 
 describe("parsePricingFromJsx", () => {
-  test("parses a model with all 4 windows", () => {
+  test("parses a model with all 3 windows", () => {
     const map = parsePricingFromJsx(PRICING_GROUP_FULL);
     expect(map.size).toBe(1);
-    const prices = map.get("zai-org/GLM-5.2-FP8")!;
-    expect(prices.length).toBe(4);
+    const prices = map.get("zai-org/GLM-5.3")!;
+    expect(prices.length).toBe(3);
 
-    const standard = prices.find((p) => p.completionWindow === "standard")!;
-    expect(standard.inputPerMTok).toBe(0.5);
-    expect(standard.cachedInputPerMTok).toBe(0.12);
-    expect(standard.outputPerMTok).toBe(2.5);
+    const asap = prices.find((p) => p.completionWindow === "asap")!;
+    expect(asap.inputPerMTok).toBe(0.98);
+    expect(asap.cachedInputPerMTok).toBe(0.182);
+    expect(asap.outputPerMTok).toBe(3.08);
+
+    const balanced = prices.find((p) => p.completionWindow === "balanced")!;
+    expect(balanced.inputPerMTok).toBe(0.5);
+    expect(balanced.cachedInputPerMTok).toBe(0.12);
+    expect(balanced.outputPerMTok).toBe(2.5);
 
     const flex = prices.find((p) => p.completionWindow === "flex")!;
     expect(flex.inputPerMTok).toBe(0.4);
     expect(flex.cachedInputPerMTok).toBe(0.08);
     expect(flex.outputPerMTok).toBe(1.8);
-
-    const asap = prices.find((p) => p.completionWindow === "asap")!;
-    expect(asap.inputPerMTok).toBe(1.4);
-    expect(asap.cachedInputPerMTok).toBe(0.26);
-    expect(asap.outputPerMTok).toBe(4.4);
   });
 
-  test("parses a model with only 2 windows (priority, asap)", () => {
+  test("parses a model with only 2 windows (asap, flex)", () => {
     const map = parsePricingFromJsx(PRICING_GROUP_PARTIAL);
     expect(map.size).toBe(1);
-    const prices = map.get("openai/gpt-oss-120b")!;
+    const prices = map.get("deepseek-ai/DeepSeek-V4-Pro-0813")!;
     expect(prices.length).toBe(2);
 
-    const priority = prices.find((p) => p.completionWindow === "priority")!;
-    expect(priority.inputPerMTok).toBe(0.04);
-    expect(priority.cachedInputPerMTok).toBe(0.02);
-    expect(priority.outputPerMTok).toBe(0.3);
-
     const asap = prices.find((p) => p.completionWindow === "asap")!;
-    expect(asap.inputPerMTok).toBe(0.06);
-    expect(asap.cachedInputPerMTok).toBe(0.03);
-    expect(asap.outputPerMTok).toBe(0.4);
+    expect(asap.inputPerMTok).toBe(1.32);
+    expect(asap.cachedInputPerMTok).toBe(0.044);
+    expect(asap.outputPerMTok).toBe(3.96);
+
+    const flex = prices.find((p) => p.completionWindow === "flex")!;
+    expect(flex.inputPerMTok).toBe(0.66);
+    expect(flex.cachedInputPerMTok).toBe(0.022);
+    expect(flex.outputPerMTok).toBe(1.98);
+  });
+
+  test("still accepts a bare ASAP label (pre-2026-09 shape)", () => {
+    const bare = `<tr className="pricing-row pricing-row-window pricing-row-model-first" aria-label="Some Model ASAP pricing: input $1.40, cached $0.26, output $4.40 per 1M tokens.">
+          <td className="pricing-cell pricing-cell-model">
+            <span className="cap-slug-text" title="org/some-model">
+              <code>org/some-model</code>
+            </span>
+          </td>
+        </tr>`;
+    const map = parsePricingFromJsx(bare);
+    const prices = map.get("org/some-model")!;
+    expect(prices.length).toBe(1);
+    expect(prices[0]!.completionWindow).toBe("asap");
+    expect(prices[0]!.inputPerMTok).toBe(1.4);
+  });
+
+  test("skips rows labelled with a retired window name", () => {
+    const retired = `<tr className="pricing-row pricing-row-window pricing-row-model-first" aria-label="Some Model Priority pricing: input $0.70, cached $0.18, output $3.00 per 1M tokens.">
+          <td className="pricing-cell pricing-cell-model">
+            <span className="cap-slug-text" title="org/some-model">
+              <code>org/some-model</code>
+            </span>
+          </td>
+        </tr>
+        <tr className="pricing-row pricing-row-window pricing-row-model-last" aria-label="Some Model Flex pricing: input $0.40, cached $0.08, output $1.80 per 1M tokens.">
+          <td className="pricing-cell pricing-cell-window">Flex</td>
+        </tr>`;
+    const map = parsePricingFromJsx(retired);
+    const prices = map.get("org/some-model")!;
+    expect(prices.length).toBe(1);
+    expect(prices[0]!.completionWindow).toBe("flex");
   });
 
   test("parses a single-window model with decimal cached price", () => {
@@ -483,8 +512,8 @@ describe("scrapePricing", () => {
 
     const map = await scrapePricing();
     expect(map.size).toBe(3);
-    expect(map.get("zai-org/GLM-5.2-FP8")!.length).toBe(4);
-    expect(map.get("openai/gpt-oss-120b")!.length).toBe(2);
+    expect(map.get("zai-org/GLM-5.3")!.length).toBe(3);
+    expect(map.get("deepseek-ai/DeepSeek-V4-Pro-0813")!.length).toBe(2);
     expect(map.get("Qwen/Qwen3.6-35B-A3B")!.length).toBe(1);
   });
 

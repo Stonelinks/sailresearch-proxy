@@ -36,11 +36,11 @@ describe("normalizeBody", () => {
     const out = normalizeBody(
       "/chat/completions",
       { model: "m", metadata: { user_id: "u1", completion_window: "asap" } },
-      "priority",
+      "balanced",
     );
     expect(out.metadata).toEqual({
       user_id: "u1",
-      completion_window: "priority",
+      completion_window: "balanced",
     });
   });
 
@@ -87,12 +87,12 @@ describe("normalizeBody", () => {
     const out = normalizeBody(
       "/responses",
       { model: "m", input: "hi", stream: true, store: false },
-      "standard",
+      "balanced",
     );
     expect(out.input).toBe("hi");
     expect(out.stream).toBe(true);
     expect(out.store).toBe(false);
-    expect(out.metadata.completion_window).toBe("standard");
+    expect(out.metadata.completion_window).toBe("balanced");
   });
 
   test("does not mutate the caller's body", () => {
@@ -109,7 +109,7 @@ describe("forwardToSail", () => {
     const res = await forwardToSail({
       path: "/chat/completions",
       body: { model: "m", messages: [{ role: "user", content: "hi" }] },
-      window: "priority",
+      window: "balanced",
       errorFormat: "openai",
       logPrefix: "test",
     });
@@ -118,7 +118,7 @@ describe("forwardToSail", () => {
     expect(captured.url).toBe(`${config.sail.baseUrl}/chat/completions`);
     const headers = captured.init?.headers as Record<string, string>;
     expect(headers.Authorization).toBe(`Bearer ${config.sail.apiKey}`);
-    expect(captured.body.metadata.completion_window).toBe("priority");
+    expect(captured.body.metadata.completion_window).toBe("balanced");
   });
 
   test("streams SSE bytes through unmodified", async () => {

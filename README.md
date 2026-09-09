@@ -8,7 +8,7 @@ A thin completion-window injector for [Sail Research](https://docs.sailresearch.
 
 What it does today:
 
-1. **Window injection** — `/{asap|priority|standard|flex}/v1/{chat/completions,messages,responses}` sets `metadata.completion_window` and forwards to Sail unchanged (streaming included, no retries, no persistence).
+1. **Window injection** — `/{asap|balanced|flex}/v1/{chat/completions,messages,responses}` sets `metadata.completion_window` and forwards to Sail unchanged (streaming included, no retries, no persistence).
 2. **Model research** — scrapes Sail's docs for capabilities/pricing, uses an embedded pi session to research sampling presets/context sizes, smoke-tests presets and window support, and stores the results in SQLite (browse/refresh via the dashboard).
 3. **`generate-models-json`** — emits a pi `models.json` with one provider per completion window, enriched with researched pricing, presets, context windows, and thinking-level maps.
 
@@ -80,9 +80,11 @@ The proxy resolves the window in this order (highest priority first):
 1. URL prefix (e.g. `/flex/v1/...`)
 2. `X-Completion-Window` header
 3. `metadata.completion_window` in the request body
-4. `DEFAULT_COMPLETION_WINDOW` config (defaults to `standard`)
+4. `DEFAULT_COMPLETION_WINDOW` config (defaults to `balanced`)
 
 The resolved window is always written into `metadata.completion_window` before forwarding.
+
+Sail's current windows are `asap`, `balanced`, and `flex`. The retired `priority` and `standard` tiers (Sail returns a 400 for them since 2026-09) are still accepted by the proxy as URL prefixes, header values, or body values and are rewritten to `balanced` with a warning in the log. Sail recommends the Responses API with `background: true` for `flex`; Chat Completions and Messages accept it but wait synchronously and may time out. Sail also rejects image input on `asap` (`unsupported_asap_request`), so send multimodal requests through `balanced` or `flex`.
 
 ### Window-prefixed routes
 
@@ -90,7 +92,7 @@ Every `/v1/*` endpoint is also available under a window prefix, so a client that
 
 ```
 /asap/v1/chat/completions
-/priority/v1/messages
+/balanced/v1/messages
 /flex/v1/responses
 /asap/v1/models        # filters the model list to that window
 ...etc
@@ -121,7 +123,7 @@ Everything else — `system`, `tools`, `thinking`, `stream`, `stream_options`, `
 
 **Auth:** the proxy accepts both `Authorization: Bearer <key>` and `x-api-key: <key>` when `PROXY_API_KEY` is set, and always uses its own `SAIL_API_KEY` upstream.
 
-**Timeouts:** the proxy applies no timeout of its own to forwarded requests; the client's disconnect aborts the upstream call. Bun's HTTP server caps *idle* time at 255 s, so use `stream: true` for batched windows — Sail's SSE (including `ping` events on `/v1/messages`) keeps the connection non-idle. A non-streaming request that sits silent past 255 s will be cut.
+**Timeouts:** the proxy applies no timeout of its own to forwarded requests; the client's disconnect aborts the upstream call. Bun's HTTP server caps *idle* time at 255 s, so use `stream: true` for the scheduled windows (`balanced`, `flex`) — Sail's SSE (including `ping` events on `/v1/messages`) keeps the connection non-idle. A non-streaming request that sits silent past 255 s will be cut.
 
 ## Model Research
 
@@ -139,7 +141,7 @@ generate-models-json                 # reads the proxy's enriched /v1/models
 generate-models-json --smoke-test    # additionally validates presets via live requests
 ```
 
-Emits providers `sail-asap` / `sail-priority` / `sail-standard` / `sail-flex` (plus a `sail` alias for standard), each pointing at the corresponding window-prefixed proxy URL, with per-window pricing and per-model presets. Output follows pi's models.json spec: https://pi.dev/docs/latest/models
+Emits providers `sail-asap` / `sail-balanced` / `sail-flex`, each pointing at the corresponding window-prefixed proxy URL, plus a `sail` provider targeting the bare `/v1` route (the proxy's `DEFAULT_COMPLETION_WINDOW`), with per-window pricing and per-model presets. Output follows pi's models.json spec: https://pi.dev/docs/latest/models
 
 ## Dashboard
 
@@ -147,7 +149,7 @@ Emits providers `sail-asap` / `sail-priority` / `sail-standard` / `sail-flex` (p
 
 ## Reverse Proxy Configuration
 
-When deploying behind a reverse proxy (nginx, Caddy, etc.), allow long-lived connections — batched windows can take minutes to start returning bytes:
+When deploying behind a reverse proxy (nginx, Caddy, etc.), allow long-lived connections — scheduled windows can take minutes to start returning bytes:
 
 ```nginx
 location / {
@@ -161,7 +163,7 @@ location / {
 }
 ```
 
-Use `stream: true` for batched requests behind a reverse proxy so Sail's SSE traffic keeps the connection alive.
+Use `stream: true` for scheduled-window requests behind a reverse proxy so Sail's SSE traffic keeps the connection alive.
 
 ## Scripts
 
@@ -205,8 +207,8 @@ Optional: set `PROXY_API_KEY` to require client auth. A `docker-compose.yaml` is
 |----------|---------|-------------|
 | `SAIL_BASE_URL` | `https://api.sailresearch.com/v1` | Sail API base URL |
 | `PORT` / `HOST` | `4000` / `0.0.0.0` | Listen address |
-| `DEFAULT_COMPLETION_WINDOW` | `standard` | Window when the client specifies none |
-| `TIMEOUT_PRIORITY_MS` / `TIMEOUT_STANDARD_MS` / `TIMEOUT_FLEX_MS` | 5 min / 30 min / 2 h | Client-side caps for research window smoke tests |
+| `DEFAULT_COMPLETION_WINDOW` | `balanced` | Window when the client specifies none (`asap`, `balanced`, or `flex`) |
+| `TIMEOUT_BALANCED_MS` / `TIMEOUT_FLEX_MS` | 30 min / 2 h | Client-side caps for research window smoke tests |
 | `RESEARCH_WINDOW` | `asap` | Window used for research LLM calls |
 | `MAX_CONCURRENT_RESEARCH` | `5` | Parallel model-research bound |
 | `LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
@@ -217,7 +219,7 @@ Optional: set `PROXY_API_KEY` to require client auth. A `docker-compose.yaml` is
 ```bash
 source env.sh
 check                # codegen + format + typecheck + tests
-SAIL_SLOW_INTEGRATION=1 bin/test   # also test batched windows (minutes each)
+SAIL_SLOW_INTEGRATION=1 bin/test   # also test balanced/flex windows (minutes each)
 ```
 
 `src/integration.test.ts` starts an isolated proxy on a random port with a temp SQLite DB and covers all three API surfaces, streaming, the Python `openai`/`anthropic` SDKs (via `uvx`), a pi CLI smoke test, and image input. Batched-window tests discover a model supporting each window at runtime (support varies) and skip windows no model currently offers. The suite skips automatically when `SAIL_API_KEY` is unset or the placeholder `test`.

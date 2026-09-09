@@ -13,8 +13,11 @@
  * Output format follows pi's models.json spec:
  * https://pi.dev/docs/latest/models
  */
-import { COMPLETION_WINDOWS } from "./completion-window.ts";
-import { WINDOW_PROVIDER_NAMES } from "./constants.ts";
+import {
+  COMPLETION_WINDOWS,
+  normalizeCompletionWindow,
+} from "./completion-window.ts";
+import { DEFAULT_PROVIDER, WINDOW_PROVIDER_NAMES } from "./constants.ts";
 import type { CompletionWindow, SamplingPresetInput } from "./types.ts";
 import type { PriceWire, PresetWire } from "./models-meta.ts";
 import {
@@ -62,9 +65,11 @@ Options:
 Generates a models.json for the pi coding agent. All model metadata is
 fetched from the proxy's /v1/models endpoint — no DB or scraper needed.
 
-Each completion window (asap, priority, standard, flex) becomes a separate
-provider section. Models with multiple sampling presets are broken out by
-name using the convention: "model-id::preset-name" for non-default presets.
+Each completion window (asap, balanced, flex) becomes a separate provider
+section (sail-asap, sail-balanced, sail-flex), plus a "sail" alias that
+targets the proxy's bare /v1 route (its DEFAULT_COMPLETION_WINDOW). Models
+with multiple sampling presets are broken out by name using the convention:
+"model-id::preset-name" for non-default presets.
 
 With --smoke-test, each preset (and one thinking level for reasoning models)
 is tested by sending a unique arithmetic prompt (e.g. "What is 42 + 17?
@@ -226,16 +231,12 @@ export function restShapeToModelData(
     for (const p of entry.x_pricing_by_completion_window) {
       if (typeof p !== "object" || p === null) continue;
       const price = p as Record<string, unknown>;
-      const window = price.completion_window ?? price.completionWindow;
-      if (
-        typeof window !== "string" ||
-        (window !== "asap" &&
-          window !== "priority" &&
-          window !== "standard" &&
-          window !== "flex")
-      ) {
-        continue;
-      }
+      const rawWindow = price.completion_window ?? price.completionWindow;
+      const window =
+        typeof rawWindow === "string"
+          ? normalizeCompletionWindow(rawWindow)
+          : null;
+      if (!window) continue;
       const inputPerMTok =
         typeof price.input_per_mtok === "number"
           ? price.input_per_mtok
@@ -256,8 +257,8 @@ export function restShapeToModelData(
             : 0;
       const currency =
         typeof price.currency === "string" ? price.currency : "USD";
-      pricesByWindow.set(window as CompletionWindow, {
-        completionWindow: window as CompletionWindow,
+      pricesByWindow.set(window, {
+        completionWindow: window,
         inputPerMTok,
         cachedInputPerMTok,
         outputPerMTok,
@@ -270,12 +271,9 @@ export function restShapeToModelData(
   let supportedWindows: Set<CompletionWindow> = new Set();
   if (Array.isArray(entry.x_supported_windows)) {
     for (const w of entry.x_supported_windows) {
-      if (
-        typeof w === "string" &&
-        (w === "asap" || w === "priority" || w === "standard" || w === "flex")
-      ) {
-        supportedWindows.add(w);
-      }
+      const window =
+        typeof w === "string" ? normalizeCompletionWindow(w) : null;
+      if (window) supportedWindows.add(window);
     }
   }
 
@@ -410,12 +408,17 @@ export function buildPiModelEntry(
 
 /**
  * Build a provider section for a given completion window.
- * Only includes models that have pricing for that window.
+ * Models whose researched `supportedWindows` excludes the window are skipped.
+ *
+ * With `bare: true` the provider targets the proxy's unprefixed `/v1` route
+ * (the proxy's DEFAULT_COMPLETION_WINDOW) instead of `/{window}/v1`; entries
+ * and pricing are still computed for `window`.
  */
 export function buildProvider(
   window: CompletionWindow,
   modelsData: Map<string, ModelData>,
   baseUrl: string,
+  opts: { bare?: boolean } = {},
 ): PiProvider | null {
   const entries: PiModelEntry[] = [];
 
@@ -423,11 +426,12 @@ export function buildProvider(
   // trailing "/v1" and slashes so the result is correct whether the caller
   // passed ".../v1" (e.g. http://localhost:4000/v1) or a bare host (e.g.
   // https://llm3.cricket.routers.stonelinks.org).
-  //   standard (default): {host}/v1
-  //   others:             {host}/{window}/v1
+  //   prefixed: {host}/{window}/v1
+  //   bare:     {host}/v1
   const stripped = baseUrl.replace(/\/v1\/?$/, "").replace(/\/+$/, "");
-  const providerBaseUrl =
-    window === "standard" ? `${stripped}/v1` : `${stripped}/${window}/v1`;
+  const providerBaseUrl = opts.bare
+    ? `${stripped}/v1`
+    : `${stripped}/${window}/v1`;
 
   for (const data of [...modelsData.values()]) {
     // Skip models that don't support this window.
@@ -736,33 +740,20 @@ async function main() {
   console.log("Building models.json ...");
   const output: PiModelsJson = { providers: {} };
 
-  // Also add a top-level "sail" provider that maps to standard (no prefix)
-  // for backward compatibility
-  let hasStandard = false;
-
   for (const window of COMPLETION_WINDOWS) {
     const provider = buildProvider(window, metaMap, opts.baseUrl);
     if (!provider) continue;
-
-    const providerName = WINDOW_PROVIDER_NAMES[window];
-    output.providers[providerName] = provider;
-
-    if (window === "standard") {
-      hasStandard = true;
-      // Also add as "sail" for convenience
-      output.providers["sail"] = {
-        ...provider,
-      };
-    }
+    output.providers[WINDOW_PROVIDER_NAMES[window]] = provider;
   }
 
-  if (!hasStandard && output.providers["sail"] === undefined) {
-    // No standard window models — still create sail provider pointing at default
-    const defaultProvider = buildProvider("standard", metaMap, opts.baseUrl);
-    if (defaultProvider) {
-      output.providers["sail"] = defaultProvider;
-    }
-  }
+  // Convenience "sail" provider targeting the bare /v1 route, i.e. the
+  // proxy's DEFAULT_COMPLETION_WINDOW. Pricing is mirrored from the
+  // window this generator is configured to treat as the default.
+  const defaultWindow = config.defaults.completionWindow;
+  const defaultProvider = buildProvider(defaultWindow, metaMap, opts.baseUrl, {
+    bare: true,
+  });
+  if (defaultProvider) output.providers[DEFAULT_PROVIDER] = defaultProvider;
 
   // Write output
   const jsonStr = JSON.stringify(output, null, 2);

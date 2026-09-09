@@ -1,4 +1,4 @@
-export type CompletionWindow = "asap" | "priority" | "standard" | "flex";
+export type CompletionWindow = "asap" | "balanced" | "flex";
 
 // --- Model Research Schema Types ---
 

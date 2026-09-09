@@ -23,7 +23,7 @@ export type ParseResult = { error: Response } | { ok: ParsedRequest };
 export interface ParseOpts {
   /** Used in log prefixes — e.g. "chat-completions", "messages". */
   routeName: string;
-  /** Window prefix from the URL (e.g. /priority/v1/...). null when unprefixed. */
+  /** Window prefix from the URL (e.g. /balanced/v1/...). null when unprefixed. */
   urlPrefix: CompletionWindow | null;
 }
 

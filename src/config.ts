@@ -1,11 +1,6 @@
 import type { CompletionWindow } from "./types.ts";
-import {
-  SECOND,
-  MINUTE,
-  FIVE_MINUTES,
-  THIRTY_MINUTES,
-  TWO_HOURS,
-} from "../shared/time.ts";
+import { normalizeCompletionWindow } from "./completion-window.ts";
+import { SECOND, MINUTE, THIRTY_MINUTES, TWO_HOURS } from "../shared/time.ts";
 
 function env(key: string, fallback: string): string {
   return process.env[key] || fallback;
@@ -20,6 +15,22 @@ function requireEnv(key: string): string {
   const v = process.env[key];
   if (!v) throw new Error(`Missing required environment variable: ${key}`);
   return v;
+}
+
+/**
+ * Read a completion-window env var. Legacy tier names (priority/standard)
+ * are aliased to their replacement; anything else is a startup error.
+ */
+function windowEnv(key: string, fallback: CompletionWindow): CompletionWindow {
+  const raw = process.env[key];
+  if (!raw) return fallback;
+  const w = normalizeCompletionWindow(raw);
+  if (!w) {
+    throw new Error(
+      `Invalid ${key}="${raw}": expected one of asap, balanced, flex`,
+    );
+  }
+  return w;
 }
 
 export const config = {
@@ -39,16 +50,11 @@ export const config = {
     host: env("HOST", "0.0.0.0"),
   },
   defaults: {
-    completionWindow: env("DEFAULT_COMPLETION_WINDOW", "standard") as
-      | "asap"
-      | "priority"
-      | "standard"
-      | "flex",
+    completionWindow: windowEnv("DEFAULT_COMPLETION_WINDOW", "balanced"),
     model: env("DEFAULT_MODEL", "zai-org/GLM-5.1-FP8"),
   },
   windowTimeouts: {
-    priority: intEnv("TIMEOUT_PRIORITY_MS", FIVE_MINUTES),
-    standard: intEnv("TIMEOUT_STANDARD_MS", THIRTY_MINUTES),
+    balanced: intEnv("TIMEOUT_BALANCED_MS", THIRTY_MINUTES),
     flex: intEnv("TIMEOUT_FLEX_MS", TWO_HOURS),
   },
   research: {
@@ -60,7 +66,7 @@ export const config = {
     // tests. asap is the passthrough path — pricier per token, but research
     // prompts are tiny and it turns 30-minute batch waits into
     // interactive-latency calls. The default model must support this window.
-    window: env("RESEARCH_WINDOW", "asap") as CompletionWindow,
+    window: windowEnv("RESEARCH_WINDOW", "asap"),
     // Slack added on top of a window's server-side timeout to form the
     // client-side smoke-test cap. The proxy always answers within the
     // window's own bound (success, failure, or job-timeout error), so the

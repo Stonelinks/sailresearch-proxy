@@ -38,19 +38,19 @@ exports[`parseCapabilitiesFromJsx snapshot: full realistic page produces stable 
 exports[`parsePricingFromJsx snapshot: full realistic pricing page produces stable output: full-page-pricing 1`] = `
 [
   {
-    "modelId": "zai-org/GLM-5.2-FP8",
+    "modelId": "zai-org/GLM-5.3",
     "prices": [
       {
-        "cachedInputPerMTok": 0.12,
-        "completionWindow": "standard",
-        "inputPerMTok": 0.5,
-        "outputPerMTok": 2.5,
+        "cachedInputPerMTok": 0.182,
+        "completionWindow": "asap",
+        "inputPerMTok": 0.98,
+        "outputPerMTok": 3.08,
       },
       {
-        "cachedInputPerMTok": 0.18,
-        "completionWindow": "priority",
-        "inputPerMTok": 0.7,
-        "outputPerMTok": 3,
+        "cachedInputPerMTok": 0.12,
+        "completionWindow": "balanced",
+        "inputPerMTok": 0.5,
+        "outputPerMTok": 2.5,
       },
       {
         "cachedInputPerMTok": 0.08,
@@ -58,28 +58,22 @@ exports[`parsePricingFromJsx snapshot: full realistic pricing page produces stab
         "inputPerMTok": 0.4,
         "outputPerMTok": 1.8,
       },
-      {
-        "cachedInputPerMTok": 0.26,
-        "completionWindow": "asap",
-        "inputPerMTok": 1.4,
-        "outputPerMTok": 4.4,
-      },
     ],
   },
   {
-    "modelId": "openai/gpt-oss-120b",
+    "modelId": "deepseek-ai/DeepSeek-V4-Pro-0813",
     "prices": [
       {
-        "cachedInputPerMTok": 0.02,
-        "completionWindow": "priority",
-        "inputPerMTok": 0.04,
-        "outputPerMTok": 0.3,
+        "cachedInputPerMTok": 0.044,
+        "completionWindow": "asap",
+        "inputPerMTok": 1.32,
+        "outputPerMTok": 3.96,
       },
       {
-        "cachedInputPerMTok": 0.03,
-        "completionWindow": "asap",
-        "inputPerMTok": 0.06,
-        "outputPerMTok": 0.4,
+        "cachedInputPerMTok": 0.022,
+        "completionWindow": "flex",
+        "inputPerMTok": 0.66,
+        "outputPerMTok": 1.98,
       },
     ],
   },
