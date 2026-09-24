@@ -187,6 +187,47 @@ describe("forwardToSail", () => {
     expect(text.endsWith("data: [DONE]\n\n")).toBe(true);
   });
 
+  test("re-POSTs once with an Idempotency-Key when the superseded response failed", async () => {
+    const id = "resp_failed";
+    const posts: RequestInit[] = [];
+    const sse = (body: string) =>
+      new Response(body, {
+        headers: { "Content-Type": "text/event-stream" },
+      });
+    globalThis.fetch = (async (url: any, init?: RequestInit) => {
+      if (String(url).endsWith(`/chat/completions/${id}`)) {
+        return Response.json({ id, status: "failed" });
+      }
+      posts.push(init!);
+      if (posts.length === 1) {
+        return sse(
+          `data: ${JSON.stringify({ id, object: "chat.completion.chunk", choices: [{ index: 0, delta: { role: "assistant" } }] })}\n\n` +
+            `data: ${JSON.stringify({ error: { message: "the streaming attempt was superseded; fetch the completed response by id" } })}\n\n`,
+        );
+      }
+      return sse(
+        `data: ${JSON.stringify({ id: "resp_retry", object: "chat.completion.chunk", choices: [{ index: 0, delta: { content: "ok" } }] })}\n\ndata: [DONE]\n\n`,
+      );
+    }) as unknown as typeof fetch;
+
+    const res = await forwardToSail({
+      path: "/chat/completions",
+      body: { model: "m", stream: true },
+      window: "flex",
+      errorFormat: "openai",
+      logPrefix: "test",
+    });
+    const text = await res.text();
+    expect(posts).toHaveLength(2);
+    const retryHeaders = posts[1]!.headers as Record<string, string>;
+    expect(retryHeaders["Idempotency-Key"]).toMatch(/^[0-9a-f-]{36}$/);
+    expect(JSON.parse(posts[1]!.body as string)).toEqual(
+      JSON.parse(posts[0]!.body as string),
+    );
+    expect(text).toContain('"content":"ok"');
+    expect(text).not.toContain("superseded");
+  });
+
   test("passes upstream error status and body through verbatim", async () => {
     mockFetch(() =>
       Response.json(

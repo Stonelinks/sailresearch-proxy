@@ -7,8 +7,10 @@
  * chat-completion streams, which are relayed through `recoverChatStream` so a
  * Sail "streaming attempt was superseded" error can be recovered by id.
  *
- * No retries: these are non-idempotent, potentially minutes-long inference
- * requests; a retry could double-bill a generation. No proxy-side timeout:
+ * No retries (except one for a superseded chat stream whose response Sail
+ * reports as failed — see stream-recovery.ts): these are non-idempotent,
+ * potentially minutes-long inference requests; a retry could double-bill a
+ * generation. No proxy-side timeout:
  * the client's own disconnect (via `clientSignal`) aborts the upstream call.
  */
 import { config } from "../config.ts";
@@ -92,17 +94,21 @@ export async function forwardToSail(opts: {
 }): Promise<Response> {
   const sailBody = normalizeBody(opts.path, opts.body, opts.window);
 
-  let upstream: Response;
-  try {
-    upstream = await fetch(`${config.sail.baseUrl}${opts.path}`, {
+  const post = (extraHeaders: Record<string, string> = {}) =>
+    fetch(`${config.sail.baseUrl}${opts.path}`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${config.sail.apiKey}`,
         "Content-Type": "application/json",
+        ...extraHeaders,
       },
       body: JSON.stringify(sailBody),
       signal: opts.clientSignal,
     });
+
+  let upstream: Response;
+  try {
+    upstream = await post();
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     log.warn(`[${opts.logPrefix}] sail fetch failed: ${message}`);
@@ -128,6 +134,9 @@ export async function forwardToSail(opts: {
       clientSignal: opts.clientSignal,
       includeUsage: sailBody.stream_options?.include_usage === true,
       logPrefix: opts.logPrefix,
+      // The one exception to "no retries": only invoked once Sail reports
+      // the superseded response as failed, so nothing is double-generated.
+      retry: () => post({ "Idempotency-Key": crypto.randomUUID() }),
     });
   }
 
