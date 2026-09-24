@@ -141,6 +141,52 @@ describe("forwardToSail", () => {
     expect(await res.text()).toBe(sse);
   });
 
+  test("recovers a superseded chat stream via the retrieve endpoint", async () => {
+    const id = "resp_abc";
+    const base = { id, created: 1, model: "m" };
+    const urls: string[] = [];
+    globalThis.fetch = (async (url: any) => {
+      urls.push(String(url));
+      if (String(url).endsWith(`/chat/completions/${id}`)) {
+        return Response.json({
+          ...base,
+          object: "chat.completion",
+          status: "completed",
+          choices: [
+            {
+              index: 0,
+              message: { role: "assistant", content: "done" },
+              finish_reason: "stop",
+            },
+          ],
+        });
+      }
+      const sse =
+        `data: ${JSON.stringify({ ...base, object: "chat.completion.chunk", choices: [{ index: 0, delta: { role: "assistant", content: "" } }] })}\n\n` +
+        `data: ${JSON.stringify({ error: { message: "the streaming attempt was superseded; fetch the completed response by id" } })}\n\n`;
+      return new Response(sse, {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream; charset=utf-8" },
+      });
+    }) as unknown as typeof fetch;
+
+    const res = await forwardToSail({
+      path: "/chat/completions",
+      body: { model: "m", stream: true },
+      window: "balanced",
+      errorFormat: "openai",
+      logPrefix: "test",
+    });
+    const text = await res.text();
+    expect(urls).toEqual([
+      `${config.sail.baseUrl}/chat/completions`,
+      `${config.sail.baseUrl}/chat/completions/${id}`,
+    ]);
+    expect(text).not.toContain("superseded");
+    expect(text).toContain('"content":"done"');
+    expect(text.endsWith("data: [DONE]\n\n")).toBe(true);
+  });
+
   test("passes upstream error status and body through verbatim", async () => {
     mockFetch(() =>
       Response.json(
