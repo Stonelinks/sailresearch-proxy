@@ -3,9 +3,7 @@
  * job: resolve the completion window (URL prefix > header > body metadata >
  * default), inject it as `metadata.completion_window`, and pass the request
  * through verbatim — Sail handles all windows natively on its synchronous
- * endpoints, including SSE streaming. The one exception to "verbatim" is
- * chat-completion streams, which are relayed through `recoverChatStream` so a
- * Sail "streaming attempt was superseded" error can be recovered by id.
+ * endpoints, including SSE streaming.
  *
  * No retries: these are non-idempotent, potentially minutes-long inference
  * requests; a retry could double-bill a generation. No proxy-side timeout:
@@ -13,7 +11,6 @@
  */
 import { config } from "../config.ts";
 import { log } from "../../shared/logger.ts";
-import { recoverChatStream } from "./stream-recovery.ts";
 import type { CompletionWindow } from "../types.ts";
 
 export type SailPath = "/chat/completions" | "/messages" | "/responses";
@@ -116,25 +113,10 @@ export async function forwardToSail(opts: {
   const headers = new Headers(upstream.headers);
   for (const h of DROP_RESPONSE_HEADERS) headers.delete(h);
 
-  let body: ReadableStream<Uint8Array> | null = upstream.body;
-  if (
-    body &&
-    opts.path === "/chat/completions" &&
-    sailBody.stream === true &&
-    upstream.ok &&
-    headers.get("content-type")?.startsWith("text/event-stream")
-  ) {
-    body = recoverChatStream(body, {
-      clientSignal: opts.clientSignal,
-      includeUsage: sailBody.stream_options?.include_usage === true,
-      logPrefix: opts.logPrefix,
-    });
-  }
-
   // Pass body, status, and remaining headers through verbatim — SSE streams
   // flow chunk-by-chunk, and Sail's error bodies (already shaped per API
   // surface) reach the client unmodified.
-  return new Response(body, {
+  return new Response(upstream.body, {
     status: upstream.status,
     headers,
   });

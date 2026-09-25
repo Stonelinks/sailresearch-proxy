@@ -44,9 +44,6 @@ export const config = {
     // to cover most generations, short enough to bound the per-request
     // socket leak if Sail hangs.
     inferenceTimeoutMs: intEnv("SAIL_INFERENCE_TIMEOUT_MS", 5 * MINUTE),
-    // How long a superseded chat stream is held open while polling Sail for
-    // the completed response. Matches Sail's own 20-minute streaming cap.
-    recoveryTimeoutMs: intEnv("SAIL_RECOVERY_TIMEOUT_MS", 20 * MINUTE),
   },
   server: {
     port: intEnv("PORT", 4000),
