@@ -3,22 +3,15 @@
  * error. Sail's streaming "does not yet continue across a failed execution
  * attempt": when it retries an execution internally, the open SSE stream
  * gets an in-band error ("the streaming attempt was superseded; fetch the
- * completed response by id") while the generation carries on server-side —
- * or, in practice, sometimes fails outright.
+ * completed response by id") while the generation carries on server-side.
  *
  * `recoverChatStream` wraps the upstream body and forwards every event
- * verbatim until that error appears. Then:
- *
- *   - If no answer text or tool call has reached the client yet (reasoning
- *     alone doesn't count), it polls `GET /chat/completions/{id}`:
- *       - completed → replays the result as synthesized
- *         `chat.completion.chunk` events (skipping reasoning if some was
- *         already streamed), so the client just sees a late normal stream;
- *       - failed → re-issues the request once via `opts.retry` and relays
- *         the fresh stream (itself recoverable, but not retried again).
- *   - If answer output was already sent, the retried generation may not
- *     match it, so the error is passed on with a clearer message carrying
- *     the response id and Sail's reported status.
+ * verbatim until that error appears. If nothing content-bearing has reached
+ * the client yet, it polls `GET /chat/completions/{id}` and replays the
+ * finished completion as synthesized `chat.completion.chunk` events — the
+ * client just sees a (late) normal stream. If partial output was already
+ * sent, the retried generation may not match it, so the error is passed on
+ * with a clearer message naming the response id instead.
  */
 import { config } from "../config.ts";
 import { log } from "../../shared/logger.ts";
@@ -71,21 +64,18 @@ export function parseSseEvents(buffer: string): {
   return { events, rest };
 }
 
-const nonEmpty = (v: unknown) => typeof v === "string" && v !== "";
-
-/** Classify what a chunk's deltas would show the client. */
-function deltaKinds(chunk: any): { answer: boolean; reasoning: boolean } {
-  let answer = false;
-  let reasoning = false;
+/** True if a chunk's delta carries anything the client would render. */
+function hasContent(chunk: any): boolean {
   for (const choice of chunk?.choices ?? []) {
     const d = choice?.delta;
     if (!d) continue;
-    if (nonEmpty(d.content)) answer = true;
-    if (Array.isArray(d.tool_calls) && d.tool_calls.length > 0) answer = true;
-    if (nonEmpty(d.reasoning_content) || nonEmpty(d.reasoning))
-      reasoning = true;
+    if (typeof d.content === "string" && d.content !== "") return true;
+    if (typeof d.reasoning_content === "string" && d.reasoning_content !== "")
+      return true;
+    if (typeof d.reasoning === "string" && d.reasoning !== "") return true;
+    if (Array.isArray(d.tool_calls) && d.tool_calls.length > 0) return true;
   }
-  return { answer, reasoning };
+  return false;
 }
 
 /** Find a response id in a superseded error payload, if Sail included one. */
@@ -105,7 +95,6 @@ function idFromError(payload: any): string | undefined {
 export function completionToChunks(
   completion: any,
   includeUsage: boolean,
-  omitReasoning = false,
 ): Record<string, any>[] {
   const base = {
     id: completion.id,
@@ -122,7 +111,7 @@ export function completionToChunks(
     const index = choice.index ?? 0;
     const msg = choice.message ?? {};
     out.push(chunk(index, { role: msg.role ?? "assistant", content: "" }));
-    if (msg.reasoning_content && !omitReasoning)
+    if (msg.reasoning_content)
       out.push(chunk(index, { reasoning_content: msg.reasoning_content }));
     if (msg.content) out.push(chunk(index, { content: msg.content }));
     (msg.tool_calls ?? []).forEach((tc: any, i: number) => {
@@ -161,45 +150,13 @@ export interface RecoverOpts {
   /** Mirror `stream_options.include_usage` in the synthesized stream. */
   includeUsage: boolean;
   logPrefix: string;
-  /**
-   * Re-issue the original request. Called at most once, and only after Sail
-   * reports the superseded response as failed with no answer yet streamed.
-   */
-  retry?: () => Promise<Response>;
   /** Poll delay schedule (ms); the last entry repeats. Overridable for tests. */
   pollDelaysMs?: number[];
 }
 
-/** One GET of the response; null on network failure. */
-async function fetchResponse(
-  id: string,
-  opts: RecoverOpts,
-): Promise<{ status: number; body: any } | null> {
-  const signals = [AbortSignal.timeout(config.sail.pollTimeoutMs)];
-  if (opts.clientSignal) signals.push(opts.clientSignal);
-  try {
-    const res = await fetch(`${config.sail.baseUrl}/chat/completions/${id}`, {
-      headers: { Authorization: `Bearer ${config.sail.apiKey}` },
-      signal: AbortSignal.any(signals),
-    });
-    return { status: res.status, body: await res.json().catch(() => null) };
-  } catch (err) {
-    log.debug(`[${opts.logPrefix}] fetch response ${id} failed: ${err}`);
-    return null;
-  }
-}
-
-/** "status=failed (chat completion failed)"-style summary of a response. */
-function describe(body: any): string {
-  const status = body?.status ?? "unknown";
-  const detail = body?.error?.message ? ` (${body.error.message})` : "";
-  return `status=${status}${detail}`;
-}
-
 type PollResult =
-  | { kind: "completed"; completion: any; polls: number }
-  | { kind: "failed"; body: any; polls: number }
-  | { kind: "gave_up"; reason: string; polls: number };
+  | { ok: true; completion: any; polls: number }
+  | { ok: false; reason: string; polls: number };
 
 async function pollCompletion(
   id: string,
@@ -213,47 +170,57 @@ async function pollCompletion(
   for (let polls = 0; ; ) {
     const delay = delays[Math.min(polls, delays.length - 1)]!;
     if (!(await sleep(delay, opts.clientSignal))) {
-      return { kind: "gave_up", reason: "client disconnected", polls };
+      return { ok: false, reason: "client disconnected", polls };
     }
     if (now() - lastKeepalive >= KEEPALIVE_INTERVAL_MS) {
       keepalive();
       lastKeepalive = now();
     }
     if (now() > deadline) {
-      return { kind: "gave_up", reason: "timed out polling", polls };
+      return { ok: false, reason: "timed out waiting for completion", polls };
     }
     polls++;
 
-    const res = await fetchResponse(id, opts);
-    if (opts.clientSignal?.aborted) {
-      return { kind: "gave_up", reason: "client disconnected", polls };
+    let res: Response;
+    try {
+      const signals = [AbortSignal.timeout(config.sail.pollTimeoutMs)];
+      if (opts.clientSignal) signals.push(opts.clientSignal);
+      res = await fetch(`${config.sail.baseUrl}/chat/completions/${id}`, {
+        headers: { Authorization: `Bearer ${config.sail.apiKey}` },
+        signal: AbortSignal.any(signals),
+      });
+    } catch (err) {
+      if (opts.clientSignal?.aborted) {
+        return { ok: false, reason: "client disconnected", polls };
+      }
+      log.debug(`[${opts.logPrefix}] recovery poll ${id} failed: ${err}`);
+      continue;
     }
-    if (!res) continue;
+
     if (res.status === 404) {
       if (++notFound >= MAX_NOT_FOUND) {
-        return { kind: "gave_up", reason: "response not found", polls };
+        return { ok: false, reason: "response not found", polls };
       }
       continue;
     }
     notFound = 0;
     if (res.status === 429 || res.status >= 500) continue;
-    if (res.status >= 400) {
-      return {
-        kind: "gave_up",
-        reason: `retrieve returned HTTP ${res.status}`,
-        polls,
-      };
+    if (!res.ok) {
+      return { ok: false, reason: `retrieve returned ${res.status}`, polls };
     }
 
-    const body = res.body;
+    const body: any = await res.json().catch(() => null);
     const status = body?.status;
-    if (FAILED_STATUSES.has(status)) return { kind: "failed", body, polls };
+    if (FAILED_STATUSES.has(status)) {
+      const detail = body?.error?.message ? `: ${body.error.message}` : "";
+      return { ok: false, reason: `response ${status}${detail}`, polls };
+    }
     const done =
       status === "completed" ||
       status === "incomplete" ||
       (status === undefined && body?.choices?.[0]?.finish_reason);
     if (done && Array.isArray(body.choices)) {
-      return { kind: "completed", completion: body, polls };
+      return { ok: true, completion: body, polls };
     }
   }
 }
@@ -270,14 +237,12 @@ export function recoverChatStream(
   const decoder = new TextDecoder();
   const reader = upstream.getReader();
   let closed = false;
-  let retryReader: ReadableStreamDefaultReader<Uint8Array> | undefined;
 
   return new ReadableStream<Uint8Array>({
     start(controller) {
-      const sendBytes = (bytes: Uint8Array) => {
-        if (!closed) controller.enqueue(bytes);
+      const send = (text: string) => {
+        if (!closed) controller.enqueue(encoder.encode(text));
       };
-      const send = (text: string) => sendBytes(encoder.encode(text));
       const finish = () => {
         if (closed) return;
         closed = true;
@@ -285,37 +250,7 @@ export function recoverChatStream(
       };
 
       let completionId: string | undefined;
-      let emittedAnswer = false;
-      let emittedReasoning = false;
-
-      /**
-       * Re-issue the request and relay its stream. Returns null on success
-       * (stream fully relayed) or a failure description.
-       */
-      const relayRetry = async (): Promise<string | null> => {
-        let res: Response;
-        try {
-          res = await opts.retry!();
-        } catch (err) {
-          return `retry request failed: ${err instanceof Error ? err.message : err}`;
-        }
-        const isSse = res.headers
-          .get("content-type")
-          ?.startsWith("text/event-stream");
-        if (!res.ok || !res.body || !isSse) {
-          await res.body?.cancel().catch(() => {});
-          return `retry returned HTTP ${res.status}`;
-        }
-        retryReader = recoverChatStream(res.body, {
-          ...opts,
-          retry: undefined,
-        }).getReader();
-        for (;;) {
-          const { done, value } = await retryReader.read();
-          if (done) return null;
-          sendBytes(value);
-        }
-      };
+      let emittedContent = false;
 
       const handleSuperseded = async (ev: SseEvent, payload: any) => {
         await reader.cancel().catch(() => {});
@@ -325,10 +260,8 @@ export function recoverChatStream(
         let failure: string;
         if (!id) {
           failure = "no response id was seen";
-        } else if (emittedAnswer) {
-          const res = await fetchResponse(id, opts);
-          const state = res ? describe(res.body) : "status=unknown";
-          failure = `partial output was already streamed; Sail reports response ${id} ${state}`;
+        } else if (emittedContent) {
+          failure = "partial output was already streamed";
         } else {
           log.info(
             `[${opts.logPrefix}] stream superseded; recovering response ${id} by polling`,
@@ -337,45 +270,30 @@ export function recoverChatStream(
             send(": keepalive\n\n"),
           );
           const elapsed = Math.round((now() - started) / SECOND);
-          if (result.kind === "completed") {
+          if (result.ok) {
             log.info(
               `[${opts.logPrefix}] recovered response ${id} after ${result.polls} polls (${elapsed}s)`,
             );
             for (const c of completionToChunks(
               result.completion,
               opts.includeUsage,
-              emittedReasoning,
             )) {
               send(sseData(c));
             }
             send("data: [DONE]\n\n");
             return finish();
           }
-          if (result.kind === "failed") {
-            failure = `Sail reports response ${id} ${describe(result.body)}`;
-            if (opts.retry) {
-              log.warn(
-                `[${opts.logPrefix}] ${failure}; retrying the request once`,
-              );
-              const retryFailure = await relayRetry();
-              if (retryFailure === null) {
-                log.info(`[${opts.logPrefix}] retry for ${id} relayed`);
-                return finish();
-              }
-              failure += `; ${retryFailure}`;
-            }
-          } else {
-            failure = `${result.reason} for response ${id}`;
-          }
+          failure = result.reason;
           if (opts.clientSignal?.aborted) return finish();
         }
 
         log.warn(
-          `[${opts.logPrefix}] superseded stream not recovered: ${failure}`,
+          `[${opts.logPrefix}] superseded stream not recovered (${failure}); response id=${id ?? "unknown"}`,
         );
         const message =
-          `Sail superseded the streaming attempt and the proxy could not recover it: ` +
-          `${failure}. Upstream said: ${payload.error.message}`;
+          `Sail superseded the streaming attempt and the proxy could not recover it ` +
+          `(${failure}). Completed response id=${id ?? "unknown"}; ` +
+          `upstream said: ${payload.error.message}`;
         const rewritten = { ...payload, error: { ...payload.error, message } };
         send((ev.event ? `event: ${ev.event}\n` : "") + sseData(rewritten));
         send("data: [DONE]\n\n");
@@ -405,9 +323,7 @@ export function recoverChatStream(
                 return handleSuperseded(ev, payload);
               }
               if (typeof payload?.id === "string") completionId = payload.id;
-              const kinds = deltaKinds(payload);
-              if (kinds.answer) emittedAnswer = true;
-              if (kinds.reasoning) emittedReasoning = true;
+              if (hasContent(payload)) emittedContent = true;
             }
             send(ev.raw);
           }
@@ -426,7 +342,6 @@ export function recoverChatStream(
     },
     cancel(reason) {
       closed = true;
-      retryReader?.cancel(reason).catch(() => {});
       return reader.cancel(reason);
     },
   });

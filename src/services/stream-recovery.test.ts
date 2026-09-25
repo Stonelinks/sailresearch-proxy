@@ -175,15 +175,8 @@ describe("recoverChatStream", () => {
     );
   });
 
-  test("after partial answer text, reports Sail's final status instead of recovering", async () => {
-    const urls = mockRetrieve([
-      () =>
-        Response.json({
-          id: ID,
-          status: "failed",
-          error: { message: "chat completion failed" },
-        }),
-    ]);
+  test("does not recover after partial content; rewrites the error instead", async () => {
+    const urls = mockRetrieve([]);
     const upstream = upstreamOf([
       ev(chunk({ role: "assistant", content: "" })),
       ev(chunk({ content: "Hel" })),
@@ -191,39 +184,16 @@ describe("recoverChatStream", () => {
     ]);
     const text = await new Response(recoverChatStream(upstream, opts)).text();
 
-    expect(urls).toHaveLength(1);
+    expect(urls).toHaveLength(0);
     const payloads = dataPayloads(text);
     const err = payloads.find((p) => p.error);
     expect(err.error.type).toBe("server_error");
     expect(err.error.message).toContain("partial output was already streamed");
-    expect(err.error.message).toContain(
-      `response ${ID} status=failed (chat completion failed)`,
-    );
+    expect(err.error.message).toContain(ID);
     expect(payloads.at(-1)).toBe("[DONE]");
   });
 
-  test("recovers after reasoning-only output, without replaying reasoning", async () => {
-    mockRetrieve([() => Response.json(COMPLETED)]);
-    const upstream = upstreamOf([
-      ev(chunk({ role: "assistant", content: "" })),
-      ev(chunk({ reasoning_content: "Thinking" })),
-      ev(SUPERSEDED),
-    ]);
-    const text = await new Response(recoverChatStream(upstream, opts)).text();
-
-    expect(text).not.toContain("superseded");
-    const payloads = dataPayloads(text);
-    const reasoning = payloads
-      .map((p) => p.choices?.[0]?.delta?.reasoning_content ?? "")
-      .join("");
-    expect(reasoning).toBe("Thinking");
-    const content = payloads
-      .map((p) => p.choices?.[0]?.delta?.content ?? "")
-      .join("");
-    expect(content).toBe("I'll check.");
-  });
-
-  test("rewrites the error when the response failed and no retry is available", async () => {
+  test("rewrites the error when the retrieved response failed", async () => {
     mockRetrieve([
       () =>
         Response.json({
@@ -238,84 +208,7 @@ describe("recoverChatStream", () => {
     ]);
     const text = await new Response(recoverChatStream(upstream, opts)).text();
     const err = dataPayloads(text).find((p) => p.error);
-    expect(err.error.message).toContain(
-      `response ${ID} status=failed (model crashed)`,
-    );
-  });
-
-  test("retries once when the response failed, relaying the fresh stream", async () => {
-    mockRetrieve([() => Response.json({ id: ID, status: "failed" })]);
-    let retries = 0;
-    const retrySse =
-      ev({ ...chunk({ role: "assistant", content: "" }), id: "resp_retry" }) +
-      ev({ ...chunk({ content: "Hi again" }), id: "resp_retry" }) +
-      "data: [DONE]\n\n";
-    const upstream = upstreamOf([
-      ev(chunk({ role: "assistant", content: "" })),
-      ev(chunk({ reasoning_content: "hmm" })),
-      ev(SUPERSEDED),
-    ]);
-    const text = await new Response(
-      recoverChatStream(upstream, {
-        ...opts,
-        retry: async () => {
-          retries++;
-          return new Response(retrySse, {
-            headers: { "Content-Type": "text/event-stream" },
-          });
-        },
-      }),
-    ).text();
-
-    expect(retries).toBe(1);
-    expect(text).not.toContain("superseded");
-    expect(text.endsWith(retrySse)).toBe(true);
-  });
-
-  test("retries at most once, even if the retry is superseded and fails too", async () => {
-    mockRetrieve([
-      () => Response.json({ id: ID, status: "failed" }),
-      () => Response.json({ id: ID, status: "failed" }),
-    ]);
-    let retries = 0;
-    const upstream = upstreamOf([
-      ev(chunk({ role: "assistant", content: "" })),
-      ev(SUPERSEDED),
-    ]);
-    const text = await new Response(
-      recoverChatStream(upstream, {
-        ...opts,
-        retry: async () => {
-          retries++;
-          return new Response(
-            ev(chunk({ role: "assistant", content: "" })) + ev(SUPERSEDED),
-            { headers: { "Content-Type": "text/event-stream" } },
-          );
-        },
-      }),
-    ).text();
-
-    expect(retries).toBe(1);
-    const errors = dataPayloads(text).filter((p) => p.error);
-    expect(errors).toHaveLength(1);
-    expect(errors[0].error.message).toContain("status=failed");
-  });
-
-  test("reports a non-streaming retry response as a failure", async () => {
-    mockRetrieve([() => Response.json({ id: ID, status: "failed" })]);
-    const upstream = upstreamOf([
-      ev(chunk({ role: "assistant", content: "" })),
-      ev(SUPERSEDED),
-    ]);
-    const text = await new Response(
-      recoverChatStream(upstream, {
-        ...opts,
-        retry: async () =>
-          Response.json({ error: { message: "overloaded" } }, { status: 503 }),
-      }),
-    ).text();
-    const err = dataPayloads(text).find((p) => p.error);
-    expect(err.error.message).toContain("retry returned HTTP 503");
+    expect(err.error.message).toContain("response failed: model crashed");
   });
 
   test("stops polling when the client disconnects", async () => {
