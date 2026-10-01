@@ -9,6 +9,7 @@ A thin completion-window injector for [Sail Research](https://docs.sailresearch.
 What it does today:
 
 1. **Window injection** — `/{asap|balanced|flex}/v1/{chat/completions,messages,responses}` sets `metadata.completion_window` and forwards to Sail unchanged (streaming included, no retries, no persistence).
+2. **Flex emulation** — Sail only serves `flex` as background work, so flex Chat Completions and foreground Responses requests are run as a `background: true` Responses job that the proxy polls and replays in the shape the client asked for (see [Flex window](#flex-window)).
 2. **Model research** — scrapes Sail's docs for capabilities/pricing, uses an embedded pi session to research sampling presets/context sizes, smoke-tests presets and window support, and stores the results in SQLite (browse/refresh via the dashboard).
 3. **`generate-models-json`** — emits a pi `models.json` with one provider per completion window, enriched with researched pricing, presets, context windows, and thinking-level maps.
 
@@ -84,7 +85,18 @@ The proxy resolves the window in this order (highest priority first):
 
 The resolved window is always written into `metadata.completion_window` before forwarding.
 
-Sail's current windows are `asap`, `balanced`, and `flex`. The retired `priority` and `standard` tiers (Sail returns a 400 for them since 2026-09) are still accepted by the proxy as URL prefixes, header values, or body values and are rewritten to `balanced` with a warning in the log. Sail recommends the Responses API with `background: true` for `flex`; Chat Completions and Messages accept it but wait synchronously and may time out. Sail also rejects image input on `asap` (`unsupported_asap_request`), so send multimodal requests through `balanced` or `flex`.
+Sail's current windows are `asap`, `balanced`, and `flex`. The retired `priority` and `standard` tiers (Sail returns a 400 for them since 2026-09) are still accepted by the proxy as URL prefixes, header values, or body values and are rewritten to `balanced` with a warning in the log. Sail serves `flex` only for background Responses requests and Batch work; the proxy bridges that for synchronous clients (next section). Sail also rejects image input on `asap` (`unsupported_asap_request`), so send multimodal requests through `balanced` or `flex`.
+
+### Flex window
+
+Since 2026-09-30 Sail rejects synchronous flex calls (`400 completion_window "flex" is only available for background responses (POST /v1/responses with background=true) or Batch work`). Synchronous clients still get flex pricing through the proxy:
+
+- **Chat Completions on flex** is translated to a `background: true` Responses request (messages, tool calls/results, tools, `tool_choice`, `response_format`, `reasoning_effort`, images), polled via `GET /v1/responses/{id}` (2 s → 30 s backoff, bounded by `TIMEOUT_FLEX_MS`), and returned as a `chat.completion` with `reasoning_content`, `tool_calls`, and usage. With `stream: true` the proxy opens the SSE stream at once, sends `: heartbeat` comments every 15 s while the job is queued, then replays the result as `chat.completion.chunk` events.
+- **Foreground Responses on flex** is submitted with `background: true` and returned (or replayed as Responses stream events) once finished. Requests that already set `background: true` pass through and get Sail's `202`.
+- **Messages on flex** is not emulated (Sail returns its 400) — use Chat Completions or Responses.
+- A `failed`/`cancelled` job is returned as a 502 (or an in-band SSE `error` event) carrying Sail's reason; `incomplete` maps to `finish_reason: "length"` / `"content_filter"`. A client disconnect stops polling, but Sail has no cancel endpoint, so the job still runs and is billed.
+
+This is the pre-`2f95450` batching path cut down to an in-memory poll per request (no job table, dedup, or dashboard). Code: `src/services/flex.ts`, `src/transforms/chat-responses.ts`.
 
 ### Window-prefixed routes
 
@@ -107,9 +119,9 @@ client = OpenAI(base_url="http://localhost:4000/flex/v1", api_key="anything")
 
 | Endpoint | Behavior |
 |----------|----------|
-| `POST /v1/chat/completions` | Forwarded verbatim (+ window injection) |
+| `POST /v1/chat/completions` | Forwarded verbatim (+ window injection); flex runs as a background Responses job |
 | `POST /v1/messages` | Forwarded verbatim (+ window injection, small field strip) |
-| `POST /v1/responses` | Forwarded verbatim (+ window injection) |
+| `POST /v1/responses` | Forwarded verbatim (+ window injection); foreground flex runs in the background |
 | `GET /v1/models` | Sail's list enriched with researched metadata from the local DB |
 | `GET /health`, `GET /api/version` | Local |
 | `POST /graphql` (+ WS) | Dashboard API (models + research) |
@@ -123,7 +135,7 @@ Everything else — `system`, `tools`, `thinking`, `stream`, `stream_options`, `
 
 **Auth:** the proxy accepts both `Authorization: Bearer <key>` and `x-api-key: <key>` when `PROXY_API_KEY` is set, and always uses its own `SAIL_API_KEY` upstream.
 
-**Timeouts:** the proxy applies no timeout of its own to forwarded requests; the client's disconnect aborts the upstream call. Bun's HTTP server caps *idle* time at 255 s, so use `stream: true` for the scheduled windows (`balanced`, `flex`) — Sail's SSE (including `ping` events on `/v1/messages`) keeps the connection non-idle. A non-streaming request that sits silent past 255 s will be cut.
+**Timeouts:** the proxy applies no timeout of its own to forwarded requests; the client's disconnect aborts the upstream call. Bun's 255 s idle cap is disabled per request on the inference routes, so a non-streaming request can wait as long as its job takes (a flex job is bounded by `TIMEOUT_FLEX_MS`, default 2 h); any reverse proxy in front needs a matching read timeout.
 
 ## Model Research
 

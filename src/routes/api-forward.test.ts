@@ -73,9 +73,9 @@ describe("handleChatCompletions", () => {
         messages: [{ role: "user", content: "hi" }],
         metadata: { completion_window: "balanced" },
       }),
-      "flex",
+      "asap",
     );
-    expect(upstream.body.metadata.completion_window).toBe("flex");
+    expect(upstream.body.metadata.completion_window).toBe("asap");
   });
 
   test("x-completion-window header selects the window", async () => {

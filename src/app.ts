@@ -128,10 +128,10 @@ export function createApp(prisma: PrismaClient, port?: number): AppServer {
   const server = Bun.serve({
     port: port ?? config.server.port,
     hostname: config.server.host,
-    // Bun's max idle timeout is 255 seconds. Streaming requests stay alive
-    // as long as Sail emits bytes (its /messages SSE includes pings); a
-    // non-streaming request on a scheduled window that sits silent past 255s
-    // will be cut — clients should use `stream: true` for long waits.
+    // Bun's max idle timeout is 255 seconds. Inference POSTs opt out of it
+    // per request (see fetch below): a non-streaming flex request is silent
+    // until its background job finishes, which can take far longer. Streams
+    // stay non-idle anyway (Sail's SSE, or the flex path's heartbeats).
     idleTimeout: 255,
 
     websocket: wsHandler,
@@ -160,6 +160,15 @@ export function createApp(prisma: PrismaClient, port?: number): AppServer {
 
       // Window-prefixed routes (e.g. /flex/v1/chat/completions): strip the
       // prefix, inject X-Completion-Window, then dispatch as if unprefixed.
+      // Inference can sit silent for a long time (a non-streaming flex job
+      // waits on background polling); the client's disconnect is the bound.
+      if (
+        req.method === "POST" &&
+        /\/v1\/(chat\/completions|messages|responses)$/.test(pathname)
+      ) {
+        server.timeout(req, 0);
+      }
+
       const rewritten = rewriteForWindowPrefix(req);
       if (rewritten) {
         return dispatch(rewritten.req, rewritten.pathname);
