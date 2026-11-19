@@ -9,10 +9,13 @@ fs.mkdirSync(config.logging.dir, { recursive: true });
 initFileLogging(config.logging.dir);
 
 // Apply committed migrations
-const migrateResult = Bun.spawnSync(["bunx", "prisma", "migrate", "deploy"], {
-  env: process.env,
-  cwd: import.meta.dir + "/..",
-});
+const migrateResult = Bun.spawnSync(
+  ["bun", "x", "prisma", "migrate", "deploy"],
+  {
+    env: process.env,
+    cwd: import.meta.dir + "/..",
+  },
+);
 if (migrateResult.exitCode !== 0) {
   log.error(
     "[startup] prisma migrate deploy failed:",
