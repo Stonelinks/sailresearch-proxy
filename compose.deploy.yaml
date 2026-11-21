@@ -8,11 +8,11 @@ services:
     image: ${IMAGE}:${IMAGE_TAG}
     env_file: app.env
     volumes:
-      - /mnt/hdd/apps/sailresearch-proxy-pilot:/app/data
+      - /mnt/hdd/apps/sailresearch-proxy:/app/data
     networks: [paas]
     labels:
       traefik.enable: 'true'
-      traefik.http.routers.sailresearch-proxy.rule: Host(`llm3.apps.stonelinks.org`)
+      traefik.http.routers.sailresearch-proxy.rule: Host(`llm3.apps.stonelinks.org`) || Host(`llm3.cricket.routers.stonelinks.org`)
       traefik.http.services.sailresearch-proxy.loadbalancer.server.port: '4000'
     healthcheck:
       test:
