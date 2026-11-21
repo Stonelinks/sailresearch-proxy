@@ -14,6 +14,16 @@ services:
       traefik.enable: 'true'
       traefik.http.routers.sailresearch-proxy.rule: Host(`llm3.apps.stonelinks.org`) || Host(`llm3.cricket.routers.stonelinks.org`)
       traefik.http.services.sailresearch-proxy.loadbalancer.server.port: '4000'
+      # People opening the old name in a browser are sent to the new one.
+      # Only page loads (GET asking for HTML) are redirected: API clients on
+      # the old name keep being served by the router above, because many HTTP
+      # clients drop the Authorization header when they follow a redirect to
+      # another host.
+      traefik.http.routers.sailresearch-proxy-old.rule: Host(`llm3.cricket.routers.stonelinks.org`) && Method(`GET`) && HeaderRegexp(`Accept`, `text/html`)
+      traefik.http.routers.sailresearch-proxy-old.middlewares: sailresearch-proxy-old-redirect
+      traefik.http.middlewares.sailresearch-proxy-old-redirect.redirectregex.regex: ^https?://llm3\.cricket\.routers\.stonelinks\.org/(.*)
+      traefik.http.middlewares.sailresearch-proxy-old-redirect.redirectregex.replacement: https://llm3.apps.stonelinks.org/$${1}
+      traefik.http.middlewares.sailresearch-proxy-old-redirect.redirectregex.permanent: 'true'
     healthcheck:
       test:
         - CMD
