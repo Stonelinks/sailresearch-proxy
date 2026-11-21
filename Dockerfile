@@ -26,7 +26,12 @@ RUN bun run build
 # and bin/test-frontend.
 FROM build AS test
 WORKDIR /app
-RUN SAIL_API_KEY=test bun test $(find src shared -name "*.test.ts" -type f)
+# One bun process per file: mock.module() in one test file leaks into files
+# that run after it in the same process, and `find` order differs by
+# filesystem, so a single `bun test` run passed on a laptop and failed here.
+RUN for f in $(find src shared -name "*.test.ts" -type f | sort); do \
+      SAIL_API_KEY=test bun test "$f" || exit 1; \
+    done
 RUN cd frontend && bun run test
 RUN touch /tests-passed
 
