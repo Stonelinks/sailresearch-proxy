@@ -1,0 +1,31 @@
+# How cricket runs this app. Used only by platform-deploy in CI (see
+# .gitea/workflows/deploy.yaml); docker-compose.yaml is for running locally.
+#
+# IMAGE and IMAGE_TAG come from the .env platform-deploy writes next to this
+# file; app.env is the APP_ENV secret (SAIL_API_KEY, TZ).
+services:
+  app:
+    image: ${IMAGE}:${IMAGE_TAG}
+    env_file: app.env
+    volumes:
+      - /mnt/hdd/apps/sailresearch-proxy-pilot:/app/data
+    networks: [paas]
+    labels:
+      traefik.enable: 'true'
+      traefik.http.routers.sailresearch-proxy.rule: Host(`llm3.apps.stonelinks.org`)
+      traefik.http.services.sailresearch-proxy.loadbalancer.server.port: '4000'
+    healthcheck:
+      test:
+        - CMD
+        - bun
+        - -e
+        - 'fetch("http://localhost:4000/health").then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))'
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    restart: unless-stopped
+
+networks:
+  paas:
+    external: true

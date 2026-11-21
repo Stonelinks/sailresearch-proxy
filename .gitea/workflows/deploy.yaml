@@ -1,0 +1,17 @@
+# Push to main -> build (tests run inside the image build) -> deploy on cricket.
+# platform-deploy lives in the echoes repo (cricket/paas/ci-image); the
+# contract is documented in echoes docs/cricket-paas.md.
+name: deploy
+on:
+  push:
+    branches: [main]
+jobs:
+  deploy:
+    runs-on: cricket
+    steps:
+      - uses: actions/checkout@v4
+      - run: platform-deploy
+        env:
+          APP_ENV: ${{ secrets.APP_ENV }}
+          REGISTRY_USER: ${{ secrets.REGISTRY_USER }}
+          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}

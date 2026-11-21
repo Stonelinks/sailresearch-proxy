@@ -19,6 +19,17 @@ WORKDIR /app/frontend
 RUN bun install --frozen-lockfile
 RUN bun run build
 
+# -- test stage --
+# The deploy gate: cricket's CI builds this image and nothing else, and the
+# runtime stage below copies a marker out of this one, so the build cannot
+# reach a runnable image unless the suites pass. Same commands as bin/test
+# and bin/test-frontend.
+FROM build AS test
+WORKDIR /app
+RUN SAIL_API_KEY=test bun test $(find src shared -name "*.test.ts" -type f)
+RUN cd frontend && bun run test
+RUN touch /tests-passed
+
 # -- runtime stage --
 FROM oven/bun:1
 ARG GIT_COMMIT=unknown
@@ -31,6 +42,8 @@ COPY --from=build /app/shared ./shared
 COPY --from=build /app/frontend/dist ./frontend/dist
 COPY --from=build /app/package.json ./
 COPY --from=build /app/entrypoint.sh ./
+# Forces the test stage to run; BuildKit skips stages nothing depends on.
+COPY --from=test /tests-passed /tmp/tests-passed
 
 RUN chmod +x entrypoint.sh
 
