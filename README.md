@@ -193,7 +193,7 @@ All scripts are in `bin/` and available on `PATH` after `source env.sh`.
 | `generate-models-json` | Emit pi models.json from the proxy's enriched `/v1/models` |
 | `pi-setup` | Write a local pi provider config pointing at the proxy |
 | `db-studio` | Open Prisma Studio |
-| `publish` | Build and push Docker image to registry |
+| _(deploy)_ | No script: `git push` to cricket's Gitea builds, tests and deploys (`.gitea/workflows/deploy.yaml`, `compose.deploy.yaml`) |
 
 ## Docker Deployment
 
