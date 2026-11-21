@@ -19,7 +19,7 @@ PI_DIR="${PI_DIR:-$HOME/.pi/agent}"
 PI_MODELS="${PI_DIR}/models.json"
 PI_AUTH="${PI_DIR}/auth.json"
 
-BASE_URL="${PI_SAIL_BASE_URL:-https://llm3.cricket.routers.stonelinks.org/v1}"
+BASE_URL="${PI_SAIL_BASE_URL:-https://llm3.apps.stonelinks.org/v1}"
 API_KEY="${PI_SAIL_API_KEY:-${SAIL_API_KEY:-}}"
 
 # `sail` targets the bare /v1 route (the proxy's DEFAULT_COMPLETION_WINDOW);

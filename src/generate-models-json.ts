@@ -425,7 +425,7 @@ export function buildProvider(
   // Build the base URL for this window. Normalize first by stripping any
   // trailing "/v1" and slashes so the result is correct whether the caller
   // passed ".../v1" (e.g. http://localhost:4000/v1) or a bare host (e.g.
-  // https://llm3.cricket.routers.stonelinks.org).
+  // https://llm3.apps.stonelinks.org).
   //   prefixed: {host}/{window}/v1
   //   bare:     {host}/v1
   const stripped = baseUrl.replace(/\/v1\/?$/, "").replace(/\/+$/, "");
