@@ -206,14 +206,14 @@ docker run -d \
   -e SAIL_API_KEY=sk-sail-... \
   -v sailresearch-proxy-data:/app/data \
   --restart unless-stopped \
-  containers.cricket.routers.stonelinks.org/sailresearch-proxy:latest
+  git.apps.stonelinks.org/lucas/sailresearch-proxy:latest
 ```
 
-Optional: set `PROXY_API_KEY` to require client auth. A `docker-compose.yaml` is included (`cp .env.docker .env`, add your key, `docker compose up -d`). Publish a new image with `publish [--version vX.Y.Z]`.
+Optional: set `PROXY_API_KEY` to require client auth. A `docker-compose.yaml` is included (`cp .env.docker .env`, add your key, `docker compose up -d`). Images are built by a push to cricket's Gitea and live in its registry (`docker login git.apps.stonelinks.org` to pull).
 
 ## Configuration
 
-**`secrets.sh`** (gitignored, created from `secrets.sh.example`): `SAIL_API_KEY` (required), `PROXY_API_KEY` (optional), `CONTAINER_REG_*` (for `publish`).
+**`secrets.sh`** (gitignored, created from `secrets.sh.example`): `SAIL_API_KEY` (required), `PROXY_API_KEY` (optional).
 
 | Variable | Default | Description |
 |----------|---------|-------------|

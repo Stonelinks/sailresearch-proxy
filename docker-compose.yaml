@@ -1,6 +1,6 @@
 services:
   sailresearch-proxy:
-    image: containers.cricket.routers.stonelinks.org/sailresearch-proxy:latest
+    image: git.apps.stonelinks.org/lucas/sailresearch-proxy:latest
     container_name: sailresearch-proxy
     volumes:
       - sailresearch-proxy-data:/app/data
