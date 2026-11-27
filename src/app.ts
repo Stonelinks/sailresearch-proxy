@@ -21,18 +21,6 @@ import type { Context } from "./graphql/builder.ts";
 
 const SPA_DIR = path.resolve(import.meta.dir, "../frontend/dist");
 
-const MIME_TYPES: Record<string, string> = {
-  ".html": "text/html",
-  ".js": "application/javascript",
-  ".css": "text/css",
-  ".json": "application/json",
-  ".svg": "image/svg+xml",
-  ".png": "image/png",
-  ".ico": "image/x-icon",
-  ".woff": "font/woff",
-  ".woff2": "font/woff2",
-};
-
 function serveSPA(req: Request): Response {
   const url = new URL(req.url);
   const pathname = url.pathname;
@@ -55,13 +43,11 @@ function serveSPA(req: Request): Response {
     try {
       const stat = fs.statSync(resolved);
       if (stat.isFile()) {
-        const ext = path.extname(resolved);
-        const contentType = MIME_TYPES[ext] || "application/octet-stream";
         // Vite hashes asset filenames — these can be cached forever.
         // index.html must never be cached so the browser picks up new builds.
         const isImmutable =
           pathname.startsWith("/assets/") && /-[a-zA-Z0-9]{6,}/.test(pathname);
-        const headers: Record<string, string> = { "Content-Type": contentType };
+        const headers: Record<string, string> = {};
         if (isImmutable) {
           headers["Cache-Control"] = "public, max-age=31536000, immutable";
         } else {
@@ -78,7 +64,7 @@ function serveSPA(req: Request): Response {
   const indexPath = path.join(SPA_DIR, "index.html");
   try {
     return new Response(Bun.file(indexPath), {
-      headers: { "Content-Type": "text/html", "Cache-Control": "no-cache" },
+      headers: { "Cache-Control": "no-cache" },
     });
   } catch {
     return openAIError(404, "Not found", "invalid_request_error");
