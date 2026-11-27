@@ -1,5 +1,6 @@
 # -- build stage --
-FROM oven/bun:1 AS build
+# Pinned: bump deliberately; a floating tag let rebuilds change Bun with no commit.
+FROM oven/bun:1.4.5 AS build
 ARG GIT_COMMIT=unknown
 WORKDIR /app
 
@@ -36,7 +37,7 @@ RUN cd frontend && bun run test
 RUN touch /tests-passed
 
 # -- runtime stage --
-FROM oven/bun:1
+FROM oven/bun:1.4.5
 ARG GIT_COMMIT=unknown
 WORKDIR /app
 
