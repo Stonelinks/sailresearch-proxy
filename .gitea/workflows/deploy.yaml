@@ -9,7 +9,7 @@ jobs:
   deploy:
     runs-on: cricket
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: platform-deploy
         env:
           APP_ENV: ${{ secrets.APP_ENV }}
