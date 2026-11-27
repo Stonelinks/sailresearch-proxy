@@ -5,7 +5,16 @@
  * mocks that backed the REST tests can drive the resolvers directly — no HTTP
  * or WS plumbing involved.
  */
-import { describe, test, expect, mock, beforeEach, beforeAll } from "bun:test";
+import {
+  describe,
+  test,
+  expect,
+  mock,
+  spyOn,
+  beforeEach,
+  beforeAll,
+  afterAll,
+} from "bun:test";
 import { execute, parse } from "graphql";
 
 beforeAll(() => {
@@ -19,13 +28,15 @@ mock.module("../sail-client.ts", () => ({
   sail: { listModels: mockListModels },
 }));
 
-const mockResearchAndUpsertOne = mock<(id: string) => Promise<void>>();
-const mockResearchAndUpsertMany =
-  mock<(ids: string[]) => Promise<Array<{ modelId: string; error: string }>>>();
-mock.module("./research-models-runner.ts", () => ({
-  researchAndUpsertOne: mockResearchAndUpsertOne,
-  researchAndUpsertMany: mockResearchAndUpsertMany,
-}));
+// Spy rather than mock.module: a module mock is process-wide in bun:test and
+// would replace the runner for research-models-runner.test.ts as well.
+const runner = await import("./research-models-runner.ts");
+const mockResearchAndUpsertOne = spyOn(runner, "researchAndUpsertOne");
+const mockResearchAndUpsertMany = spyOn(runner, "researchAndUpsertMany");
+afterAll(() => {
+  mockResearchAndUpsertOne.mockRestore();
+  mockResearchAndUpsertMany.mockRestore();
+});
 
 const mockModelMetaFindMany = mock();
 const mockModelMetaFindUnique = mock();
