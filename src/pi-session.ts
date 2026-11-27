@@ -141,6 +141,7 @@ export async function runPiPrompt(prompt: string): Promise<string> {
   const { session } = await createAgentSession({
     model,
     thinkingLevel: "off",
+    noTools: "all",
     modelRuntime,
     resourceLoader: makeResourceLoader(),
     sessionManager: SessionManager.inMemory(process.cwd()),
@@ -210,6 +211,7 @@ export async function runPiChat(
   const { session } = await createAgentSession({
     model,
     thinkingLevel: "off",
+    noTools: "all",
     modelRuntime,
     resourceLoader: makeResourceLoader(
       "You are a helpful assistant. Be concise.",
