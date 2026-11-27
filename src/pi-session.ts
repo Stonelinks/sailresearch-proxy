@@ -8,7 +8,7 @@
  *
  * `runPiPrompt(prompt)` runs one research prompt on the first of
  * RESEARCH_MODELS (routed via RESEARCH_WINDOW), moving to the next model
- * only when Sail reports the current one out of capacity.
+ * when Sail reports the current one out of capacity or its reply is rejected.
  */
 import { DEFAULT_PROVIDER } from "./constants.ts";
 import { config } from "./config.ts";
@@ -159,13 +159,19 @@ async function promptText(
 
 /**
  * Send a one-shot research prompt and return the raw text response. Tries
- * RESEARCH_MODELS in order, falling through to the next model only on a
- * capacity error; any other error is thrown as-is. Each model gets pi's own
- * retries first (2 retries, 2s then 4s backoff).
+ * RESEARCH_MODELS in order, falling through to the next model on a capacity
+ * error, or when `accept` is given and returns false for the reply (e.g. a
+ * model that answered with a chat-template fragment instead of JSON). Any
+ * other error is thrown as-is. When the last model's reply is rejected it is
+ * returned anyway, for the caller to report. Each model gets pi's own retries
+ * first (2 retries, 2s then 4s backoff).
  *
  * No extensions, no session persistence.
  */
-export async function runPiPrompt(prompt: string): Promise<string> {
+export async function runPiPrompt(
+  prompt: string,
+  accept?: (text: string) => boolean,
+): Promise<string> {
   const modelRuntime = await getModelRuntime();
   const modelIds = config.research.models;
   for (const [i, modelId] of modelIds.entries()) {
@@ -193,6 +199,12 @@ export async function runPiPrompt(prompt: string): Promise<string> {
 
     try {
       const text = await promptText(session, prompt);
+      if (accept && !accept(text)) {
+        log.warn(
+          `[pi-session] ${modelId} reply rejected: ${text.slice(0, 500)}`,
+        );
+        if (modelIds[i + 1]) continue;
+      }
       log.info(`[pi-session] research prompt ran on ${modelId}`);
       return text;
     } catch (err) {

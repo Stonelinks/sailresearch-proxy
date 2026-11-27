@@ -310,12 +310,15 @@ export async function runPiResearch(
 ): Promise<ModelResearchResult> {
   const prompt = PI_PROMPT_TEMPLATE(modelId);
 
-  const stdout = await runPiPrompt(prompt);
+  const stdout = await runPiPrompt(prompt, (t) => extractJson(t) !== null);
 
   log.debug(`[pi-research] raw output for ${modelId}: ${stdout.slice(0, 300)}`);
 
   const jsonStr = extractJson(stdout);
   if (!jsonStr) {
+    log.warn(
+      `[pi-research] no JSON object for ${modelId}; raw reply: ${stdout.slice(0, 500)}`,
+    );
     throw new Error(
       `No JSON object found in pi SDK response for ${modelId}. Raw output (first 200 chars): ${stdout.slice(0, 200)}`,
     );

@@ -1,6 +1,7 @@
 import { afterAll, beforeEach, expect, test } from "bun:test";
 import { config } from "./config.ts";
 import { runPiPrompt } from "./pi-session.ts";
+import { runPiResearch } from "./research-models.ts";
 
 // One fake upstream for the file: pi-session reads config when it first
 // builds its model runtime, and keeps that runtime.
@@ -73,4 +74,24 @@ test("runPiPrompt throws the capacity error when every model is out", async () =
   handle = capacity;
   await expect(runPiPrompt("hi")).rejects.toThrow(/model_capacity_unavailable/);
   expect(new Set(seen)).toEqual(new Set(["first/model", "second/model"]));
+}, 60_000);
+
+const json = JSON.stringify({
+  contextSize: 1000,
+  samplingPresets: [],
+  description: "d",
+  source: "s",
+});
+const template = "{%- if tools %} {{ message }} {%- endif %}";
+
+test("research falls through to the next model when a reply has no JSON", async () => {
+  handle = (model) => (model === "first/model" ? sse(template) : sse(json));
+  expect((await runPiResearch("x/y")).contextSize).toBe(1000);
+  expect(seen).toEqual(["first/model", "second/model"]);
+}, 60_000);
+
+test("research reports 'No JSON object found' when every model replies without JSON", async () => {
+  handle = () => sse("not json at all");
+  await expect(runPiResearch("x/y")).rejects.toThrow(/No JSON object found/);
+  expect(seen).toEqual(["first/model", "second/model"]);
 }, 60_000);
