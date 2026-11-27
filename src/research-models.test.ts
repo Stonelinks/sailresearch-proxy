@@ -1,4 +1,4 @@
-import { describe, test, expect, mock, beforeAll, beforeEach } from "bun:test";
+import { describe, test, expect, mock, beforeAll, afterEach } from "bun:test";
 import {
   parseAndValidatePiOutput,
   smokeTestPreset,
@@ -308,7 +308,7 @@ describe("parseAndValidatePiOutput", () => {
 describe("smokeTestPreset", () => {
   const originalFetch = globalThis.fetch;
 
-  beforeEach(() => {
+  afterEach(() => {
     globalThis.fetch = originalFetch;
   });
 
@@ -462,7 +462,7 @@ describe("smokeTestPreset", () => {
 describe("smokeTestPresets", () => {
   const originalFetch = globalThis.fetch;
 
-  beforeEach(() => {
+  afterEach(() => {
     globalThis.fetch = originalFetch;
   });
 
@@ -613,7 +613,7 @@ describe("chatCompletionsUrlForWindow", () => {
 describe("smokeTestWindowCompatibility", () => {
   const originalFetch = globalThis.fetch;
 
-  beforeEach(() => {
+  afterEach(() => {
     globalThis.fetch = originalFetch;
   });
 
