@@ -2,7 +2,6 @@ import { test, expect, describe } from "bun:test";
 import {
   isValidCompletionWindow,
   normalizeCompletionWindow,
-  extractWindowPrefix,
   rawWindowPrefix,
   resolveCompletionWindow,
   COMPLETION_WINDOWS,
@@ -80,54 +79,9 @@ describe("rawWindowPrefix", () => {
   });
 });
 
-describe("extractWindowPrefix", () => {
-  test.each([...COMPLETION_WINDOWS] as CompletionWindow[])(
-    "extracts '%s' from /%s/v1/chat/completions",
-    (window) => {
-      expect(extractWindowPrefix(`/${window}/v1/chat/completions`)).toBe(
-        window,
-      );
-    },
-  );
-
-  test("maps retired prefixes to their replacement window", () => {
-    expect(extractWindowPrefix("/priority/v1/chat/completions")).toBe(
-      "balanced",
-    );
-    expect(extractWindowPrefix("/standard/v1/messages")).toBe("balanced");
-  });
-
-  test("returns null for unprefixed /v1/ paths", () => {
-    expect(extractWindowPrefix("/v1/chat/completions")).toBeNull();
-  });
-
-  test("returns null for invalid prefix", () => {
-    expect(extractWindowPrefix("/urgent/v1/chat/completions")).toBeNull();
-  });
-
-  test("returns null for paths without /v1/", () => {
-    expect(extractWindowPrefix("/asap/chat/completions")).toBeNull();
-  });
-
-  test("extracts from /models path too", () => {
-    expect(extractWindowPrefix("/flex/v1/models")).toBe("flex");
-  });
-});
-
 describe("resolveCompletionWindow", () => {
-  test("prefix takes highest priority", () => {
+  test("header wins over metadata", () => {
     const result = resolveCompletionWindow(
-      "flex",
-      "asap",
-      { completion_window: "balanced" },
-      "balanced",
-    );
-    expect(result).toEqual({ window: "flex", source: "prefix" });
-  });
-
-  test("header wins when no prefix", () => {
-    const result = resolveCompletionWindow(
-      null,
       "asap",
       { completion_window: "flex" },
       "balanced",
@@ -138,7 +92,6 @@ describe("resolveCompletionWindow", () => {
   test("metadata wins when no prefix or header", () => {
     const result = resolveCompletionWindow(
       null,
-      null,
       { completion_window: "flex" },
       "balanced",
     );
@@ -146,23 +99,17 @@ describe("resolveCompletionWindow", () => {
   });
 
   test("default is used when nothing else is provided", () => {
-    const result = resolveCompletionWindow(null, null, undefined, "balanced");
+    const result = resolveCompletionWindow(null, undefined, "balanced");
     expect(result).toEqual({ window: "balanced", source: "default" });
   });
 
   test("default is used when metadata has no completion_window", () => {
-    const result = resolveCompletionWindow(null, null, {}, "balanced");
+    const result = resolveCompletionWindow(null, {}, "balanced");
     expect(result).toEqual({ window: "balanced", source: "default" });
-  });
-
-  test("prefix overrides even with empty header and metadata", () => {
-    const result = resolveCompletionWindow("asap", null, undefined, "flex");
-    expect(result).toEqual({ window: "asap", source: "prefix" });
   });
 
   test("header with empty string falls through to metadata", () => {
     const result = resolveCompletionWindow(
-      null,
       "",
       { completion_window: "flex" },
       "balanced",
@@ -171,13 +118,12 @@ describe("resolveCompletionWindow", () => {
   });
 
   test("legacy header value is aliased, not forwarded verbatim", () => {
-    const result = resolveCompletionWindow(null, "priority", undefined, "asap");
+    const result = resolveCompletionWindow("priority", undefined, "asap");
     expect(result).toEqual({ window: "balanced", source: "header" });
   });
 
   test("legacy metadata value is aliased, not forwarded verbatim", () => {
     const result = resolveCompletionWindow(
-      null,
       null,
       { completion_window: "standard" },
       "asap",
@@ -187,7 +133,6 @@ describe("resolveCompletionWindow", () => {
 
   test("unknown header value falls through to metadata", () => {
     const result = resolveCompletionWindow(
-      null,
       "urgent",
       { completion_window: "flex" },
       "balanced",
@@ -197,7 +142,6 @@ describe("resolveCompletionWindow", () => {
 
   test("unknown metadata value falls through to default", () => {
     const result = resolveCompletionWindow(
-      null,
       null,
       { completion_window: "urgent" },
       "balanced",

@@ -100,15 +100,12 @@ export function createApp(prisma: PrismaClient, port?: number): AppServer {
 
   // Pre-build per-route logging wrappers once; allocating new wrappers per
   // request would defeat the point of the wrapper closure.
-  const chatRoute = wrapRouteLogging("/v1/chat/completions", (req) =>
-    handleChatCompletions(req),
+  const chatRoute = wrapRouteLogging(
+    "/v1/chat/completions",
+    handleChatCompletions,
   );
-  const messagesRoute = wrapRouteLogging("/v1/messages", (req) =>
-    handleMessages(req),
-  );
-  const responsesRoute = wrapRouteLogging("/v1/responses", (req) =>
-    handleResponses(req),
-  );
+  const messagesRoute = wrapRouteLogging("/v1/messages", handleMessages);
+  const responsesRoute = wrapRouteLogging("/v1/responses", handleResponses);
 
   function dispatch(
     req: Request,

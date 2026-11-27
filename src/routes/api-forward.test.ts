@@ -65,15 +65,18 @@ describe("handleChatCompletions", () => {
     expect(upstream.body.metadata.completion_window).toBe("balanced");
   });
 
-  test("URL prefix overrides body metadata window", async () => {
+  test("header overrides body metadata window", async () => {
     const upstream = mockUpstream();
     await handleChatCompletions(
-      makeRequest("/v1/chat/completions", {
-        model: "m",
-        messages: [{ role: "user", content: "hi" }],
-        metadata: { completion_window: "balanced" },
-      }),
-      "asap",
+      makeRequest(
+        "/v1/chat/completions",
+        {
+          model: "m",
+          messages: [{ role: "user", content: "hi" }],
+          metadata: { completion_window: "balanced" },
+        },
+        { "x-completion-window": "asap" },
+      ),
     );
     expect(upstream.body.metadata.completion_window).toBe("asap");
   });
@@ -184,8 +187,11 @@ describe("handleResponses", () => {
   test("forwards to /responses with the window injected", async () => {
     const upstream = mockUpstream();
     const res = await handleResponses(
-      makeRequest("/v1/responses", { model: "m", input: "hi" }, {}),
-      "balanced",
+      makeRequest(
+        "/v1/responses",
+        { model: "m", input: "hi" },
+        { "x-completion-window": "balanced" },
+      ),
     );
     expect(res.status).toBe(200);
     expect(upstream.url).toContain("/responses");

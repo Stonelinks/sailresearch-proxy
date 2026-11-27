@@ -242,10 +242,13 @@ describe("responseViaFlex", () => {
   });
 });
 
-function post(path: string, body: any) {
+function post(path: string, body: any, window?: string) {
   return new Request(`http://localhost${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(window ? { "x-completion-window": window } : {}),
+    },
     body: JSON.stringify(body),
   });
 }
@@ -255,11 +258,14 @@ describe("route wiring", () => {
     // A job Sail reports completed at submit needs no polling.
     const calls = mockSail(() => Response.json(COMPLETED, { status: 200 }));
     const res = await handleChatCompletions(
-      post("/v1/chat/completions", {
-        model: "m",
-        messages: [{ role: "user", content: "hi" }],
-      }),
-      "flex",
+      post(
+        "/v1/chat/completions",
+        {
+          model: "m",
+          messages: [{ role: "user", content: "hi" }],
+        },
+        "flex",
+      ),
     );
     expect(res.status).toBe(200);
     expect(calls).toHaveLength(1);
@@ -272,11 +278,14 @@ describe("route wiring", () => {
   test("balanced chat completions are still forwarded verbatim", async () => {
     const calls = mockSail(() => Response.json({ ok: true }));
     await handleChatCompletions(
-      post("/v1/chat/completions", {
-        model: "m",
-        messages: [{ role: "user", content: "hi" }],
-      }),
-      "balanced",
+      post(
+        "/v1/chat/completions",
+        {
+          model: "m",
+          messages: [{ role: "user", content: "hi" }],
+        },
+        "balanced",
+      ),
     );
     expect(calls[0]!.url).toBe(`${config.sail.baseUrl}/chat/completions`);
   });
@@ -286,8 +295,11 @@ describe("route wiring", () => {
       Response.json({ id: ID, status: "queued" }, { status: 202 }),
     );
     const res = await handleResponses(
-      post("/v1/responses", { model: "m", input: "hi", background: true }),
-      "flex",
+      post(
+        "/v1/responses",
+        { model: "m", input: "hi", background: true },
+        "flex",
+      ),
     );
     expect(res.status).toBe(202);
     expect(calls).toHaveLength(1);

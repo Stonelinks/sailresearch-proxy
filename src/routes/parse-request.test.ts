@@ -23,10 +23,7 @@ describe("parseRequest", () => {
   test("returns parsed body and resolved window on success", async () => {
     config.proxyApiKey = "";
     const req = makeRequest({ model: "m" });
-    const result = await parseRequest(req, {
-      routeName: "test",
-      urlPrefix: "balanced",
-    });
+    const result = await parseRequest(req, { routeName: "test" });
     expect("ok" in result).toBe(true);
     if (!("ok" in result)) return;
     expect(result.ok.body.model).toBe("m");
@@ -38,7 +35,6 @@ describe("parseRequest", () => {
     const req = makeRequest({ model: "m" });
     const result = await parseRequest(req, {
       routeName: "test",
-      urlPrefix: null,
     });
     expect("error" in result).toBe(true);
     if (!("error" in result)) return;
@@ -50,7 +46,6 @@ describe("parseRequest", () => {
     const req = makeRequest({ model: "m" }, { Authorization: "Bearer secret" });
     const result = await parseRequest(req, {
       routeName: "test",
-      urlPrefix: null,
     });
     expect("ok" in result).toBe(true);
   });
@@ -60,7 +55,6 @@ describe("parseRequest", () => {
     const req = makeRequest({ model: "m" }, { "x-api-key": "secret" });
     const result = await parseRequest(req, {
       routeName: "test",
-      urlPrefix: null,
     });
     expect("ok" in result).toBe(true);
   });
@@ -70,7 +64,6 @@ describe("parseRequest", () => {
     const req = makeRequest("{not json", {});
     const result = await parseRequest(req, {
       routeName: "test",
-      urlPrefix: null,
     });
     expect("error" in result).toBe(true);
     if (!("error" in result)) return;
@@ -82,7 +75,6 @@ describe("parseRequest", () => {
     const req = makeRequest({});
     const result = await parseRequest(req, {
       routeName: "test",
-      urlPrefix: null,
     });
     expect("error" in result).toBe(true);
     if (!("error" in result)) return;

@@ -14,7 +14,6 @@ import { resolvePresetModel } from "../services/preset-resolver.ts";
 import { chatCompletionViaFlex, responseViaFlex } from "../services/flex.ts";
 import type { FlexOpts } from "../services/flex.ts";
 import type { ErrorFormat, SailPath } from "../services/forward.ts";
-import type { CompletionWindow } from "../types.ts";
 
 interface ForwardRouteOpts {
   /** Used in log prefixes — e.g. "chat-completions". */
@@ -33,14 +32,8 @@ interface ForwardRouteOpts {
 }
 
 export function makeForwardHandler(opts: ForwardRouteOpts) {
-  return async (
-    req: Request,
-    urlPrefix: CompletionWindow | null = null,
-  ): Promise<Response> => {
-    const parsed = await parseRequest(req, {
-      routeName: opts.routeName,
-      urlPrefix,
-    });
+  return async (req: Request): Promise<Response> => {
+    const parsed = await parseRequest(req, { routeName: opts.routeName });
     if ("error" in parsed) return parsed.error;
     const { body, completionWindow, windowSource } = parsed.ok;
 

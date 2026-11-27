@@ -23,8 +23,6 @@ export type ParseResult = { error: Response } | { ok: ParsedRequest };
 export interface ParseOpts {
   /** Used in log prefixes — e.g. "chat-completions", "messages". */
   routeName: string;
-  /** Window prefix from the URL (e.g. /balanced/v1/...). null when unprefixed. */
-  urlPrefix: CompletionWindow | null;
 }
 
 /**
@@ -74,7 +72,6 @@ export async function parseRequest(
   const headerWindow = req.headers.get("x-completion-window");
   const { window: completionWindow, source: windowSource } =
     resolveCompletionWindow(
-      opts.urlPrefix,
       headerWindow,
       body.metadata,
       config.defaults.completionWindow,

@@ -61,25 +61,12 @@ export function rawWindowPrefix(pathname: string): string | null {
 }
 
 /**
- * Extract the completion window prefix from a URL path.
- * e.g. "/asap/v1/chat/completions"     → "asap"
- *      "/priority/v1/chat/completions" → "balanced" (legacy alias)
- *      "/v1/chat/completions"          → null
- */
-export function extractWindowPrefix(pathname: string): CompletionWindow | null {
-  const candidate = rawWindowPrefix(pathname);
-  if (!candidate) return null;
-  return normalizeCompletionWindow(candidate);
-}
-
-/**
  * Resolve the effective completion window from all possible sources.
  *
  * Priority order (highest first):
- *   1. URL prefix (e.g. /flex/v1/...)
- *   2. X-Completion-Window header
- *   3. metadata.completion_window in request body
- *   4. defaultWindow (from config)
+ *   1. X-Completion-Window header (the dispatcher turns a URL prefix into it)
+ *   2. metadata.completion_window in request body
+ *   3. defaultWindow (from config)
  *
  * Header and body values are normalized (legacy names aliased); a value that
  * is neither current nor legacy is ignored and the next source is consulted.
@@ -87,15 +74,13 @@ export function extractWindowPrefix(pathname: string): CompletionWindow | null {
  * Returns the resolved window and which source won.
  */
 export function resolveCompletionWindow(
-  urlPrefix: CompletionWindow | null,
   header: string | null,
   bodyMetadata: { completion_window?: string } | undefined,
   defaultWindow: CompletionWindow,
 ): {
   window: CompletionWindow;
-  source: "prefix" | "header" | "metadata" | "default";
+  source: "header" | "metadata" | "default";
 } {
-  if (urlPrefix) return { window: urlPrefix, source: "prefix" };
   if (header) {
     const w = normalizeCompletionWindow(header);
     if (w) return { window: w, source: "header" };
