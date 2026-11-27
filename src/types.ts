@@ -30,5 +30,4 @@ export interface ModelResearchResult {
   supportsImage: boolean;
   reasoning: boolean;
   thinkingLevelMap: Record<string, string | null> | null;
-  supportedWindows: CompletionWindow[] | null;
 }

@@ -281,7 +281,6 @@ export function parseAndValidatePiOutput(raw: string): ModelResearchResult {
       typeof obj.supportsImage === "boolean" ? obj.supportsImage : false,
     reasoning,
     thinkingLevelMap,
-    supportedWindows: null, // populated by smoke test, not by pi research
   };
 }
 
@@ -569,8 +568,31 @@ export interface WindowCompatResult {
   timedOut: Set<CompletionWindow>;
 }
 
+/** One in-flight smoke request per completion window; each never rejects. */
+export type WindowProbes = Record<CompletionWindow, Promise<SmokeTestResult>>;
+
+/** Start the window compatibility smoke requests, all in parallel. */
+export function probeWindows(
+  modelId: string,
+  baseUrl: string = `http://127.0.0.1:${config.server.port}/v1`,
+  timeoutMs?: number,
+): WindowProbes {
+  return Object.fromEntries(
+    COMPLETION_WINDOWS.map((window) => [
+      window,
+      smokeTestPreset(
+        modelId,
+        {},
+        null,
+        chatCompletionsUrlForWindow(baseUrl, window),
+        timeoutMs ?? smokeTimeoutForWindow(window),
+      ),
+    ]),
+  ) as WindowProbes;
+}
+
 /**
- * Smoke test a model against all 4 completion windows by sending a simple
+ * Smoke test a model against every completion window by sending a simple
  * request to each window-prefixed chat completions endpoint. Returns the
  * set of windows where the model returned a successful response, plus the
  * set that timed out client-side (batched windows can legitimately take
@@ -585,20 +607,22 @@ export interface WindowCompatResult {
  * can't hang research. Wall time is bounded by the slowest window's cap.
  *
  * @param timeoutMs  Overrides the per-window cap for every window (tests).
+ * @param probes     Already-started probes (from `probeWindows`) to collect
+ *                   instead of starting new ones.
  */
 export async function smokeTestWindowCompatibility(
   modelId: string,
   baseUrl: string = `http://127.0.0.1:${config.server.port}/v1`,
   timeoutMs?: number,
+  probes: WindowProbes = probeWindows(modelId, baseUrl, timeoutMs),
 ): Promise<WindowCompatResult> {
   const supported = new Set<CompletionWindow>();
   const timedOut = new Set<CompletionWindow>();
 
   await Promise.all(
     COMPLETION_WINDOWS.map(async (window) => {
-      const url = chatCompletionsUrlForWindow(baseUrl, window);
       const cap = timeoutMs ?? smokeTimeoutForWindow(window);
-      const result = await smokeTestPreset(modelId, {}, null, url, cap);
+      const result = await probes[window];
       if (result.ok) {
         supported.add(window);
       } else if (result.timedOut) {
@@ -638,6 +662,20 @@ export function pickBestWindow(
   return config.research.window;
 }
 
+/**
+ * The window `pickBestWindow` would choose, known as soon as every faster
+ * window's probe has answered: once asap (or balanced) is confirmed, a flex
+ * probe that takes up to 2 h does not hold up the preset smoke tests.
+ */
+export async function firstConfirmedWindow(
+  probes: WindowProbes,
+): Promise<CompletionWindow> {
+  for (const window of COMPLETION_WINDOWS) {
+    if ((await probes[window]).ok) return window;
+  }
+  return config.research.window;
+}
+
 // ─── Upsert model metadata ─────────────────────────────────────────────────
 
 export async function upsertModelMeta(
@@ -658,9 +696,6 @@ export async function upsertModelMeta(
         thinkingLevelMap: result.thinkingLevelMap
           ? JSON.stringify(result.thinkingLevelMap)
           : null,
-        supportedWindows: result.supportedWindows
-          ? JSON.stringify(result.supportedWindows)
-          : null,
         researchedAt: new Date(),
       },
       create: {
@@ -672,9 +707,6 @@ export async function upsertModelMeta(
         reasoning: result.reasoning,
         thinkingLevelMap: result.thinkingLevelMap
           ? JSON.stringify(result.thinkingLevelMap)
-          : null,
-        supportedWindows: result.supportedWindows
-          ? JSON.stringify(result.supportedWindows)
           : null,
       },
     });
@@ -707,5 +739,22 @@ export async function upsertModelMeta(
         },
       });
     }
+  });
+}
+
+/**
+ * Record the windows a model answered on. Kept apart from `upsertModelMeta`
+ * because the compatibility probes (flex: up to 2 h) finish long after the
+ * rest of a model's research. Only confirmed windows are stored; timed-out
+ * ones stay unknown until a later run confirms them.
+ */
+export async function saveSupportedWindows(
+  modelId: string,
+  supported: Set<CompletionWindow>,
+): Promise<void> {
+  const { prisma } = await import("./db.ts");
+  await prisma.modelMeta.update({
+    where: { modelId },
+    data: { supportedWindows: JSON.stringify([...supported]) },
   });
 }

@@ -13,10 +13,11 @@ import {
   smokeTestPresets,
   smokeTestWindowCompatibility,
   chatCompletionsUrlForWindow,
-  pickBestWindow,
+  firstConfirmedWindow,
+  probeWindows,
+  saveSupportedWindows,
   smokeTimeoutForWindow,
   type SmokeTestResult,
-  type WindowCompatResult,
 } from "../research-models.ts";
 import { scrapeModelCapabilities, scrapePricing } from "../docs-scraper.ts";
 import { log } from "../../shared/logger.ts";
@@ -171,12 +172,22 @@ async function researchOneWithScrapedData(
   // field, presets and prices), so a failed run keeps the last good data.
 
   // Run pi research (contextSize, samplingPresets, description, source) and
-  // window compatibility concurrently — they are independent, and only the
-  // preset smoke tests below need both. runWindowCompatWithFallback never
-  // rejects; a pi research failure fails the model as before.
-  const [result, windowCompat] = await Promise.all([
+  // the window compatibility probes concurrently. Research waits only for
+  // the probes it needs to pick the preset smoke-test window (fast first:
+  // asap > balanced > flex); the full compatibility result, whose flex probe
+  // can take 2 h, is saved in the background after the upsert, so neither
+  // 'completed' nor 'failed' waits for it. A pi research failure rejects
+  // straight away; the probes then finish on their own and are only logged.
+  const probes = probeWindows(modelId);
+  const compat = smokeTestWindowCompatibility(
+    modelId,
+    undefined,
+    undefined,
+    probes,
+  );
+  const [result, bestWindow] = await Promise.all([
     runPiResearch(modelId),
-    runWindowCompatWithFallback(modelId),
+    firstConfirmedWindow(probes),
   ]);
 
   // Merge scraped data (authoritative)
@@ -195,15 +206,6 @@ async function researchOneWithScrapedData(
     result.reasoning = caps.reasoning;
   }
 
-  // Only confirmed windows are persisted — timed-out windows stay unknown
-  // until a later re-research confirms them.
-  if (windowCompat !== null) {
-    result.supportedWindows = [...windowCompat.supported];
-  }
-
-  // Pick the best available window for preset smoke tests (fast first:
-  // asap > balanced > flex).
-  const bestWindow = pickBestWindow(windowCompat?.supported ?? null);
   const smokeTestUrl = chatCompletionsUrlForWindow(
     `http://127.0.0.1:${config.server.port}/v1`,
     bestWindow,
@@ -262,6 +264,15 @@ async function researchOneWithScrapedData(
   log.info(
     `[research-runner] upserted ${modelId} contextSize=${result.contextSize} presets=${result.samplingPresets.length} supportsImage=${result.supportsImage} reasoning=${result.reasoning}`,
   );
+
+  void compat
+    .then((c) => saveSupportedWindows(modelId, c.supported))
+    .catch((err) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      log.warn(
+        `[research-runner] could not save supported windows for ${modelId}: ${msg}`,
+      );
+    });
 }
 
 /**
@@ -294,24 +305,5 @@ async function runSmokeTestsWithFallback(
       `[research-runner] smoke tests skipped for ${modelId} (proxy unreachable?): ${msg}`,
     );
     return [];
-  }
-}
-
-/**
- * Run window compatibility smoke test, but skip gracefully if the proxy is
- * unreachable. Returns null on connection error so research can proceed —
- * window compatibility is a validation step, not a gatekeeper.
- */
-async function runWindowCompatWithFallback(
-  modelId: string,
-): Promise<WindowCompatResult | null> {
-  try {
-    return await smokeTestWindowCompatibility(modelId);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    log.warn(
-      `[research-runner] window compatibility test skipped for ${modelId} (proxy unreachable?): ${msg}`,
-    );
-    return null;
   }
 }
