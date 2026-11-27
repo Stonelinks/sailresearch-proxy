@@ -222,6 +222,7 @@ Optional: set `PROXY_API_KEY` to require client auth. A `docker-compose.yaml` is
 | `DEFAULT_COMPLETION_WINDOW` | `balanced` | Window when the client specifies none (`asap`, `balanced`, or `flex`) |
 | `TIMEOUT_BALANCED_MS` / `TIMEOUT_FLEX_MS` | 30 min / 2 h | Client-side caps for research window smoke tests |
 | `RESEARCH_WINDOW` | `asap` | Window used for research LLM calls |
+| `RESEARCH_MODELS` | `zai-org/GLM-5.3,moonshotai/Kimi-K3.1-Pro` | Research agent models in preference order; the next is tried when Sail reports one out of capacity |
 | `MAX_CONCURRENT_RESEARCH` | `5` | Parallel model-research bound |
 | `LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
 | `DATABASE_URL` | `file:$PROJECT_ROOT/data/proxy.db` | SQLite database path |

@@ -6,11 +6,9 @@
  * so research and scraping always route through the proxy, and no
  * ~/.pi/agent/models.json entry is required.
  *
- * Two modes:
- *   - `runPiPrompt(prompt)` — one-shot call using the default model
- *     (sail / DEFAULT_MODEL, routed via RESEARCH_WINDOW)
- *   - `runPiChat(provider, modelId, prompt)` — one-shot call targeting a
- *     specific provider/model (used by smoke tests)
+ * `runPiPrompt(prompt)` runs one research prompt on the first of
+ * RESEARCH_MODELS (routed via RESEARCH_WINDOW), moving to the next model
+ * only when Sail reports the current one out of capacity.
  */
 import { DEFAULT_PROVIDER } from "./constants.ts";
 import { config } from "./config.ts";
@@ -28,19 +26,9 @@ import { log } from "../shared/logger.ts";
 const SYSTEM_PROMPT =
   "You are a data extraction assistant. Return ONLY valid JSON. No markdown fences, no commentary.";
 
-const DEFAULT_MODEL_ID = config.defaults.model;
-
-/**
- * Base URL for the local proxy's OpenAI-compatible endpoint.
- * The embedded pi SDK uses this as the provider's baseUrl.
- *
- * The window prefix (default "asap") routes research LLM calls through the
- * proxy's low-latency window instead of a cheaper scheduled one — pricier
- * per token, but research prompts are tiny and it turns minutes-long
- * scheduling waits into interactive-latency calls. The default model must
- * support the configured window.
- */
-const LOCAL_PROXY_BASE_URL = `http://127.0.0.1:${config.server.port}/${config.research.window}/v1`;
+/** Sail's 503 when a model has no capacity, e.g. `model_capacity_unavailable`
+ *  "This model is temporarily unavailable. Please retry with backoff." */
+const CAPACITY_ERROR = /model_capacity_unavailable|temporarily unavailable/i;
 
 let _modelRuntime: Promise<ModelRuntime> | undefined;
 
@@ -50,7 +38,16 @@ function getModelRuntime(): Promise<ModelRuntime> {
   _modelRuntime ??= (async () => {
     const runtime = await ModelRuntime.create();
 
-    // Register the default provider with the default model pointing at the
+    // Base URL for the local proxy's OpenAI-compatible endpoint. The window
+    // prefix (default "asap") routes research LLM calls through the proxy's
+    // low-latency window instead of a cheaper scheduled one — pricier per
+    // token, but research prompts are tiny and it turns minutes-long
+    // scheduling waits into interactive-latency calls. Every research model
+    // must support the configured window. Read here, not at import, so tests
+    // can point config at a fake upstream.
+    const baseUrl = `http://127.0.0.1:${config.server.port}/${config.research.window}/v1`;
+
+    // Register the default provider with the research models pointing at the
     // local proxy. This works even when ~/.pi/agent/models.json has no such
     // entry (e.g. on a fresh deploy) because we include the model definition
     // directly in the provider config.
@@ -62,22 +59,20 @@ function getModelRuntime(): Promise<ModelRuntime> {
     // the proxy skips auth when proxyApiKey is empty, so the dummy is ignored.
     const apiKey = config.proxyApiKey || "sail-proxy-internal";
     runtime.registerProvider(DEFAULT_PROVIDER, {
-      baseUrl: LOCAL_PROXY_BASE_URL,
+      baseUrl: baseUrl,
       apiKey,
       api: "openai-completions",
-      models: [
-        {
-          id: DEFAULT_MODEL_ID,
-          name: DEFAULT_MODEL_ID,
-          api: "openai-completions",
-          baseUrl: LOCAL_PROXY_BASE_URL,
-          reasoning: false,
-          input: ["text"],
-          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-          contextWindow: 131072,
-          maxTokens: 16384,
-        },
-      ],
+      models: config.research.models.map((id) => ({
+        id,
+        name: id,
+        api: "openai-completions" as const,
+        baseUrl: baseUrl,
+        reasoning: false,
+        input: ["text" as const],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 131072,
+        maxTokens: 16384,
+      })),
     });
 
     // A stored ~/.pi/agent/auth.json entry for this provider would otherwise
@@ -87,7 +82,7 @@ function getModelRuntime(): Promise<ModelRuntime> {
     await runtime.setRuntimeApiKey(DEFAULT_PROVIDER, apiKey);
 
     log.debug(
-      `[pi-session] registered ${DEFAULT_PROVIDER} → ${LOCAL_PROXY_BASE_URL} with model ${DEFAULT_MODEL_ID}`,
+      `[pi-session] registered ${DEFAULT_PROVIDER} → ${baseUrl} with models ${config.research.models.join(", ")}`,
     );
     return runtime;
   })();
@@ -163,77 +158,50 @@ async function promptText(
 // ─── Public API ─────────────────────────────────────────────────────────────
 
 /**
- * Send a one-shot prompt to the default pi model and return the raw text
- * response. Uses `DEFAULT_PROVIDER/DEFAULT_MODEL` by default.
+ * Send a one-shot research prompt and return the raw text response. Tries
+ * RESEARCH_MODELS in order, falling through to the next model only on a
+ * capacity error; any other error is thrown as-is. Each model gets pi's own
+ * retries first (2 retries, 2s then 4s backoff).
  *
- * No tools, no extensions, no session persistence — just a single LLM call.
+ * No extensions, no session persistence.
  */
 export async function runPiPrompt(prompt: string): Promise<string> {
   const modelRuntime = await getModelRuntime();
-  const model = modelRuntime.getModel(DEFAULT_PROVIDER, DEFAULT_MODEL_ID);
+  const modelIds = config.research.models;
+  for (const [i, modelId] of modelIds.entries()) {
+    const model = modelRuntime.getModel(DEFAULT_PROVIDER, modelId);
+    if (!model) {
+      throw new Error(
+        `Model ${DEFAULT_PROVIDER}/${modelId} not found in pi model registry. ` +
+          `This should not happen — it is registered at startup. Check pi-session.ts.`,
+      );
+    }
 
-  if (!model) {
-    throw new Error(
-      `Model ${DEFAULT_PROVIDER}/${DEFAULT_MODEL_ID} not found in pi model registry. ` +
-        `This should not happen — it is registered at startup. Check pi-session.ts.`,
-    );
+    const settingsManager = SettingsManager.inMemory({
+      compaction: { enabled: false },
+      retry: { enabled: true, maxRetries: 2 },
+    });
+
+    const { session } = await createAgentSession({
+      model,
+      thinkingLevel: "off",
+      modelRuntime,
+      resourceLoader: makeResourceLoader(),
+      sessionManager: SessionManager.inMemory(process.cwd()),
+      settingsManager,
+    });
+
+    try {
+      const text = await promptText(session, prompt);
+      log.info(`[pi-session] research prompt ran on ${modelId}`);
+      return text;
+    } catch (err) {
+      const next = modelIds[i + 1];
+      if (!next || !CAPACITY_ERROR.test(String(err))) throw err;
+      log.warn(
+        `[pi-session] ${modelId} out of capacity, falling back to ${next}: ${err}`,
+      );
+    }
   }
-
-  const settingsManager = SettingsManager.inMemory({
-    compaction: { enabled: false },
-    retry: { enabled: true, maxRetries: 2 },
-  });
-
-  const { session } = await createAgentSession({
-    model,
-    thinkingLevel: "off",
-    modelRuntime,
-    resourceLoader: makeResourceLoader(),
-    sessionManager: SessionManager.inMemory(process.cwd()),
-    settingsManager,
-  });
-
-  return promptText(session, prompt);
-}
-
-/**
- * Send a one-shot prompt to a specific provider/model and return the raw text
- * response. Used by smoke tests that need to hit a particular provider+model.
- *
- * @param provider  Provider name (e.g. "sail-balanced", "sail-flex")
- * @param modelId   Model ID within that provider (e.g. "zai-org/GLM-5.3")
- * @param prompt    The prompt text
- */
-export async function runPiChat(
-  provider: string,
-  modelId: string,
-  prompt: string,
-): Promise<string> {
-  const modelRuntime = await getModelRuntime();
-  const model = modelRuntime.getModel(provider, modelId);
-
-  if (!model) {
-    throw new Error(
-      `Model ${provider}/${modelId} not found in pi model registry. ` +
-        `Ensure the pi model registry has a "${provider}" provider with model "${modelId}".`,
-    );
-  }
-
-  const settingsManager = SettingsManager.inMemory({
-    compaction: { enabled: false },
-    retry: { enabled: true, maxRetries: 2 },
-  });
-
-  const { session } = await createAgentSession({
-    model,
-    thinkingLevel: "off",
-    modelRuntime,
-    resourceLoader: makeResourceLoader(
-      "You are a helpful assistant. Be concise.",
-    ),
-    sessionManager: SessionManager.inMemory(process.cwd()),
-    settingsManager,
-  });
-
-  return promptText(session, prompt);
+  throw new Error("RESEARCH_MODELS is empty");
 }

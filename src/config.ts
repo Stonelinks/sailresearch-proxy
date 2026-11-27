@@ -51,7 +51,6 @@ export const config = {
   },
   defaults: {
     completionWindow: windowEnv("DEFAULT_COMPLETION_WINDOW", "balanced"),
-    model: env("DEFAULT_MODEL", "zai-org/GLM-5.3"),
   },
   windowTimeouts: {
     balanced: intEnv("TIMEOUT_BALANCED_MS", THIRTY_MINUTES),
@@ -65,8 +64,15 @@ export const config = {
     // Completion window used for pi research LLM calls and preset smoke
     // tests. asap is the passthrough path — pricier per token, but research
     // prompts are tiny and it turns 30-minute batch waits into
-    // interactive-latency calls. The default model must support this window.
+    // interactive-latency calls. The research models must support this window.
     window: windowEnv("RESEARCH_WINDOW", "asap"),
+    // Models the pi research agent runs on, in preference order. The next
+    // one is tried only when Sail reports the current one out of capacity.
+    // Every model listed must support the research window.
+    models: env("RESEARCH_MODELS", "zai-org/GLM-5.3,moonshotai/Kimi-K3.1-Pro")
+      .split(",")
+      .map((m) => m.trim())
+      .filter(Boolean),
     // Slack added on top of a window's server-side timeout to form the
     // client-side smoke-test cap. The proxy always answers within the
     // window's own bound (success, failure, or job-timeout error), so the
