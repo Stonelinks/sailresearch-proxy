@@ -40,9 +40,8 @@ export const config = {
     // Tight bound for status checks and job-creation calls. These should
     // return in milliseconds; anything past 30s is a stuck socket.
     pollTimeoutMs: intEnv("SAIL_POLL_TIMEOUT_MS", 30 * SECOND),
-    // Generous bound for synchronous inference passthroughs. Long enough
-    // to cover most generations, short enough to bound the per-request
-    // socket leak if Sail hangs.
+    // Caps the asap-window smoke tests in research-models. The inference
+    // passthrough has no proxy-side timeout.
     inferenceTimeoutMs: intEnv("SAIL_INFERENCE_TIMEOUT_MS", 5 * MINUTE),
   },
   server: {
