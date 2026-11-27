@@ -76,8 +76,9 @@ function getModelRuntime(): Promise<ModelRuntime> {
     });
 
     // A stored ~/.pi/agent/auth.json entry for this provider would otherwise
-    // win over the apiKey above: the entrypoint's plain-string entry disables
-    // the provider, and a valid one sends the Sail key instead of the proxy key.
+    // win over the apiKey above (bin/pi-setup, for the local pi CLI, is the
+    // remaining writer): a plain-string entry disables the provider, and a
+    // valid one sends the Sail key instead of the proxy key.
     // A runtime key takes precedence and is never written to disk.
     await runtime.setRuntimeApiKey(DEFAULT_PROVIDER, apiKey);
 

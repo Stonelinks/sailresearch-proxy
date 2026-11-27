@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Generate ~/.pi/agent/models.json and auth.json so the embedded pi SDK
-# can find the `sail` provider pointing at the proxy itself (plus a
-# `sail-balanced` provider pinned to the balanced window).
+# Generate ~/.pi/agent/models.json and auth.json so the local pi CLI can
+# find the `sail` provider pointing at the proxy (plus a `sail-balanced`
+# provider pinned to the balanced window).
 #
-# This is only needed in environments where ~/.pi/agent/ is not already
-# configured (e.g. Docker containers). If the files exist and contain
+# The embedded pi SDK and the Docker containers do not use this; it only
+# configures the pi CLI on this machine. If the files exist and contain
 # a sail provider, this script is a no-op.
 #
 # Environment variables:
