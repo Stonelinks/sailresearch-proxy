@@ -51,7 +51,7 @@ export const config = {
   },
   defaults: {
     completionWindow: windowEnv("DEFAULT_COMPLETION_WINDOW", "balanced"),
-    model: env("DEFAULT_MODEL", "zai-org/GLM-5.1-FP8"),
+    model: env("DEFAULT_MODEL", "zai-org/GLM-5.3"),
   },
   windowTimeouts: {
     balanced: intEnv("TIMEOUT_BALANCED_MS", THIRTY_MINUTES),

@@ -184,7 +184,7 @@ export async function runPiPrompt(prompt: string): Promise<string> {
  * response. Used by smoke tests that need to hit a particular provider+model.
  *
  * @param provider  Provider name (e.g. "sail-balanced", "sail-flex")
- * @param modelId   Model ID within that provider (e.g. "zai-org/GLM-5.1-FP8")
+ * @param modelId   Model ID within that provider (e.g. "zai-org/GLM-5.3")
  * @param prompt    The prompt text
  */
 export async function runPiChat(
