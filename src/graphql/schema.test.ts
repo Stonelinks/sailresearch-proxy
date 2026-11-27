@@ -40,6 +40,7 @@ const mockPrisma = {
 // Import schema + pubsub AFTER the module mocks so the resolvers pick them up.
 const { schema } = await import("./schema.ts");
 const { pubsub } = await import("./pubsub.ts");
+const { researchTracker } = await import("./research-tracker.ts");
 
 const ctx = { prisma: mockPrisma, pubsub };
 
@@ -188,19 +189,22 @@ describe("Mutation.refetchModel", () => {
     mockResearchAndUpsertOne.mockReset();
   });
 
-  test("invokes the research runner and returns the refreshed Model", async () => {
-    mockResearchAndUpsertOne.mockResolvedValueOnce(undefined);
-    mockListModels.mockResolvedValueOnce({
-      status: 200,
-      data: {
-        data: [{ id: "m1", object: "model", created: 100, owned_by: "org" }],
-      },
-    });
+  const sailM1 = {
+    status: 200,
+    data: {
+      data: [{ id: "m1", object: "model", created: 100, owned_by: "org" }],
+    },
+  };
+
+  test("starts research in the background and returns the stored Model", async () => {
+    // Research that never settles: the mutation must not wait for it.
+    mockResearchAndUpsertOne.mockReturnValueOnce(new Promise(() => {}));
+    mockListModels.mockResolvedValueOnce(sailM1);
     mockModelMetaFindUnique.mockResolvedValueOnce({
       modelId: "m1",
       contextSize: 8192,
       samplingPresets: [],
-      description: "fresh",
+      description: "stored",
       source: "https://example.com/m1",
       supportedWindows: '["asap","balanced"]',
       researchedAt: new Date("2025-06-02T00:00:00Z"),
@@ -216,13 +220,42 @@ describe("Mutation.refetchModel", () => {
     expect((res.data as any).refetchModel).toEqual({
       id: "m1",
       contextSize: 8192,
-      description: "fresh",
+      description: "stored",
       researchedAt: "2025-06-02T00:00:00.000Z",
     });
   });
 
-  test("errors when the model id is unknown to Sail", async () => {
-    mockResearchAndUpsertOne.mockResolvedValueOnce(undefined);
+  test("a failed background run does not fail the mutation", async () => {
+    mockResearchAndUpsertOne.mockRejectedValueOnce(new Error("pi timeout"));
+    mockListModels.mockResolvedValueOnce(sailM1);
+    mockModelMetaFindUnique.mockResolvedValueOnce(null);
+
+    const res = await run(
+      `mutation R($id: ID!) { refetchModel(modelId: $id) { id } }`,
+      { id: "m1" },
+    );
+
+    expect(res.errors).toBeUndefined();
+    expect((res.data as any).refetchModel).toEqual({ id: "m1" });
+  });
+
+  test("does not start a second run for a model already being researched", async () => {
+    mockListModels.mockResolvedValueOnce(sailM1);
+    mockModelMetaFindUnique.mockResolvedValueOnce(null);
+    researchTracker.startModel("m1");
+    try {
+      const res = await run(
+        `mutation R($id: ID!) { refetchModel(modelId: $id) { id } }`,
+        { id: "m1" },
+      );
+      expect(res.errors).toBeUndefined();
+      expect(mockResearchAndUpsertOne).not.toHaveBeenCalled();
+    } finally {
+      researchTracker.completeModel("m1");
+    }
+  });
+
+  test("errors without researching when the model id is unknown to Sail", async () => {
     mockListModels.mockResolvedValueOnce({
       status: 200,
       data: { data: [] },
@@ -235,6 +268,7 @@ describe("Mutation.refetchModel", () => {
 
     expect(res.errors).toBeDefined();
     expect(res.errors?.[0]?.message).toMatch(/not found in Sail upstream/);
+    expect(mockResearchAndUpsertOne).not.toHaveBeenCalled();
   });
 });
 
@@ -245,7 +279,7 @@ describe("Mutation.researchAllModels", () => {
     mockResearchAndUpsertMany.mockReset();
   });
 
-  test("researches all models in parallel and returns enriched list", async () => {
+  test("starts the batch in the background and returns the stored list", async () => {
     mockListModels.mockResolvedValueOnce({
       status: 200,
       data: {
@@ -255,30 +289,21 @@ describe("Mutation.researchAllModels", () => {
         ],
       },
     });
-    mockResearchAndUpsertMany.mockResolvedValueOnce([]); // no errors
+    mockResearchAndUpsertMany.mockReturnValueOnce(new Promise(() => {}));
     mockModelMetaFindMany.mockResolvedValueOnce([
       {
         modelId: "m1",
         contextSize: 8192,
         samplingPresets: [],
-        description: "researched",
+        description: "stored",
         source: "https://example.com/m1",
         supportedWindows: '["asap","balanced"]',
         researchedAt: new Date("2025-06-02T00:00:00Z"),
       },
-      {
-        modelId: "m2",
-        contextSize: 4096,
-        samplingPresets: [],
-        description: "also researched",
-        source: null,
-        supportedWindows: null,
-        researchedAt: new Date("2025-06-02T00:01:00Z"),
-      },
     ]);
 
     const res = await run(`
-      mutation { researchAllModels { id contextSize description researchedAt } }
+      mutation { researchAllModels { id contextSize description } }
     `);
 
     expect(res.errors).toBeUndefined();
@@ -286,66 +311,10 @@ describe("Mutation.researchAllModels", () => {
     expect(mockResearchAndUpsertMany).toHaveBeenCalledWith(["m1", "m2"], {
       pruneStale: true,
     });
-    const models = (res.data as any).researchAllModels;
-    expect(models).toHaveLength(2);
-    expect(models[0]).toEqual({
-      id: "m1",
-      contextSize: 8192,
-      description: "researched",
-      researchedAt: "2025-06-02T00:00:00.000Z",
-    });
-    expect(models[1]).toEqual({
-      id: "m2",
-      contextSize: 4096,
-      description: "also researched",
-      researchedAt: "2025-06-02T00:01:00.000Z",
-    });
-  });
-
-  test("returns all models even when some fail research", async () => {
-    mockListModels.mockResolvedValueOnce({
-      status: 200,
-      data: {
-        data: [
-          { id: "m1", object: "model", created: 100, owned_by: "org-a" },
-          { id: "m2", object: "model", created: 101, owned_by: "org-b" },
-          { id: "m3", object: "model", created: 102, owned_by: "org-c" },
-        ],
-      },
-    });
-    // Simulate partial failure: m2 failed
-    mockResearchAndUpsertMany.mockResolvedValueOnce([
-      { modelId: "m2", error: "pi SDK timeout" },
+    expect((res.data as any).researchAllModels).toEqual([
+      { id: "m1", contextSize: 8192, description: "stored" },
+      { id: "m2", contextSize: null, description: null },
     ]);
-    mockModelMetaFindMany.mockResolvedValueOnce([
-      {
-        modelId: "m1",
-        contextSize: 8192,
-        samplingPresets: [],
-        description: "ok",
-        source: null,
-        supportedWindows: '["asap","balanced"]',
-        researchedAt: new Date("2025-06-02T00:00:00Z"),
-      },
-      {
-        modelId: "m3",
-        contextSize: 2048,
-        samplingPresets: [],
-        description: "ok too",
-        source: null,
-        supportedWindows: null,
-        researchedAt: new Date("2025-06-02T00:02:00Z"),
-      },
-    ]);
-
-    const res = await run(`
-      mutation { researchAllModels { id contextSize } }
-    `);
-
-    // Should still succeed — partial failure is not a GraphQL error
-    expect(res.errors).toBeUndefined();
-    const models = (res.data as any).researchAllModels;
-    expect(models).toHaveLength(3); // All models returned, m2 just not researched
   });
 
   test("returns GraphQL error when Sail upstream fails", async () => {

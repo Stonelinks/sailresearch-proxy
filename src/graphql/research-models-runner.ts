@@ -167,9 +167,8 @@ async function researchOneWithScrapedData(
 ): Promise<void> {
   log.info(`[research-runner] researching ${modelId}`);
 
-  // Wipe old model data before re-researching — clean slate
-  const { prisma } = await import("../db.ts");
-  await prisma.modelMeta.deleteMany({ where: { modelId } });
+  // The old ModelMeta row stays until upsertModelMeta replaces it (every
+  // field, presets and prices), so a failed run keeps the last good data.
 
   // Run pi research (contextSize, samplingPresets, description, source) and
   // window compatibility concurrently — they are independent, and only the

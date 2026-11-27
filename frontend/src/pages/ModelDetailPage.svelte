@@ -164,6 +164,10 @@
     }
   }
 
+  // Set when this tab started a refetch. The mutation returns before research
+  // finishes, so a failure only arrives on the subscription.
+  let requested = false;
+
   async function refetch() {
     try {
       log.debug("Refetching model", params.id);
@@ -172,7 +176,8 @@
         log.error("Refetch failed:", result.errors[0].message);
         alert(`Refetch failed: ${result.errors[0].message}`);
       } else {
-        log.debug("Refetched", params.id);
+        requested = true;
+        log.debug("Refetch started", params.id);
       }
     } catch (err) {
       log.error("Refetch failed:", err);
@@ -192,6 +197,10 @@
     } else {
       newIds.delete(update.modelId);
       if (update.modelId === untrack(() => params.id)) {
+        if (update.status === "failed" && requested) {
+          alert(`Refetch failed: ${update.error ?? "unknown error"}`);
+        }
+        requested = false;
         load();
       }
     }

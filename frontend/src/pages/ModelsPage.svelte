@@ -179,6 +179,11 @@
     return formatUsdPerMTok(min);
   }
 
+  // Models this tab asked to refetch. The mutation returns before research
+  // finishes, so a failure only arrives on the subscription; alert for those
+  // here and not in every other open tab.
+  const requested = new Set<string>();
+
   async function refetchOne(modelId: string) {
     try {
       log.debug("Refetching model", modelId);
@@ -187,7 +192,8 @@
         log.error("Refetch failed:", result.errors[0].message);
         alert(`Refetch failed: ${result.errors[0].message}`);
       } else {
-        log.debug("Refetched", modelId);
+        requested.add(modelId);
+        log.debug("Refetch started", modelId);
       }
     } catch (err) {
       log.error("Refetch failed:", err);
@@ -202,7 +208,7 @@
         log.error("Research all failed:", result.errors[0].message);
         alert(`Research all failed: ${result.errors[0].message}`);
       } else {
-        log.debug("Researched all models");
+        log.debug("Research all started");
       }
     } catch (err) {
       log.error("Research all failed:", err);
@@ -233,6 +239,10 @@
     } else {
       // "completed" or "failed" — remove from active set
       newIds.delete(update.modelId);
+      if (update.status === "failed" && requested.has(update.modelId)) {
+        alert(`Refetch failed: ${update.error ?? "unknown error"}`);
+      }
+      requested.delete(update.modelId);
       // On completion, refetch models to get fresh data
       Models.fetch();
     }

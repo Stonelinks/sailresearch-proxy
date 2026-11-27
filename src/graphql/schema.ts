@@ -170,6 +170,12 @@ builder.queryType({
   }),
 });
 
+// Both mutations start research in the background and return immediately:
+// one model's research takes longer than the front proxy's 60 s request
+// timeout, so a synchronous resolver answered 504 even when the run
+// succeeded. They return the models as currently stored; clients follow
+// progress on the modelResearchUpdated subscription (started / completed /
+// failed) and refetch on completion.
 builder.mutationType({
   fields: (t) => ({
     refetchModel: t.field({
@@ -177,10 +183,16 @@ builder.mutationType({
       args: { modelId: t.arg.id({ required: true }) },
       resolve: async (_root, { modelId }, ctx) => {
         const id = String(modelId);
-        await researchAndUpsertOne(id);
         const wire = await loadModelWire(id, ctx);
         if (!wire) {
           throw new Error(`Model ${id} not found in Sail upstream`);
+        }
+        if (!researchTracker.isResearching(id)) {
+          // researchAndUpsertOne publishes the failed event itself.
+          researchAndUpsertOne(id).catch((err) => {
+            const msg = err instanceof Error ? err.message : String(err);
+            log.error(`[refetchModel] research failed for ${id}: ${msg}`);
+          });
         }
         return wire;
       },
@@ -201,17 +213,21 @@ builder.mutationType({
 
         // Research all models in parallel (scrapes docs once, shares results).
         // This is the full Sail list, so stale ModelMeta rows are pruned.
-        const errors = await researchAndUpsertMany(modelIds, {
-          pruneStale: true,
-        });
-
-        if (errors.length > 0) {
-          log.warn(
-            `[researchAllModels] ${errors.length}/${list.length} models failed: ${errors.map((e) => e.modelId).join(", ")}`,
-          );
+        if (!researchTracker.getBatch()) {
+          researchAndUpsertMany(modelIds, { pruneStale: true })
+            .then((errors) => {
+              if (errors.length > 0) {
+                log.warn(
+                  `[researchAllModels] ${errors.length}/${list.length} models failed: ${errors.map((e) => e.modelId).join(", ")}`,
+                );
+              }
+            })
+            .catch((err) => {
+              const msg = err instanceof Error ? err.message : String(err);
+              log.error(`[researchAllModels] failed: ${msg}`);
+            });
         }
 
-        // Return the full enriched model list
         const metas = await ctx.prisma.modelMeta.findMany({
           include: { samplingPresets: true, prices: true },
         });
