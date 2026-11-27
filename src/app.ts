@@ -16,7 +16,7 @@ import { pubsub } from "./graphql/pubsub.ts";
 import { handleProtocols, makeHandler } from "graphql-ws/use/bun";
 import path from "node:path";
 import fs from "node:fs";
-import type { PrismaClient } from "@prisma/client";
+import type { PrismaClient } from "./generated/prisma/client.ts";
 import type { Context } from "./graphql/builder.ts";
 
 const SPA_DIR = path.resolve(import.meta.dir, "../frontend/dist");

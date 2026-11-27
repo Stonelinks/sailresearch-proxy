@@ -37,6 +37,7 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 # Prisma
 prisma/*.db
 prisma/*.db-journal
+src/generated/prisma
 
 # Secrets
 secrets.sh

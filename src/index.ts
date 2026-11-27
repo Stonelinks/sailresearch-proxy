@@ -1,7 +1,7 @@
-import { PrismaClient } from "@prisma/client";
 import { log, initFileLogging, closeFileLogging } from "../shared/logger.ts";
 import { createApp } from "./app.ts";
 import { config } from "./config.ts";
+import { prisma } from "./db.ts";
 import fs from "node:fs";
 
 // Initialize file logging before anything else
@@ -23,8 +23,6 @@ if (migrateResult.exitCode !== 0) {
   );
   process.exit(1);
 }
-
-const prisma = new PrismaClient();
 
 const app = createApp(prisma);
 

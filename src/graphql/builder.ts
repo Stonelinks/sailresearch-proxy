@@ -1,5 +1,5 @@
 import SchemaBuilder from "@pothos/core";
-import type { PrismaClient } from "@prisma/client";
+import type { PrismaClient } from "../generated/prisma/client.ts";
 import type { ModelWire, PresetWire, PriceWire } from "../models-meta.ts";
 import type { pubsub } from "./pubsub.ts";
 import type {

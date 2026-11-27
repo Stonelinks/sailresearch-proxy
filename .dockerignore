@@ -9,3 +9,4 @@ TODO.md
 AGENTS.md
 frontend/node_modules
 frontend/dist
+src/generated/prisma

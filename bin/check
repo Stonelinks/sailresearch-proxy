@@ -6,6 +6,8 @@ cd $PROJECT_ROOT
 source env.sh
 
 echo "=== codegen ==="
+# Prisma 7 no longer generates the client on install.
+bunx prisma generate
 bun run codegen
 
 echo "=== format ==="

@@ -23,12 +23,15 @@
   "dependencies": {
     "@earendil-works/pi-coding-agent": "^1.6.1",
     "@pothos/core": "^4.12.0",
-    "@pothos/plugin-prisma": "^4.14.3",
-    "@prisma/client": "^6",
+    "@prisma/adapter-libsql": "7.10.1",
+    "@prisma/client": "7.10.1",
     "graphql": "^16.13.2",
     "graphql-ws": "^6.0.8",
     "graphql-yoga": "^6.1.1",
-    "prisma": "^6",
+    "prisma": "7.10.1",
     "winston": "^3.19.0"
+  },
+  "overrides": {
+    "effect": "3.22.5"
   }
 }

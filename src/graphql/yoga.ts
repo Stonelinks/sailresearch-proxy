@@ -1,5 +1,5 @@
 import { createYoga } from "graphql-yoga";
-import type { PrismaClient } from "@prisma/client";
+import type { PrismaClient } from "../generated/prisma/client.ts";
 import { schema } from "./schema.ts";
 import { pubsub } from "./pubsub.ts";
 import type { Context } from "./builder.ts";

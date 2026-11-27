@@ -7,10 +7,11 @@ WORKDIR /app
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
 
-COPY prisma ./prisma
-RUN bunx prisma generate
-
 COPY . .
+
+# Generates the client into src/generated/prisma, which the runtime stage
+# copies with src/.
+RUN bunx prisma generate
 
 # Bake the git commit hash into a file the app can read at runtime
 RUN echo "export const GIT_COMMIT = \"${GIT_COMMIT}\";" > /app/src/build-info.ts
@@ -43,6 +44,7 @@ WORKDIR /app
 
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/prisma ./prisma
+COPY --from=build /app/prisma.config.ts ./
 COPY --from=build /app/src ./src
 COPY --from=build /app/shared ./shared
 COPY --from=build /app/frontend/dist ./frontend/dist

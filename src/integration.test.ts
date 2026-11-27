@@ -297,10 +297,9 @@ describe.skipIf(!hasApiKey)("integration: proxy + Sail API", () => {
     }
 
     // Import app module AFTER env vars are set
-    const { PrismaClient } = await import("@prisma/client");
+    const { prisma } = await import("./db.ts");
     const { createApp } = await import("./app.ts");
 
-    const prisma = new PrismaClient();
     app = createApp(prisma, 0); // port 0 = random available port
     baseUrl = `http://localhost:${app.server.port}`;
   }, 30_000);
