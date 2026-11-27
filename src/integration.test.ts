@@ -445,15 +445,16 @@ describe.skipIf(!hasApiKey)("integration: proxy + Sail API", () => {
     }, 60_000);
   });
 
-  // ── Image input tests (always run, balanced) ─────────────────────────────
+  // ── Image input tests (always run, asap) ─────────────────────────────────
   //
-  // Sail rejects image input on asap (`unsupported_asap_request`, observed
-  // 2026-09), so these go through balanced. It still answers in seconds for
-  // this model, hence the tests stay in the fast suite with a wider cap.
+  // Sail once rejected image input on asap (`unsupported_asap_request`,
+  // observed 2026-09); IMAGE_MODEL now lists asap in x_supported_windows and
+  // answers in seconds there. Balanced can take over 5 minutes, which made
+  // these tests time out, so they use asap.
 
-  describe("image input (balanced)", () => {
+  describe("image input (asap)", () => {
     test("chat completions with image_url returns 200", async () => {
-      const url = `${baseUrl}/balanced/v1/chat/completions`;
+      const url = `${baseUrl}/asap/v1/chat/completions`;
       const res = await fetch(url, {
         method: "POST",
         headers: {
@@ -490,7 +491,7 @@ describe.skipIf(!hasApiKey)("integration: proxy + Sail API", () => {
     }, 180_000);
 
     test("Anthropic messages with image returns 200", async () => {
-      const url = `${baseUrl}/balanced/v1/messages`;
+      const url = `${baseUrl}/asap/v1/messages`;
       const res = await fetch(url, {
         method: "POST",
         headers: {
@@ -550,8 +551,8 @@ client = anthropic.Anthropic(
     auth_token="${process.env.SAIL_API_KEY}",
     base_url="${baseUrl}/asap",
 )
-# gpt-oss-120b emits a thinking block first; a tight cap can end the turn on
-# max_tokens before any text, which would make the stop_reason assert flaky.
+# A reasoning model can run out of tokens, so "max_tokens" is as normal a
+# stop_reason as "end_turn".
 response = client.messages.create(
     model="${TEST_MODEL}",
     max_tokens=256,
@@ -559,7 +560,7 @@ response = client.messages.create(
 )
 assert response.content is not None
 assert len(response.content) > 0
-assert response.stop_reason == "end_turn"
+assert response.stop_reason in ("end_turn", "max_tokens")
 print("OK")
 `;
       const { exitCode, stdout } = await runUvxPython(["anthropic"], script);
@@ -738,7 +739,7 @@ r = client.chat.completions.create(
     max_completion_tokens=64,
 )
 assert r.choices[0].message is not None
-assert r.choices[0].finish_reason == "stop"
+assert r.choices[0].finish_reason in ("stop", "length")
 print("OK")
 `;
       const { exitCode, stdout } = await runUvxPython(["openai"], script);
