@@ -19,7 +19,6 @@ export function onWsConnected(cb: (generation: number) => void): () => void {
 }
 
 export default new HoudiniClient({
-  url: "/graphql",
   plugins: [
     subscription(() =>
       createWSClient({

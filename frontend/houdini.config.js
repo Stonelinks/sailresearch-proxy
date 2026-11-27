@@ -3,6 +3,11 @@
 /** @type {import('houdini').ConfigFile} */
 const config = {
   schemaPath: "../shared/schema.graphql",
+  // houdini 2 defaults to .houdini; keep the $houdini path the alias,
+  // tsconfig and .gitignore already use.
+  runtimeDir: "$houdini",
+  // houdini 2 takes the API url here; HoudiniClient no longer accepts one.
+  url: "/graphql",
   watchSchema: {
     url: "http://localhost:4000/graphql",
   },
