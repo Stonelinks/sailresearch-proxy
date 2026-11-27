@@ -1,4 +1,4 @@
-import { describe, test, expect, mock, beforeEach } from "bun:test";
+import { describe, test, expect, mock, afterEach } from "bun:test";
 import {
   parseCapabilitiesFromJsx,
   scrapeModelCapabilities,
@@ -501,7 +501,9 @@ describe("parsePricingFromJsx", () => {
 describe("scrapePricing", () => {
   const originalFetch = globalThis.fetch;
 
-  beforeEach(() => {
+  // Restore after every test so the last mock does not leak into test files
+  // that run later in the same process (e.g. sail-client.test.ts).
+  afterEach(() => {
     globalThis.fetch = originalFetch;
   });
 

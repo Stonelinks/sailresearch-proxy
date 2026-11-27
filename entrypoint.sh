@@ -74,16 +74,16 @@ if [ ! -f "$PI_DIR/auth.json" ] || ! grep -q 'sail' "$PI_DIR/auth.json" 2>/dev/n
 import json, sys
 with open(sys.argv[1]) as f:
     d = json.load(f)
-d['sail'] = sys.argv[2]
-d['sail-balanced'] = sys.argv[2]
+d['sail'] = {'type': 'api_key', 'key': sys.argv[2]}
+d['sail-balanced'] = {'type': 'api_key', 'key': sys.argv[2]}
 with open(sys.argv[1], 'w') as f:
     json.dump(d, f, indent=2)
 " "$PI_DIR/auth.json" "$API_KEY"
     else
       cat > "$PI_DIR/auth.json" <<AUTH_EOF
 {
-  "sail": "${API_KEY}",
-  "sail-balanced": "${API_KEY}"
+  "sail": { "type": "api_key", "key": "${API_KEY}" },
+  "sail-balanced": { "type": "api_key", "key": "${API_KEY}" }
 }
 AUTH_EOF
       chmod 600 "$PI_DIR/auth.json"

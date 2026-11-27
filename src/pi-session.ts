@@ -15,13 +15,12 @@
 import { DEFAULT_PROVIDER } from "./constants.ts";
 import { config } from "./config.ts";
 import {
-  AuthStorage,
   createAgentSession,
   createExtensionRuntime,
-  ModelRegistry,
+  ModelRuntime,
   SessionManager,
   SettingsManager,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 import { log } from "../shared/logger.ts";
 
 // ─── Shared config ──────────────────────────────────────────────────────────
@@ -43,19 +42,13 @@ const DEFAULT_MODEL_ID = config.defaults.model;
  */
 const LOCAL_PROXY_BASE_URL = `http://127.0.0.1:${config.server.port}/${config.research.window}/v1`;
 
-let _authStorage: ReturnType<typeof AuthStorage.create> | undefined;
-let _modelRegistry: ReturnType<typeof ModelRegistry.create> | undefined;
+let _modelRuntime: Promise<ModelRuntime> | undefined;
 
-function getAuthStorage() {
-  if (!_authStorage) {
-    _authStorage = AuthStorage.create();
-  }
-  return _authStorage;
-}
-
-function getModelRegistry() {
-  if (!_modelRegistry) {
-    _modelRegistry = ModelRegistry.create(getAuthStorage());
+// Memoize the promise, not the value: research runs prompts concurrently and
+// each caller must share one runtime.
+function getModelRuntime(): Promise<ModelRuntime> {
+  _modelRuntime ??= (async () => {
+    const runtime = await ModelRuntime.create();
 
     // Register the default provider with the default model pointing at the
     // local proxy. This works even when ~/.pi/agent/models.json has no such
@@ -68,7 +61,7 @@ function getModelRegistry() {
     // (the default), we pass a dummy value to satisfy the SDK's validation —
     // the proxy skips auth when proxyApiKey is empty, so the dummy is ignored.
     const apiKey = config.proxyApiKey || "sail-proxy-internal";
-    _modelRegistry.registerProvider(DEFAULT_PROVIDER, {
+    runtime.registerProvider(DEFAULT_PROVIDER, {
       baseUrl: LOCAL_PROXY_BASE_URL,
       apiKey,
       api: "openai-completions",
@@ -87,11 +80,18 @@ function getModelRegistry() {
       ],
     });
 
+    // A stored ~/.pi/agent/auth.json entry for this provider would otherwise
+    // win over the apiKey above: the entrypoint's plain-string entry disables
+    // the provider, and a valid one sends the Sail key instead of the proxy key.
+    // A runtime key takes precedence and is never written to disk.
+    await runtime.setRuntimeApiKey(DEFAULT_PROVIDER, apiKey);
+
     log.debug(
       `[pi-session] registered ${DEFAULT_PROVIDER} → ${LOCAL_PROXY_BASE_URL} with model ${DEFAULT_MODEL_ID}`,
     );
-  }
-  return _modelRegistry;
+    return runtime;
+  })();
+  return _modelRuntime;
 }
 
 function makeResourceLoader(systemPrompt = SYSTEM_PROMPT) {
@@ -106,7 +106,9 @@ function makeResourceLoader(systemPrompt = SYSTEM_PROMPT) {
     getThemes: () => ({ themes: [], diagnostics: [] }),
     getAgentsFiles: () => ({ agentsFiles: [] }),
     getSystemPrompt: () => systemPrompt,
+    getSystemPromptSource: () => undefined,
     getAppendSystemPrompt: () => [],
+    getAppendSystemPromptSources: () => [],
     extendResources: () => {},
     reload: async () => {},
   };
@@ -121,9 +123,8 @@ function makeResourceLoader(systemPrompt = SYSTEM_PROMPT) {
  * No tools, no extensions, no session persistence — just a single LLM call.
  */
 export async function runPiPrompt(prompt: string): Promise<string> {
-  const authStorage = getAuthStorage();
-  const modelRegistry = getModelRegistry();
-  const model = modelRegistry.find(DEFAULT_PROVIDER, DEFAULT_MODEL_ID);
+  const modelRuntime = await getModelRuntime();
+  const model = modelRuntime.getModel(DEFAULT_PROVIDER, DEFAULT_MODEL_ID);
 
   if (!model) {
     throw new Error(
@@ -140,8 +141,7 @@ export async function runPiPrompt(prompt: string): Promise<string> {
   const { session } = await createAgentSession({
     model,
     thinkingLevel: "off",
-    authStorage,
-    modelRegistry,
+    modelRuntime,
     resourceLoader: makeResourceLoader(),
     sessionManager: SessionManager.inMemory(process.cwd()),
     settingsManager,
@@ -192,9 +192,8 @@ export async function runPiChat(
   modelId: string,
   prompt: string,
 ): Promise<string> {
-  const authStorage = getAuthStorage();
-  const modelRegistry = getModelRegistry();
-  const model = modelRegistry.find(provider, modelId);
+  const modelRuntime = await getModelRuntime();
+  const model = modelRuntime.getModel(provider, modelId);
 
   if (!model) {
     throw new Error(
@@ -211,8 +210,7 @@ export async function runPiChat(
   const { session } = await createAgentSession({
     model,
     thinkingLevel: "off",
-    authStorage,
-    modelRegistry,
+    modelRuntime,
     resourceLoader: makeResourceLoader(
       "You are a helpful assistant. Be concise.",
     ),
