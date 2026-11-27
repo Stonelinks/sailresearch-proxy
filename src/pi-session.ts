@@ -114,6 +114,52 @@ function makeResourceLoader(systemPrompt = SYSTEM_PROMPT) {
   };
 }
 
+/**
+ * Run one prompt and return the assistant's text. Throws when the final
+ * assistant message ended with stopReason "error" (provider or config
+ * failure) instead of returning "" for the caller to misreport.
+ */
+async function promptText(
+  session: Awaited<ReturnType<typeof createAgentSession>>["session"],
+  prompt: string,
+): Promise<string> {
+  let text = "";
+  let lastAssistant: { stopReason?: string; errorMessage?: string } | undefined;
+  session.subscribe((event) => {
+    if (
+      event.type === "message_update" &&
+      event.assistantMessageEvent.type === "text_delta"
+    ) {
+      text += event.assistantMessageEvent.delta;
+    } else if (event.type === "message_end") {
+      const msg = event.message;
+      if (msg && msg.role === "assistant") {
+        lastAssistant = msg;
+        // Fallback: if no text_delta events were captured (e.g. non-streaming
+        // response or single-chunk delivery), extract text from the final message.
+        if (text.length === 0) {
+          for (const part of msg.content ?? []) {
+            if (part && (part as any).type === "text") {
+              text += (part as any).text ?? "";
+            }
+          }
+        }
+      }
+    }
+  });
+
+  try {
+    await session.prompt(prompt);
+  } finally {
+    session.dispose();
+  }
+
+  if (lastAssistant?.stopReason === "error") {
+    throw new Error(`pi SDK error: ${lastAssistant.errorMessage ?? "unknown"}`);
+  }
+  return text;
+}
+
 // ─── Public API ─────────────────────────────────────────────────────────────
 
 /**
@@ -147,36 +193,7 @@ export async function runPiPrompt(prompt: string): Promise<string> {
     settingsManager,
   });
 
-  let text = "";
-  session.subscribe((event) => {
-    if (
-      event.type === "message_update" &&
-      event.assistantMessageEvent.type === "text_delta"
-    ) {
-      text += event.assistantMessageEvent.delta;
-    } else if (event.type === "message_end") {
-      // Fallback: if no text_delta events were captured (e.g. non-streaming
-      // response or single-chunk delivery), extract text from the final message.
-      if (text.length === 0) {
-        const msg = event.message;
-        if (msg && msg.role === "assistant") {
-          for (const part of msg.content ?? []) {
-            if (part && (part as any).type === "text") {
-              text += (part as any).text ?? "";
-            }
-          }
-        }
-      }
-    }
-  });
-
-  try {
-    await session.prompt(prompt);
-  } finally {
-    session.dispose();
-  }
-
-  return text;
+  return promptText(session, prompt);
 }
 
 /**
@@ -218,32 +235,5 @@ export async function runPiChat(
     settingsManager,
   });
 
-  let text = "";
-  session.subscribe((event) => {
-    if (
-      event.type === "message_update" &&
-      event.assistantMessageEvent.type === "text_delta"
-    ) {
-      text += event.assistantMessageEvent.delta;
-    } else if (event.type === "message_end") {
-      if (text.length === 0) {
-        const msg = event.message;
-        if (msg && msg.role === "assistant") {
-          for (const part of msg.content ?? []) {
-            if (part && (part as any).type === "text") {
-              text += (part as any).text ?? "";
-            }
-          }
-        }
-      }
-    }
-  });
-
-  try {
-    await session.prompt(prompt);
-  } finally {
-    session.dispose();
-  }
-
-  return text;
+  return promptText(session, prompt);
 }
