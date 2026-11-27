@@ -55,8 +55,8 @@ const runSlow = process.env.SAIL_SLOW_INTEGRATION === "1";
 
 // Small, fast model for asap tests. Batched-window tests pick their model
 // dynamically (see firstSupportedResult).
-const TEST_MODEL = "openai/gpt-oss-120b";
-const IMAGE_MODEL = "moonshotai/Kimi-K2.6";
+const TEST_MODEL = "zai-org/GLM-5.3-Flash";
+const IMAGE_MODEL = "moonshotai/Kimi-K3.1-Pro";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
