@@ -11,5 +11,6 @@ export function createGraphQLYoga(prisma: PrismaClient) {
     context: () => ({ prisma, pubsub }),
     graphiql: { subscriptionsProtocol: "WS" },
     landingPage: false,
+    logging: "warn",
   });
 }
